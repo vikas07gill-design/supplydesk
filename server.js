@@ -8,6 +8,7 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const multer = require("multer");
 const mysql = require("mysql2/promise");
+const nodemailer = require("nodemailer");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -104,6 +105,24 @@ const catalog = {
 };
 
 const categories = Object.keys(catalog);
+const connectLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many connection requests. Please try again later." }
+});
+
+const mailer = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT || 465),
+  secure: String(process.env.SMTP_SECURE || "true") === "true",
+  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD }
+});
+
+async function ensureConnectRequestsTable() {
+  await pool.execute("CREATE TABLE IF NOT EXISTS connect_requests (id CHAR(36) PRIMARY KEY, supplier_id CHAR(36) NOT NULL, customer_name VARCHAR(180) NOT NULL, customer_email VARCHAR(255) NOT NULL, customer_phone VARCHAR(80) NULL, product_name VARCHAR(255) NULL, source_action ENUM('phone','email','contact') NOT NULL DEFAULT 'contact', message TEXT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT fk_connect_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE, INDEX idx_connect_supplier (supplier_id, created_at), INDEX idx_connect_customer (customer_email, created_at)) ENGINE=InnoDB");
+}
 
 function clean(value, max = 2000) {
   return String(value || "").trim().slice(0, max);
@@ -330,6 +349,45 @@ app.get("/api/suppliers", async (req, res) => {
   }
 });
 
+
+app.post("/api/connect-requests", connectLimiter, async (req, res) => {
+  const supplierId = clean(req.body?.supplierId, 80);
+  const customerName = clean(req.body?.customerName, 180);
+  const customerEmail = clean(req.body?.customerEmail, 255).toLowerCase();
+  const customerPhone = clean(req.body?.customerPhone, 80) || null;
+  const productName = clean(req.body?.productName, 255) || null;
+  const sourceAction = ["phone","email","contact"].includes(req.body?.sourceAction) ? req.body.sourceAction : "contact";
+  const message = clean(req.body?.message, 2000) || null;
+  if (!supplierId || !customerName || !customerEmail) return res.status(400).json({ error: "Name and email are required." });
+  if (!/^\S+@\S+\.\S+$/.test(customerEmail)) return res.status(400).json({ error: "Please enter a valid email address." });
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) return res.status(503).json({ error: "Connection email service is not configured yet." });
+  try {
+    const [[supplier]] = await pool.execute("SELECT id, legal_name, trade_name, business_email, category, subcategory FROM supplier_profiles WHERE id = ? AND verified = 1 AND published = 1", [supplierId]);
+    if (!supplier || !supplier.business_email) return res.status(404).json({ error: "Supplier contact is not available." });
+    const supplierName = supplier.trade_name || supplier.legal_name;
+    const subject = "SupplyDesk: New connection request" + (productName ? " for " + productName : "");
+    const text = [
+      "A customer wants to connect with " + supplierName + " through SupplyDesk.",
+      "",
+      "Customer: " + customerName,
+      "Email: " + customerEmail,
+      customerPhone ? "Mobile: " + customerPhone : "",
+      productName ? "Product / requirement: " + productName : "Category: " + supplier.category + " / " + supplier.subcategory,
+      message ? "Message: " + message : "",
+      "",
+      "Please contact the customer directly to continue the discussion.",
+      "",
+      "This connection was initiated on SupplyDesk."
+    ].filter(Boolean).join("\n");
+    await pool.execute("INSERT INTO connect_requests (id, supplier_id, customer_name, customer_email, customer_phone, product_name, source_action, message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [crypto.randomUUID(), supplierId, customerName, customerEmail, customerPhone, productName, sourceAction, message]);
+    await mailer.sendMail({ from: process.env.SMTP_FROM, to: supplier.business_email, replyTo: customerEmail, subject, text });
+    res.status(201).json({ ok: true, message: "Connection request sent to the supplier." });
+  } catch (error) {
+    console.error("Connection request failed:", error);
+    res.status(500).json({ error: "Could not send the connection request. Please try again." });
+  }
+});
+
 app.get("/api/suppliers/:id", async (req, res) => {
   try {
     const [[row]] = await pool.execute(
@@ -509,6 +567,13 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Something went wrong." });
 });
 
-app.listen(PORT, () => {
-  console.log(`SupplyDesk running on port ${PORT}`);
-});
+async function start() {
+  try {
+    await ensureConnectRequestsTable();
+    app.listen(PORT, () => console.log(\`SupplyDesk running on port \${PORT}\`));
+  } catch (error) {
+    console.error("Database initialization failed:", error);
+    process.exit(1);
+  }
+}
+start();
