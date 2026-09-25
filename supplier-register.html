@@ -25,11 +25,12 @@
 <div class="field full"><a class="request-link" id="requestToggle">+ My category or sub-category is not listed</a></div>
 <div class="field full hidden" id="requestBox"><label>Requested category / sub-category</label><textarea id="requestText" placeholder="Example: Plastics & Packaging → PET Bottles"></textarea><div class="help">Your request will be included with the supplier submission for SupplyDesk review.</div></div>
 </div></div>
-<div class="card"><h2>4. Supporting documents & photos</h2><div class="note"><strong>For verification:</strong> upload business registration, tax registration, relevant licences/certificates, address proof and business/facility photos. In this prototype, files are selected locally only. Secure portal storage and admin review will be connected to the backend before production use.</div><div class="grid">
-<div class="field"><label>Business registration document</label><input type="file" accept=".pdf,.jpg,.jpeg,.png"></div><div class="field"><label>Tax registration document</label><input type="file" accept=".pdf,.jpg,.jpeg,.png"></div>
-<div class="field"><label>Licence / certificate</label><input type="file" accept=".pdf,.jpg,.jpeg,.png"></div><div class="field"><label>Business / factory / office photos</label><input type="file" multiple accept=".jpg,.jpeg,.png"></div>
+<div class="card"><h2>4. Supporting documents & photos</h2><div class="note"><strong>For verification:</strong> upload business registration, tax registration, relevant licences/certificates, address proof and business/facility photos. Files are uploaded securely to the SupplyDesk server for private admin verification. Legal documents are not published on the public website.</div><div class="grid">
+<div class="field"><label>Business registration document</label><input name="registrationDoc" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"></div><div class="field"><label>Tax registration document</label><input name="taxDoc" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"></div>
+<div class="field"><label>Licence / certificate</label><input name="licenceDoc" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"></div><div class="field"><label>Address proof</label><input name="addressProof" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"></div>
+<div class="field full"><label>Business / factory / office photos</label><input name="businessPhotos" type="file" multiple accept=".jpg,.jpeg,.png,.webp"><div class="help">Maximum 8 photos. Each file can be up to 10 MB.</div></div>
 </div></div>
-<div class="card"><div class="check"><input type="checkbox" required> <span>I confirm that the information submitted is accurate and I authorize SupplyDesk to review the submitted business information and supporting documents for listing verification.</span></div><div class="actions"><span class="help">No listing fee is shown or requested on this registration form.</span><button class="btn primary" type="submit">Submit for Verification →</button></div><div class="status" id="status"></div></div>
+<div class="card"><input name="website_confirm" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px" aria-hidden="true"><div class="check"><input type="checkbox" required> <span>I confirm that the information submitted is accurate and I authorize SupplyDesk to review the submitted business information and supporting documents for listing verification.</span></div><div class="actions"><span class="help">No listing fee is shown or requested on this registration form.</span><button class="btn primary" type="submit">Submit for Verification →</button></div><div class="status" id="status"></div></div>
 </form><footer><div class="wrap">SupplyDesk · Information & connection platform</div></footer>
 <script>
 const catalog={Products:['Raw Materials','Plastics & Packaging','Machinery','Electronics & Components','Automotive','Textiles & Apparel','Food & Agriculture','Chemicals','Consumer Products','Construction Materials'],Services:['Logistics & Freight','Warehousing & Fulfilment','Customs & Trade','Inspection & Verification','Insurance','Trade Finance','Sourcing Services','Professional Services'],Industrial:['Industrial Equipment','Electrical Equipment','Tools & Hardware','Metal Products','Industrial Components','Manufacturing Services']};
@@ -38,6 +39,25 @@ const cat=document.getElementById('category'),sub=document.getElementById('subca
 Object.entries(catalog).forEach(([group,items])=>{const o=document.createElement('optgroup');o.label=group;items.forEach(x=>{const op=document.createElement('option');op.value=x;op.textContent=x;o.appendChild(op)});cat.appendChild(o)});
 function fillSub(){sub.innerHTML='<option value="">Select sub-category</option>'; (subs[cat.value]||['Other / General']).forEach(x=>{const o=document.createElement('option');o.value=x;o.textContent=x;sub.appendChild(o)})}fillSub();cat.onchange=fillSub;
 document.getElementById('requestToggle').onclick=()=>document.getElementById('requestBox').classList.toggle('hidden');
-document.getElementById('form').onsubmit=e=>{e.preventDefault();const s=document.getElementById('status');s.style.display='block';s.innerHTML='<strong>Submission captured.</strong><br>Your supplier application is marked <b>Under Review</b> in this prototype. The next production step is secure backend storage, admin verification and approval before publication.';window.scrollTo({top:s.offsetTop,behavior:'smooth'})};
+document.getElementById('form').onsubmit=async e=>{
+e.preventDefault();
+const form=e.currentTarget;
+const s=document.getElementById('status');
+const btn=form.querySelector('button[type="submit"]');
+s.style.display='block';
+s.innerHTML='<strong>Submitting...</strong><br>Please wait while your application and files are securely uploaded.';
+btn.disabled=true; btn.textContent='Submitting...';
+try{
+ const response=await fetch('/api/supplier-applications',{method:'POST',body:new FormData(form)});
+ const data=await response.json().catch(()=>({}));
+ if(!response.ok) throw new Error(data.error||'Submission failed. Please try again.');
+ s.innerHTML='<strong>Application submitted ✓</strong><br>'+data.message+'<br><span class="help">Application reference: '+data.applicationId+'</span>';
+ form.querySelectorAll('input,select,textarea,button').forEach(el=>el.disabled=true);
+ window.scrollTo({top:s.offsetTop-30,behavior:'smooth'});
+}catch(err){
+ s.innerHTML='<strong>We could not submit the application.</strong><br>'+err.message+'<br><span class="help">Please check your details and try again.</span>';
+ btn.disabled=false; btn.textContent='Submit for Verification →';
+}
+};
 if(location.hash==='#category-request')document.getElementById('requestBox').classList.remove('hidden');
 </script></body></html>
