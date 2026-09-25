@@ -110,8 +110,8 @@ function clean(value, max = 2000) {
 }
 
 function requireAdmin(req, res, next) {
-  const expected = process.env.ADMIN_TOKEN;
-  const received = req.get("x-admin-token") || "";
+  const expected = String(process.env.ADMIN_TOKEN || "").trim();
+  const received = String(req.get("x-admin-token") || "").trim();
   if (!expected || received.length !== expected.length || received.length < 20 || !crypto.timingSafeEqual(Buffer.from(received), Buffer.from(expected))) {
     return res.status(401).json({ error: "Unauthorized" });
   }
