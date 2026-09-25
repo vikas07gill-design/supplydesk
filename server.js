@@ -123,6 +123,18 @@ function safeDeleteApplicationFiles(applicationId) {
   if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
 }
 
+app.get("/api/admin/token-check", (req, res) => {
+  const expected = String(process.env.ADMIN_TOKEN || "").trim();
+  const received = String(req.get("x-admin-token") || "").trim();
+  res.json({
+    adminTokenConfigured: Boolean(expected),
+    configuredLength: expected.length,
+    receivedLength: received.length,
+    minimumRequiredLength: 20,
+    headerReceived: Boolean(received)
+  });
+});
+
 app.get("/api/health", async (req, res) => {
   try {
     await pool.query("SELECT 1");
