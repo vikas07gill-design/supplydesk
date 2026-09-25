@@ -10,7 +10,7 @@
 <div class="filters"><select id="category" onchange="render()"><option value="">Any category</option><option>Raw Materials</option><option>Plastics & Packaging</option><option>Machinery</option><option>Electronics & Components</option><option>Automotive</option><option>Textiles & Apparel</option><option>Food & Agriculture</option><option>Chemicals</option><option>Consumer Products</option><option>Construction Materials</option><option>Logistics & Freight</option><option>Warehousing & Fulfilment</option><option>Customs & Trade</option><option>Inspection & Verification</option><option>Insurance</option><option>Trade Finance</option><option>Sourcing Services</option><option>Professional Services</option></select><select id="subcategory" onchange="render()"><option value="">Any sub-category</option></select><select id="country" onchange="render()"><option value="">Any country</option><option>India</option><option>China</option><option>UAE</option><option>USA</option></select><select id="city" onchange="render()"><option value="">Any city</option><option>Delhi</option><option>Mumbai</option><option>Ahmedabad</option><option>Yiwu</option><option>Dubai</option><option>Shenzhen</option></select><select id="market" onchange="render()"><option value="">Any market</option><option>Domestic</option><option>International</option></select></div>
 <div class="summary" id="summary"></div><section id="results"></section><div class="footer">SupplyDesk is an information and connection platform. Listings and business details are shown for discovery.</div></main>
 <script>
-const data=[
+const demoData=[
 {id:'abc-plastics',name:'ABC Plastics Manufacturing',type:'supplier',city:'Yiwu',country:'China',market:'International',desc:'Manufacturer of household plastic products and kitchen storage items.',category:'Plastics & Packaging',subcategories:['Plastic Containers','Kitchenware'],tags:['Plastic containers','Kitchenware','Manufacturer']},
 {id:'india-growth',name:'India Growth Industries',type:'supplier',city:'Ahmedabad',country:'India',market:'Domestic',desc:'Indian manufacturer of plastic household and industrial articles.',category:'Plastics & Packaging',subcategories:['Plastic Containers','Household Products'],tags:['Household','Plastics','Manufacturing']},
 {id:'asia-components',name:'Asia Components',type:'supplier',city:'Shenzhen',country:'China',market:'International',desc:'Electronics components supplier serving domestic and export markets.',category:'Electronics & Components',subcategories:['Electronic Components','OEM'],tags:['Electronics','Components','OEM']},
@@ -18,11 +18,110 @@ const data=[
 {id:'plastic-container',name:'Plastic Storage Container',type:'product',city:'Ahmedabad',country:'India',market:'Domestic',desc:'Example product listing with category, market and supplier connection.',category:'Plastics & Packaging',subcategories:['Plastic Containers','Household Products'],tags:['Storage','Plastic','Household']},
 {id:'freight-forwarding',name:'Freight Forwarding Provider',type:'service',city:'Dubai',country:'UAE',market:'International',desc:'Example logistics service provider for international cargo movements.',category:'Logistics & Freight',subcategories:['Freight Forwarding','International Logistics'],tags:['Freight','Logistics','International']}
 ];
-const params=new URLSearchParams(location.search);document.getElementById('q').value=params.get('q')||'';let active=params.get('type')||'all';
-document.querySelectorAll('.tab').forEach(b=>{b.classList.toggle('active',b.dataset.type===active);b.onclick=()=>{active=b.dataset.type;document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.type===active));render()}})
-function run(){const q=document.getElementById('q').value.trim();location.href=q?'search.html?q='+encodeURIComponent(q):'search.html'}
-function match(x,q){return !q||(x.name+' '+x.desc+' '+x.tags.join(' ')).toLowerCase().includes(q.toLowerCase())}
-function target(x){return x.type==='supplier'?'supplier.html?id='+encodeURIComponent(x.id):x.type==='product'?'product.html?id='+encodeURIComponent(x.id):'service.html?id='+encodeURIComponent(x.id)}
-function render(){const q=document.getElementById('q').value.trim(),cat=document.getElementById('category').value,sub=document.getElementById('subcategory').value,c=document.getElementById('country').value,city=document.getElementById('city').value,m=document.getElementById('market').value;const rows=data.filter(x=>(active==='all'||x.type===active)&&(!cat||x.category===cat)&&(!sub||x.subcategories?.includes(sub))&&(!c||x.country===c)&&(!city||x.city===city)&&(!m||x.market===m)&&match(x,q));document.getElementById('title').textContent=q?'Results for “'+q+'”':'Explore SupplyDesk';document.getElementById('summary').textContent=rows.length+' result'+(rows.length===1?'':'s')+' · Products, suppliers and services';document.getElementById('results').innerHTML=rows.length?rows.map(x=>'<article class="result"><div class="result-main"><div class="type">'+x.type+'</div><h3>'+x.name+'</h3><div class="meta">📍 '+x.city+', '+x.country+' · '+x.market+'</div><div class="desc">'+x.desc+'</div><div class="tags">'+x.tags.map(t=>'<span class="tag">'+t+'</span>').join('')+'</div></div><div class="result-actions"><a class="btn primary view" href="'+target(x)+'">View '+(x.type==='product'?'Product':x.type==='service'?'Service':'Supplier')+' →</a></div></article>').join(''):'<div class="empty"><h3>No exact matches yet</h3><p>Try a broader term, another market, or clear the filters.</p><button class="btn" onclick="clearFilters()">Clear filters</button></div>'}
-function clearFilters(){document.getElementById('category').value='';document.getElementById('subcategory').innerHTML='<option value="">Any sub-category</option>';document.getElementById('country').value='';document.getElementById('city').value='';document.getElementById('market').value='';active='all';document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.type==='all'));render()}document.getElementById('category').onchange=()=>{const map={ 'Plastics & Packaging':['Plastic Containers','Plastic Bottles','Packaging Films','Plastic Components'], 'Machinery':['Injection Moulding Machines','CNC Machines','Packaging Machines'], 'Electronics & Components':['Electronic Components','PCB','Power Supplies'], 'Logistics & Freight':['Sea Freight','Air Freight','Road Transport','Freight Forwarding'], 'Construction Materials':['Building Materials','Tiles & Surfaces','Plumbing Products'], 'Raw Materials':['Metals','Minerals','Polymers'], 'Automotive':['Auto Components','Accessories','Aftermarket Parts'], 'Textiles & Apparel':['Fabrics','Garments','Home Textiles'], 'Food & Agriculture':['Food Ingredients','Agri Products','Processed Food'], 'Chemicals':['Industrial Chemicals','Specialty Chemicals'], 'Inspection & Verification':['Factory Inspection','Pre-shipment Inspection'], 'Insurance':['Cargo Insurance','Transit Insurance'], 'Trade Finance':['Trade Finance','Letter of Credit'], 'Warehousing & Fulfilment':['Warehousing','Consolidation'], 'Customs & Trade':['Customs Clearance','Trade Documentation'], 'Sourcing Services':['Product Sourcing','Supplier Discovery'], 'Professional Services':['Consulting','Accounting & Tax']};document.getElementById('subcategory').innerHTML='<option value="">Any sub-category</option>'+(map[this.value]||[]).map(x=>'<option>'+x+'</option>').join('');render()};render();
-</script></body></html>
+let data=[...demoData];
+const params=new URLSearchParams(location.search);
+document.getElementById('q').value=params.get('q')||'';
+let active=params.get('type')||'all';
+
+document.querySelectorAll('.tab').forEach(b=>{
+  b.classList.toggle('active',b.dataset.type===active);
+  b.onclick=()=>{
+    active=b.dataset.type;
+    document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.type===active));
+    render();
+  };
+});
+
+function run(){
+  const q=document.getElementById('q').value.trim();
+  location.href=q?'search.html?q='+encodeURIComponent(q):'search.html';
+}
+
+function match(x,q){
+  return !q || (x.name+' '+x.desc+' '+x.tags.join(' ')).toLowerCase().includes(q.toLowerCase());
+}
+
+function target(x){
+  return x.type==='supplier'?'supplier.html?id='+encodeURIComponent(x.id):x.type==='product'?'product.html?id='+encodeURIComponent(x.id):'service.html?id='+encodeURIComponent(x.id);
+}
+
+function esc(v){
+  return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function render(){
+  const q=document.getElementById('q').value.trim(),
+        cat=document.getElementById('category').value,
+        sub=document.getElementById('subcategory').value,
+        country=document.getElementById('country').value,
+        city=document.getElementById('city').value,
+        market=document.getElementById('market').value;
+
+  const rows=data.filter(x=>
+    (active==='all'||x.type===active) &&
+    (!cat||x.category===cat) &&
+    (!sub||x.subcategories?.includes(sub)) &&
+    (!country||x.country===country) &&
+    (!city||x.city===city) &&
+    (!market||x.market===market||x.market==='All markets') &&
+    match(x,q)
+  );
+
+  document.getElementById('title').textContent=q?'Results for “'+q+'”':'Explore SupplyDesk';
+  document.getElementById('summary').textContent=rows.length+' result'+(rows.length===1?'':'s')+' · Products, suppliers and services';
+
+  document.getElementById('results').innerHTML=rows.length
+    ?rows.map(x=>'<article class="result"><div class="result-main"><div class="type">'+esc(x.type)+(x.verified?' · ✓ Verified':'')+'</div><h3>'+esc(x.name)+'</h3><div class="meta">📍 '+esc(x.city)+', '+esc(x.country)+' · '+esc(x.market)+'</div><div class="desc">'+esc(x.desc)+'</div><div class="tags">'+x.tags.map(t=>'<span class="tag">'+esc(t)+'</span>').join('')+'</div></div><div class="result-actions"><a class="btn primary view" href="'+target(x)+'">View '+(x.type==='product'?'Product':x.type==='service'?'Service':'Supplier')+' →</a></div></article>').join('')
+    :'<div class="empty"><h3>No exact matches yet</h3><p>Try a broader term, another market, or clear the filters.</p><button class="btn" onclick="clearFilters()">Clear filters</button></div>';
+}
+
+function clearFilters(){
+  document.getElementById('category').value='';
+  document.getElementById('subcategory').innerHTML='<option value="">Any sub-category</option>';
+  document.getElementById('country').value='';
+  document.getElementById('city').value='';
+  document.getElementById('market').value='';
+  active='all';
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.type==='all'));
+  render();
+}
+
+document.getElementById('category').onchange=()=>{
+  const map={
+    'Plastics & Packaging':['Plastic Containers','Plastic Bottles','Packaging Films','Plastic Components'],
+    'Machinery':['Injection Moulding Machines','CNC Machines','Packaging Machines'],
+    'Electronics & Components':['Electronic Components','PCB','Power Supplies'],
+    'Logistics & Freight':['Sea Freight','Air Freight','Road Transport','Freight Forwarding'],
+    'Construction Materials':['Building Materials','Tiles & Surfaces','Plumbing Products'],
+    'Raw Materials':['Metals','Minerals','Polymers'],
+    'Automotive':['Auto Components','Accessories','Aftermarket Parts'],
+    'Textiles & Apparel':['Fabrics','Garments','Home Textiles'],
+    'Food & Agriculture':['Food Ingredients','Agri Products','Processed Food'],
+    'Chemicals':['Industrial Chemicals','Specialty Chemicals'],
+    'Inspection & Verification':['Factory Inspection','Pre-shipment Inspection'],
+    'Insurance':['Cargo Insurance','Transit Insurance'],
+    'Trade Finance':['Trade Finance','Letter of Credit'],
+    'Warehousing & Fulfilment':['Warehousing','Consolidation'],
+    'Customs & Trade':['Customs Clearance','Trade Documentation'],
+    'Sourcing Services':['Product Sourcing','Supplier Discovery'],
+    'Professional Services':['Consulting','Accounting & Tax']
+  };
+  document.getElementById('subcategory').innerHTML='<option value="">Any sub-category</option>'+(map[this.value]||[]).map(x=>'<option>'+esc(x)+'</option>').join('');
+  render();
+};
+
+async function loadLiveSuppliers(){
+  try{
+    const response=await fetch('/api/suppliers');
+    if(!response.ok) return;
+    const json=await response.json();
+    const live=(json.suppliers||[]).map(x=>({...x,market:'All markets'}));
+    data=[...live,...demoData];
+    render();
+  }catch(e){
+    render();
+  }
+}
+
+render();
+loadLiveSuppliers();</script></body></html>
