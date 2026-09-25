@@ -112,7 +112,7 @@ function clean(value, max = 2000) {
 function requireAdmin(req, res, next) {
   const expected = process.env.ADMIN_TOKEN;
   const received = req.get("x-admin-token") || "";
-  if (!expected || received.length < 20 || !crypto.timingSafeEqual(Buffer.from(received), Buffer.from(expected))) {
+  if (!expected || received.length !== expected.length || received.length < 20 || !crypto.timingSafeEqual(Buffer.from(received), Buffer.from(expected))) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   next();
@@ -270,6 +270,71 @@ app.post("/api/supplier-applications",
     }
   }
 );
+
+app.get("/api/suppliers", async (req, res) => {
+  const q = clean(req.query.q, 200).toLowerCase();
+  const category = clean(req.query.category, 180);
+  const country = clean(req.query.country, 100);
+  const city = clean(req.query.city, 150);
+
+  let sql = `SELECT id, legal_name, trade_name, business_type, country, city, website,
+                    business_email, business_phone, category, subcategory
+             FROM supplier_profiles
+             WHERE verified = 1 AND published = 1`;
+  const params = [];
+
+  if (category) { sql += " AND category = ?"; params.push(category); }
+  if (country) { sql += " AND country = ?"; params.push(country); }
+  if (city) { sql += " AND city = ?"; params.push(city); }
+
+  if (q) {
+    sql += " AND (LOWER(legal_name) LIKE ? OR LOWER(COALESCE(trade_name,'')) LIKE ? OR LOWER(category) LIKE ? OR LOWER(subcategory) LIKE ? OR LOWER(country) LIKE ? OR LOWER(city) LIKE ?)";
+    const like = `%${q}%`;
+    params.push(like, like, like, like, like, like);
+  }
+
+  sql += " ORDER BY updated_at DESC LIMIT 200";
+
+  try {
+    const [rows] = await pool.execute(sql, params);
+    res.json({
+      suppliers: rows.map(x => ({
+        id: x.id,
+        name: x.trade_name || x.legal_name,
+        type: "supplier",
+        city: x.city,
+        country: x.country,
+        market: "Listed Business",
+        desc: `${x.business_type} in ${x.category} · ${x.subcategory}`,
+        category: x.category,
+        subcategories: [x.subcategory],
+        tags: [x.business_type, x.category, x.subcategory],
+        verified: true
+      }))
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Could not load suppliers." });
+  }
+});
+
+app.get("/api/suppliers/:id", async (req, res) => {
+  try {
+    const [[row]] = await pool.execute(
+      `SELECT id, legal_name, trade_name, business_type, country, city, address, website,
+              business_email, business_phone, contact_person, designation, category, subcategory,
+              verified, published
+       FROM supplier_profiles
+       WHERE id = ? AND verified = 1 AND published = 1`,
+      [req.params.id]
+    );
+    if (!row) return res.status(404).json({ error: "Supplier not found." });
+    res.json({ supplier: row });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Could not load supplier." });
+  }
+});
 
 app.get("/api/admin/applications", requireAdmin, async (req, res) => {
   const status = clean(req.query.status, 40);
