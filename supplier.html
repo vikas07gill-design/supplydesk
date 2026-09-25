@@ -50,7 +50,6 @@ function renderProfile(p,verified=false){
   document.getElementById("contactText").textContent="Use the phone or email icon below to view the contact details.";
   document.getElementById("phoneDetail").innerHTML=phone?'📞 <a href="tel:'+esc(phone)+'">'+esc(phone)+"</a>":"Phone number not provided.";
   document.getElementById("mailDetail").innerHTML=email?'✉️ <a href="mailto:'+encodeURIComponent(email)+'">'+esc(email)+"</a>":"Email address not provided.";
-  document.getElementById("email").href=email?"mailto:"+encodeURIComponent(email)+"?subject="+encodeURIComponent("SupplyDesk enquiry - "+p.name):"#";
   if(verified){
     document.querySelector(".badges").innerHTML='<span class="badge">✓ SupplyDesk Verified</span><span class="badge">Direct connection</span>';
   }
