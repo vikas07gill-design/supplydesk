@@ -2,75 +2,72 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SupplyDesk | Find What You Need. Connect Directly.</title>
-<meta name="description" content="SupplyDesk helps businesses find products, suppliers and supply services in domestic and international markets.">
+<title>SupplyDesk | Find Products, Suppliers & Services</title>
+<meta name="description" content="Find products, suppliers and supply services for domestic and international sourcing. Discover information and connect directly.">
 <style>
-:root{--ink:#10242d;--muted:#60727b;--line:#dce6ea;--bg:#f7fafb;--white:#fff;--brand:#087f8c;--blue:#176aa5;--max:1180px}
-*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}a{text-decoration:none;color:inherit}.wrap{max-width:var(--max);margin:auto;padding:0 22px}
-nav{height:72px;background:rgba(255,255,255,.92);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20;backdrop-filter:blur(12px)}.navin{height:100%;display:flex;align-items:center;justify-content:space-between}.logo{display:flex;align-items:center;gap:10px;font-size:22px;font-weight:850;letter-spacing:-.04em}.mark{width:36px;height:36px;border-radius:11px;background:linear-gradient(135deg,#2fd0bd,#2679bc);color:#fff;display:grid;place-items:center}.links{display:flex;gap:27px;color:var(--muted);font-size:14px}.links a:hover{color:var(--brand)}.actions{display:flex;gap:9px}.btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);background:#fff;padding:10px 15px;border-radius:10px;font-weight:700;font-size:13px;cursor:pointer}.primary{background:var(--brand);border-color:var(--brand);color:#fff}
-.hero{background:#fff;border-bottom:1px solid var(--line);padding:72px 0 76px}.hero-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:70px;align-items:center}.eyebrow{font-size:12px;color:var(--brand);font-weight:850;text-transform:uppercase;letter-spacing:.12em}.hero h1{font-size:clamp(43px,5.4vw,70px);line-height:1.02;letter-spacing:-.055em;margin:13px 0 20px}.hero h1 span{color:var(--brand)}.hero p{font-size:18px;line-height:1.65;color:var(--muted);max-width:650px;margin:0}.hero-actions{display:flex;gap:10px;margin-top:27px}.hero-actions .btn{padding:13px 19px}
-.visual{min-height:410px;border-radius:28px;background:linear-gradient(145deg,#edf9f7,#edf5fb);border:1px solid var(--line);position:relative;overflow:hidden;padding:24px}.visual:before{content:"";position:absolute;width:330px;height:330px;border-radius:50%;background:radial-gradient(circle,#4ccfbe 0,#2385a7 42%,#143b58 70%,transparent 71%);left:50%;top:50%;transform:translate(-50%,-50%);opacity:.9;box-shadow:0 25px 80px rgba(20,100,130,.22)}.orbit{position:absolute;left:50%;top:50%;width:390px;height:150px;border:1px solid rgba(8,127,140,.28);border-radius:50%;transform:translate(-50%,-50%) rotate(-17deg)}.orbit.two{transform:translate(-50%,-50%) rotate(58deg)}.loc{position:absolute;width:10px;height:10px;background:#fff;border:3px solid var(--brand);border-radius:50%;box-shadow:0 0 0 5px rgba(8,127,140,.12)}.l1{left:28%;top:38%}.l2{left:68%;top:55%}.l3{left:53%;top:28%}.visual-label{position:absolute;left:22px;bottom:20px;background:rgba(255,255,255,.85);border:1px solid rgba(255,255,255,.8);border-radius:12px;padding:10px 12px;font-size:12px;color:#4f6670}.visual-label strong{display:block;color:var(--ink);font-size:14px}
-.search{margin-top:-30px;position:relative;z-index:2}.searchbox{background:#fff;border:1px solid var(--line);box-shadow:0 16px 45px rgba(16,36,45,.10);border-radius:18px;padding:14px}.searchrow{display:grid;grid-template-columns:1fr auto;gap:9px}.quick{display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:10px 2px 2px;color:#82929a;font-size:11px}.quick button{border:1px solid var(--line);background:#f8fbfc;color:#53666f;border-radius:999px;padding:6px 9px;cursor:pointer;font:inherit}.quick button:hover{border-color:#a7d8d2;color:var(--brand)}.search input,.search select{width:100%;height:48px;border:1px solid var(--line);border-radius:10px;background:#fbfdfe;padding:0 13px;color:var(--ink);font:inherit}.search button{height:48px}.hint{font-size:11px;color:#82929a;padding:9px 3px 0}
-.section{padding:62px 0}.head{margin-bottom:23px}.head h2{font-size:32px;letter-spacing:-.04em;margin:0 0 6px}.head p{margin:0;color:var(--muted)}
-.pillgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:13px}.pill{background:#fff;border:1px solid var(--line);border-radius:15px;padding:18px;transition:.18s}.pill:hover{border-color:#a7d8d2;transform:translateY(-2px)}.pill .ico{font-size:22px;margin-bottom:12px}.pill h3{margin:0 0 5px;font-size:16px}.pill p{margin:0;color:var(--muted);font-size:12px;line-height:1.5}
-.twocol{display:grid;grid-template-columns:1fr 1fr;gap:17px}.box{background:#fff;border:1px solid var(--line);border-radius:18px;padding:24px}.box h3{margin:0 0 7px;font-size:21px}.box p{color:var(--muted);line-height:1.6;font-size:14px;margin:0 0 16px}.arrow{color:var(--brand);font-weight:750;font-size:13px}
-.how{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.step{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px}.step b{color:var(--brand);font-size:12px}.step h3{margin:10px 0 7px;font-size:18px}.step p{color:var(--muted);font-size:13px;line-height:1.55;margin:0}
-.cta{background:#102f3b;color:#fff;border-radius:23px;padding:42px}.cta h2{font-size:35px;margin:0 0 8px;letter-spacing:-.04em}.cta p{color:#b9ccd3;margin:0 0 22px;max-width:650px;line-height:1.6}.cta .btn{background:#fff;color:#0e4f5c;border-color:#fff}
-footer{border-top:1px solid var(--line);padding:25px 0;color:#73858e;font-size:12px}
-@media(max-width:900px){.hero-grid{grid-template-columns:1fr;gap:35px}.pillgrid{grid-template-columns:1fr 1fr}.how,.twocol{grid-template-columns:1fr}.links{display:none}}
-@media(max-width:560px){.wrap{padding:0 16px}.hero{padding-top:48px}.hero-actions{flex-direction:column}.pillgrid{grid-template-columns:1fr}.searchrow{grid-template-columns:1fr}.visual{min-height:330px}}
+:root{--ink:#0d2430;--muted:#637680;--line:#dbe7eb;--bg:#f5fafb;--card:#fff;--brand:#087f8c;--brand2:#176aa5;--dark:#092a38;--max:1180px}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}a{text-decoration:none;color:inherit}.wrap{max-width:var(--max);margin:auto;padding:0 22px}
+nav{height:72px;background:rgba(255,255,255,.9);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:30;backdrop-filter:blur(14px)}.navin{height:100%;display:flex;align-items:center;justify-content:space-between}.logo{display:flex;align-items:center;gap:10px;font-size:22px;font-weight:900;letter-spacing:-.04em}.mark{width:37px;height:37px;border-radius:12px;background:linear-gradient(135deg,#2fd0bd,#2377b7);color:#fff;display:grid;place-items:center;box-shadow:0 8px 20px rgba(8,127,140,.18)}.links{display:flex;gap:25px;color:var(--muted);font-size:14px;font-weight:650}.links a:hover{color:var(--brand)}.actions{display:flex;gap:8px}.btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);background:#fff;padding:11px 16px;border-radius:11px;font-weight:800;font-size:13px;cursor:pointer;transition:.2s}.btn:hover{transform:translateY(-1px)}.primary{background:var(--brand);border-color:var(--brand);color:#fff;box-shadow:0 8px 20px rgba(8,127,140,.18)}
+.hero{position:relative;overflow:hidden;background:linear-gradient(135deg,#fff 0%,#f1fbfa 52%,#edf6fc 100%);border-bottom:1px solid var(--line);padding:76px 0 92px}.hero:after{content:"";position:absolute;width:420px;height:420px;border-radius:50%;right:-150px;top:-190px;background:rgba(47,208,189,.12);filter:blur(4px)}.hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:60px;align-items:center;position:relative;z-index:1}.eyebrow{display:inline-flex;gap:8px;align-items:center;color:var(--brand);font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.13em}.eyebrow:before{content:"";width:28px;height:2px;background:var(--brand)}.hero h1{font-size:clamp(46px,6vw,76px);line-height:.98;letter-spacing:-.065em;margin:16px 0 22px;max-width:760px}.hero h1 span{color:var(--brand)}.hero p{font-size:18px;line-height:1.65;color:var(--muted);max-width:650px;margin:0}.hero-actions{display:flex;gap:10px;margin-top:28px}.hero-actions .btn{padding:13px 19px}
+.network{height:410px;border:1px solid rgba(8,127,140,.18);border-radius:30px;background:radial-gradient(circle at 50% 48%,rgba(47,208,189,.16),transparent 34%),linear-gradient(145deg,#eaf9f7,#edf5fb);position:relative;overflow:hidden;box-shadow:0 24px 70px rgba(13,60,75,.1)}.globe{position:absolute;width:235px;height:235px;left:50%;top:50%;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle at 35% 28%,#58dbc8 0,#1689a0 45%,#103b56 76%);box-shadow:inset -28px -25px 55px rgba(0,0,0,.2),0 22px 55px rgba(13,75,100,.2)}.globe:before,.globe:after{content:"";position:absolute;inset:25px 52px;border:1px solid rgba(255,255,255,.28);border-radius:50%}.globe:after{inset:52px 25px}.ring{position:absolute;left:50%;top:50%;width:360px;height:145px;border:1px solid rgba(8,127,140,.3);border-radius:50%;transform:translate(-50%,-50%) rotate(-16deg)}.ring.r2{transform:translate(-50%,-50%) rotate(55deg);width:300px}.node{position:absolute;width:12px;height:12px;border-radius:50%;background:#fff;border:3px solid var(--brand);box-shadow:0 0 0 7px rgba(8,127,140,.12)}.n1{left:19%;top:38%}.n2{right:18%;top:33%}.n3{right:27%;bottom:23%}.n4{left:31%;bottom:21%}.route{position:absolute;height:1px;background:linear-gradient(90deg,transparent,var(--brand),transparent);transform-origin:left center;opacity:.55}.route.a{width:180px;left:25%;top:42%;transform:rotate(14deg)}.route.b{width:155px;left:51%;top:49%;transform:rotate(-25deg)}.network-label{position:absolute;left:20px;bottom:18px;background:rgba(255,255,255,.88);border:1px solid rgba(255,255,255,.8);border-radius:13px;padding:10px 13px;font-size:11px;color:var(--muted);box-shadow:0 8px 20px rgba(0,0,0,.06)}.network-label strong{display:block;color:var(--ink);font-size:13px;margin-bottom:2px}
+.search{margin-top:-32px;position:relative;z-index:5}.searchbox{background:#fff;border:1px solid var(--line);border-radius:20px;padding:14px;box-shadow:0 20px 55px rgba(13,36,48,.12)}.searchrow{display:grid;grid-template-columns:1fr auto;gap:9px}.search input{width:100%;height:54px;border:1px solid var(--line);border-radius:12px;background:#fbfdfe;padding:0 16px;color:var(--ink);font:inherit;font-size:15px;outline:none}.search input:focus{border-color:#83cfc6;box-shadow:0 0 0 4px rgba(8,127,140,.08)}.search button{height:54px;padding:0 23px}.quick{display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:11px 2px 2px;color:#80919a;font-size:11px}.quick button{border:1px solid var(--line);background:#f7fafb;color:#526872;border-radius:999px;padding:7px 10px;cursor:pointer;font:inherit}.quick button:hover{border-color:#a5d8d2;color:var(--brand)}.hint{font-size:11px;color:#8a9aa1;padding:9px 3px 0}
+.section{padding:68px 0}.head{display:flex;justify-content:space-between;align-items:end;gap:20px;margin-bottom:24px}.head h2{font-size:32px;letter-spacing:-.045em;margin:0 0 6px}.head p{margin:0;color:var(--muted)}.head-link{color:var(--brand);font-size:13px;font-weight:800}
+.pillgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.pill{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:21px;transition:.2s;min-height:165px;position:relative;overflow:hidden}.pill:after{content:"→";position:absolute;right:18px;bottom:16px;color:#9aacb3;font-weight:800}.pill:hover{transform:translateY(-4px);border-color:#a7d8d2;box-shadow:0 14px 35px rgba(13,36,48,.08)}.ico{width:43px;height:43px;border-radius:13px;background:#eaf8f6;display:grid;place-items:center;font-size:20px;margin-bottom:16px}.pill h3{margin:0 0 6px;font-size:17px}.pill p{margin:0;color:var(--muted);font-size:12px;line-height:1.55}
+.markets{display:grid;grid-template-columns:1fr 1fr;gap:16px}.market{border-radius:20px;padding:27px;background:#fff;border:1px solid var(--line);position:relative;overflow:hidden}.market.dark{background:var(--dark);color:#fff;border-color:var(--dark)}.market .badge{font-size:11px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:var(--brand)}.market.dark .badge{color:#5ed8c8}.market h3{font-size:23px;margin:10px 0 7px}.market p{color:var(--muted);font-size:14px;line-height:1.6;margin:0 0 17px;max-width:510px}.market.dark p{color:#b7ccd4}.flows{display:flex;gap:7px;flex-wrap:wrap}.flowtag{font-size:11px;padding:7px 9px;border-radius:999px;background:#f0f6f7;color:#51666f}.dark .flowtag{background:rgba(255,255,255,.09);color:#d4e4e8}
+.how{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.step{background:#fff;border:1px solid var(--line);border-radius:18px;padding:23px;position:relative}.step-no{width:31px;height:31px;border-radius:9px;background:#eaf8f6;color:var(--brand);display:grid;place-items:center;font-size:11px;font-weight:900}.step h3{margin:16px 0 7px;font-size:18px}.step p{color:var(--muted);font-size:13px;line-height:1.6;margin:0}
+.cta{background:linear-gradient(135deg,#092a38,#0e4b5a);color:#fff;border-radius:24px;padding:43px;position:relative;overflow:hidden}.cta:after{content:"";position:absolute;width:240px;height:240px;border-radius:50%;right:-70px;top:-90px;background:rgba(47,208,189,.15)}.cta h2{font-size:35px;margin:0 0 8px;letter-spacing:-.045em}.cta p{color:#bdd0d7;margin:0 0 22px;max-width:680px;line-height:1.6}.cta .btn{background:#fff;color:#0d5361;border-color:#fff}
+footer{border-top:1px solid var(--line);padding:28px 0;color:#758890;font-size:12px}.footerin{display:flex;justify-content:space-between;gap:20px}.footerlinks{display:flex;gap:17px}.footerlinks a:hover{color:var(--brand)}
+@media(max-width:900px){.hero-grid{grid-template-columns:1fr}.network{max-width:650px}.pillgrid{grid-template-columns:1fr 1fr}.markets{grid-template-columns:1fr}.how{grid-template-columns:1fr}.links{display:none}}
+@media(max-width:560px){.wrap{padding:0 16px}.hero{padding:52px 0 70px}.hero-actions{flex-direction:column}.pillgrid{grid-template-columns:1fr}.searchrow{grid-template-columns:1fr}.search button{width:100%}.network{height:330px}.globe{width:190px;height:190px}.ring{width:300px}.head{display:block}.head-link{display:inline-block;margin-top:12px}.footerin{display:block}.footerlinks{margin-top:10px;flex-wrap:wrap}}
 </style>
 </head>
 <body>
 <nav><div class="wrap navin">
-<a class="logo" href="#"><span class="mark">S</span>SupplyDesk</a>
-<div class="links"><a href="#what">What we do</a><a href="services.html">Services</a><a href="#how">How it works</a><a href="#countries">Markets</a></div>
-<div class="actions"><a class="btn" href="#how">How it works</a><a class="btn primary" href="services.html">Explore Services</a></div>
+<a class="logo" href="index.html"><span class="mark">S</span>SupplyDesk</a>
+<div class="links"><a href="#what">Explore</a><a href="search.html">Find Suppliers</a><a href="services.html">Services</a><a href="#how">How it works</a></div>
+<div class="actions"><a class="btn" href="#how">How it works</a><a class="btn primary" href="search.html">Search Supply</a></div>
 </div></nav>
 
 <section class="hero"><div class="wrap hero-grid">
-<div><div class="eyebrow">Global supply information network</div>
-<h1>Whatever you need to source, <span>start here.</span></h1>
-<p>SupplyDesk helps businesses discover products, suppliers and supply-related services in their own country or anywhere in the world. Find the information you need, then connect directly.</p>
-<div class="hero-actions"><a class="btn primary" href="#search">Start Searching</a><a class="btn" href="services.html">See All Services</a></div>
-</div>
-<div class="visual"><div class="orbit"></div><div class="orbit two"></div><div class="loc l1"></div><div class="loc l2"></div><div class="loc l3"></div><div class="visual-label"><strong>Global + Domestic</strong>India • China • UAE • USA • and more</div></div>
+<div><div class="eyebrow">Global + domestic supply network</div>
+<h1>Find what you need. <span>Connect directly.</span></h1>
+<p>Discover products, suppliers and supply services in your own market or across borders. SupplyDesk brings the information together so your next sourcing step is easier.</p>
+<div class="hero-actions"><a class="btn primary" href="#search">Start Searching</a><a class="btn" href="services.html">Explore Services</a></div></div>
+<div class="network" aria-label="Global and domestic supply network visual"><div class="globe"></div><div class="ring"></div><div class="ring r2"></div><div class="route a"></div><div class="route b"></div><i class="node n1"></i><i class="node n2"></i><i class="node n3"></i><i class="node n4"></i><div class="network-label"><strong>One starting point</strong>India · China · UAE · USA · and more</div></div>
 </div></section>
 
 <section id="search" class="search"><div class="wrap"><div class="searchbox">
-<div class="searchrow"><input id="product" placeholder="What are you looking for?  Product, supplier or service"><button class="btn primary" onclick="searchDemo()">Search</button></div>
-<div class="quick"><span>Try:</span><button onclick="quick('Plastic containers')">Plastic containers</button><button onclick="quick('Machinery')">Machinery</button><button onclick="quick('Electronics supplier')">Electronics supplier</button><button onclick="quick('Freight forwarder')">Freight forwarder</button></div><div class="hint">Search first. Location and other filters can be added after the results.</div>
+<div class="searchrow"><input id="product" aria-label="Search SupplyDesk" placeholder="What are you looking for? Product, material, supplier or service"><button class="btn primary" onclick="searchDemo()">Search</button></div>
+<div class="quick"><span>Popular:</span><button onclick="quick('Plastic containers')">Plastic containers</button><button onclick="quick('Machinery')">Machinery</button><button onclick="quick('Electronics supplier')">Electronics supplier</button><button onclick="quick('Freight forwarder')">Freight forwarder</button></div>
+<div class="hint">Search first. Refine by type, country, city and market on the results page.</div>
 </div></div></section>
 
 <section id="what" class="section"><div class="wrap">
-<div class="head"><h2>What you can find on SupplyDesk</h2><p>One starting point for the supply journey.</p></div>
+<div class="head"><div><h2>Explore SupplyDesk</h2><p>Four simple ways to start your supply search.</p></div><a class="head-link" href="search.html">Browse all →</a></div>
 <div class="pillgrid">
-<div class="pill"><div class="ico">📦</div><h3>Products</h3><p>Discover products, materials, machinery and goods by category and market.</p></div>
-<div class="pill"><div class="ico">🏭</div><h3>Suppliers</h3><p>Find manufacturers, wholesalers, distributors and trading companies.</p></div>
-<div class="pill"><div class="ico">🚚</div><h3>Logistics</h3><p>Find freight, transport, warehousing and distribution providers.</p></div>
-<div class="pill"><div class="ico">📋</div><h3>Trade Services</h3><p>Find customs, documentation, inspection, insurance and related services.</p></div>
-</div>
-</div></section>
-
-<section id="countries" class="section" style="padding-top:0"><div class="wrap"><div class="twocol">
-<div class="box"><h3>Domestic supply</h3><p>Need something within the same country? Search local manufacturers, wholesalers, distributors and service providers.</p><div class="arrow">India → India · China → China · UAE → UAE</div></div>
-<div class="box"><h3>International supply</h3><p>Looking across borders? Discover suppliers and the supporting services around an international supply requirement.</p><div class="arrow">India → UAE · China → India · China → UAE · and more</div></div>
+<a class="pill" href="search.html?type=product"><div class="ico">📦</div><h3>Products</h3><p>Materials, machinery, components, goods and more.</p></a>
+<a class="pill" href="search.html?type=supplier"><div class="ico">🏭</div><h3>Suppliers</h3><p>Manufacturers, wholesalers, distributors and traders.</p></a>
+<a class="pill" href="search.html?type=service"><div class="ico">🚚</div><h3>Logistics</h3><p>Freight, transport, warehousing and distribution support.</p></a>
+<a class="pill" href="services.html"><div class="ico">📋</div><h3>Trade Services</h3><p>Customs, inspection, insurance, finance and documentation.</p></a>
 </div></div></section>
 
-<section id="how" class="section"><div class="wrap">
-<div class="head"><h2>Simple by design</h2><p>We start as the information and connection layer.</p></div>
+<section id="markets" class="section" style="padding-top:0"><div class="wrap"><div class="markets">
+<div class="market"><div class="badge">Domestic</div><h3>Source within your market.</h3><p>Find local manufacturers, distributors, wholesalers and service providers without changing platforms.</p><div class="flows"><span class="flowtag">India → India</span><span class="flowtag">China → China</span><span class="flowtag">UAE → UAE</span></div></div>
+<div class="market dark"><div class="badge">International</div><h3>Look beyond borders.</h3><p>Discover suppliers and supporting services around an international sourcing requirement.</p><div class="flows"><span class="flowtag">India → UAE</span><span class="flowtag">China → India</span><span class="flowtag">China → UAE</span></div></div>
+</div></div></section>
+
+<section id="how" class="section"><div class="wrap"><div class="head"><div><h2>Simple by design</h2><p>No complicated buying journey. Start with information and a direct connection.</p></div></div>
 <div class="how">
-<div class="step"><b>01 / SEARCH</b><h3>Tell us what you need</h3><p>Search for a product, supplier or service and choose the relevant market.</p></div>
-<div class="step"><b>02 / DISCOVER</b><h3>Explore the options</h3><p>Review supplier and service-provider information, locations and categories.</p></div>
-<div class="step"><b>03 / CONNECT</b><h3>Contact directly</h3><p>Connect with the relevant supplier or service provider directly and complete your arrangement with them.</p></div>
-</div>
-</div></section>
+<div class="step"><div class="step-no">01</div><h3>Search</h3><p>Tell us the product, supplier or service you need.</p></div>
+<div class="step"><div class="step-no">02</div><h3>Discover</h3><p>Compare relevant listings by category, location and market.</p></div>
+<div class="step"><div class="step-no">03</div><h3>Connect</h3><p>Contact the relevant business directly and make your own arrangement.</p></div>
+</div></div></section>
 
-<section class="section" style="padding-top:0"><div class="wrap"><div class="cta"><h2>Looking for something?</h2><p>Start with the product, service or market you need. SupplyDesk is built to make the first step easier.</p><a class="btn" href="#search">Start Searching</a></div></div></section>
+<section class="section" style="padding-top:0"><div class="wrap"><div class="cta"><h2>Looking for something specific?</h2><p>Start with a simple search. SupplyDesk is built to make the first connection easier.</p><a class="btn" href="#search">Start Searching</a></div></div></section>
 
-<footer><div class="wrap">© 2026 SupplyDesk · Global supply information & connection platform</div></footer>
+<footer><div class="wrap footerin"><div>© 2026 SupplyDesk · Global supply information & connection platform</div><div class="footerlinks"><a href="search.html">Search</a><a href="services.html">Services</a><a href="#how">How it works</a></div></div></footer>
 <script>
-function searchDemo(){const q=document.getElementById('product').value.trim();if(!q){document.getElementById('product').focus();return}window.location.href='search.html?q='+encodeURIComponent(q)} function quick(q){document.getElementById('product').value=q;searchDemo()}
+function searchDemo(){const q=document.getElementById('product').value.trim();if(!q){document.getElementById('product').focus();return}location.href='search.html?q='+encodeURIComponent(q)}
+function quick(q){document.getElementById('product').value=q;searchDemo()}
 </script>
-</body>
-</html>
+</body></html>
