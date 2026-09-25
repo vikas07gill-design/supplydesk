@@ -359,6 +359,29 @@ app.get("/api/admin/applications", requireAdmin, async (req, res) => {
   }
 });
 
+app.get("/api/admin/files/:id", requireAdmin, async (req, res) => {
+  try {
+    const [[file]] = await pool.execute(
+      "SELECT stored_name, relative_path, original_name, mime_type FROM supplier_files WHERE id = ?",
+      [req.params.id]
+    );
+    if (!file) return res.status(404).json({ error: "File not found." });
+
+    const absolute = path.resolve(UPLOAD_DIR, file.relative_path);
+    const root = path.resolve(UPLOAD_DIR);
+    if (!absolute.startsWith(root + path.sep) || !fs.existsSync(absolute)) {
+      return res.status(404).json({ error: "File not found." });
+    }
+
+    res.setHeader("Content-Type", file.mime_type);
+    res.setHeader("Content-Disposition", `inline; filename="${file.original_name.replace(/["\\]/g, "")}"`);
+    res.sendFile(absolute);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Could not open file." });
+  }
+});
+
 app.get("/api/admin/applications/:id", requireAdmin, async (req, res) => {
   try {
     const [[application]] = await pool.execute(
