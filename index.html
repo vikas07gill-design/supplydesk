@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SupplyDesk | Global Supply Network</title>
+<meta name="description" content="Find products, discover suppliers and connect directly across domestic and international markets.">
+<style>
+:root{
+  --bg:#07131b;--panel:#0d202b;--panel2:#102936;--line:rgba(255,255,255,.10);
+  --text:#f4fbff;--muted:#a9bcc7;--brand:#48d7c4;--brand2:#66a7ff;--white:#fff;
+  --max:1200px;
+}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(circle at 75% 0%,#15374a 0,#07131b 38%,#050d13 100%);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}
+a{color:inherit;text-decoration:none}.wrap{max-width:var(--max);margin:auto;padding:0 24px}
+nav{height:76px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);backdrop-filter:blur(14px);position:sticky;top:0;z-index:20;background:rgba(7,19,27,.72)}
+.logo{display:flex;align-items:center;gap:11px;font-weight:800;letter-spacing:-.03em;font-size:22px}.logo-mark{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--brand),var(--brand2));display:grid;place-items:center;color:#062029;box-shadow:0 0 28px rgba(72,215,196,.25)}
+.navlinks{display:flex;gap:26px;color:var(--muted);font-size:14px}.navlinks a:hover{color:var(--white)}
+.actions{display:flex;gap:10px}.btn{border:1px solid var(--line);background:#fff0;color:var(--white);padding:10px 15px;border-radius:11px;font-weight:650;cursor:pointer}.btn:hover{border-color:rgba(255,255,255,.25);background:rgba(255,255,255,.05)}.btn-primary{background:linear-gradient(135deg,var(--brand),var(--brand2));border:0;color:#05212a}
+.hero{padding:68px 0 30px}.hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:40px;align-items:center}.eyebrow{display:inline-flex;gap:8px;align-items:center;border:1px solid var(--line);background:rgba(255,255,255,.035);padding:7px 11px;border-radius:999px;color:#c9e5ed;font-size:12px}.dot{width:7px;height:7px;border-radius:50%;background:var(--brand);box-shadow:0 0 12px var(--brand)}
+h1{font-size:clamp(44px,6vw,76px);line-height:.98;margin:18px 0;letter-spacing:-.055em}h1 span{background:linear-gradient(90deg,var(--brand),#83c8ff);color:transparent;background-clip:text}
+.lead{font-size:18px;line-height:1.65;color:var(--muted);max-width:650px}
+.searchbox{margin-top:28px;border:1px solid rgba(255,255,255,.13);background:rgba(9,25,34,.85);padding:14px;border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.24)}
+.search-main{display:grid;grid-template-columns:1fr auto;gap:10px}.search-main input{width:100%;padding:15px 16px;border-radius:12px;border:1px solid var(--line);background:#091821;color:var(--white);font-size:16px}.search-main button{padding:0 22px;border-radius:12px}
+.filters{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.filters select{width:100%;padding:13px 14px;border-radius:12px;border:1px solid var(--line);background:#0a1b24;color:#dcebf0}
+.note{font-size:12px;color:#78909d;margin-top:11px}
+.globe-card{position:relative;min-height:455px;border:1px solid var(--line);border-radius:28px;overflow:hidden;background:radial-gradient(circle at 48% 45%,rgba(72,215,196,.10),transparent 35%),linear-gradient(180deg,#0c202c,#07131b)}
+.glow{position:absolute;inset:12% 12%;border-radius:50%;background:radial-gradient(circle,rgba(72,215,196,.18),rgba(102,167,255,.05) 44%,transparent 67%);filter:blur(20px)}
+.globe{position:absolute;left:50%;top:50%;width:310px;height:310px;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle at 38% 35%,#3de0cf 0 6%,#1a8a9a 16%,#0c4960 47%,#062332 72%);box-shadow:inset -28px -22px 54px rgba(0,0,0,.55),0 0 70px rgba(72,215,196,.20);animation:float 7s ease-in-out infinite}
+.globe:before,.globe:after{content:"";position:absolute;inset:18px;border:1px solid rgba(255,255,255,.14);border-radius:50%;transform:rotate(28deg)}.globe:after{inset:50px;transform:rotate(-42deg)}
+.route{position:absolute;height:1px;background:linear-gradient(90deg,transparent,var(--brand),transparent);transform-origin:left center;opacity:.8}.r1{width:210px;left:27%;top:42%;transform:rotate(18deg)}.r2{width:170px;left:58%;top:57%;transform:rotate(145deg)}.pin{position:absolute;width:11px;height:11px;border-radius:50%;background:var(--brand);box-shadow:0 0 0 5px rgba(72,215,196,.13),0 0 20px var(--brand)}.p1{left:31%;top:38%}.p2{left:67%;top:54%}.p3{left:53%;top:34%}
+.map-label{position:absolute;left:20px;bottom:18px;color:#b9ccd5;font-size:12px}.map-label strong{display:block;color:#fff;font-size:14px;margin-bottom:4px}
+.section{padding:38px 0}.section-head{display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:18px}.section h2{font-size:32px;letter-spacing:-.04em;margin:0}.section p{color:var(--muted);margin:5px 0 0}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.card{border:1px solid var(--line);background:linear-gradient(180deg,rgba(17,42,55,.95),rgba(10,27,36,.95));border-radius:17px;padding:18px;transition:.2s}.card:hover{transform:translateY(-3px);border-color:rgba(102,167,255,.32)}.icon{width:42px;height:42px;border-radius:12px;background:rgba(72,215,196,.09);display:grid;place-items:center;font-size:22px;margin-bottom:15px}.card h3{margin:0 0 7px;font-size:17px}.card p{margin:0;color:var(--muted);font-size:13px;line-height:1.55}
+.countries{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.country{padding:13px;border:1px solid var(--line);border-radius:13px;background:rgba(255,255,255,.025);text-align:center;color:#dbe8ed}.country small{display:block;color:#7f97a3;margin-top:3px}
+.suppliers{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.supplier .top{display:flex;justify-content:space-between;gap:10px;align-items:start}.supplier .logo2{width:46px;height:46px;border-radius:13px;background:linear-gradient(135deg,#1d5f73,#143145);display:grid;place-items:center;font-weight:800}.badge{font-size:11px;padding:5px 8px;border-radius:999px;background:rgba(72,215,196,.10);color:#89efe4;border:1px solid rgba(72,215,196,.18)}.meta{color:#8ea6b2;font-size:12px}.tags{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0}.tag{font-size:11px;color:#b8cbd3;padding:5px 7px;border-radius:8px;background:rgba(255,255,255,.045)}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.step{padding:22px;border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.025)}.num{font-size:12px;color:var(--brand);font-weight:800;letter-spacing:.08em}
+footer{margin-top:55px;border-top:1px solid var(--line);padding:26px 0 50px;color:#78909d;font-size:12px;display:flex;justify-content:space-between;gap:20px}
+@keyframes float{0%,100%{transform:translate(-50%,-50%) translateY(0)}50%{transform:translate(-50%,-50%) translateY(-9px)}}
+@media(max-width:900px){.hero-grid{grid-template-columns:1fr}.globe-card{min-height:380px}.grid4{grid-template-columns:repeat(2,1fr)}.countries{grid-template-columns:repeat(3,1fr)}.suppliers,.steps{grid-template-columns:1fr}.navlinks{display:none}}
+@media(max-width:600px){.wrap{padding:0 16px}.hero{padding-top:40px}h1{font-size:46px}.search-main{grid-template-columns:1fr}.filters{grid-template-columns:1fr}.grid4{grid-template-columns:1fr}.countries{grid-template-columns:repeat(2,1fr)}.actions .btn:first-child{display:none}}
+</style>
+</head>
+<body>
+<nav>
+  <div class="wrap" style="width:100%;display:flex;align-items:center;justify-content:space-between">
+    <a class="logo" href="#"><span class="logo-mark">S</span>SupplyDesk</a>
+    <div class="navlinks">
+      <a href="#products">Products</a><a href="#suppliers">Suppliers</a><a href="#services">Services</a><a href="#how">How it works</a>
+    </div>
+    <div class="actions"><button class="btn">Sign in</button><button class="btn btn-primary">Join as Supplier</button></div>
+  </div>
+</nav>
+
+<main>
+<section class="hero wrap">
+  <div class="hero-grid">
+    <div>
+      <div class="eyebrow"><span class="dot"></span> Global supply information network</div>
+      <h1>Find products.<br><span>Discover suppliers.</span><br>Connect directly.</h1>
+      <p class="lead">Explore domestic and international supply markets across countries, cities and categories. SupplyDesk helps you find the right supplier and contact them directly.</p>
+      <div class="searchbox">
+        <div class="search-main">
+          <input id="q" placeholder="What product or material are you looking for?">
+          <button class="btn btn-primary" onclick="demoSearch()">Search Supply</button>
+        </div>
+        <div class="filters">
+          <select id="from"><option>From: Any country</option><option>India</option><option>China</option><option>UAE</option><option>USA</option><option>Germany</option></select>
+          <select id="to"><option>To: Any country</option><option>India</option><option>China</option><option>UAE</option><option>USA</option><option>Germany</option></select>
+        </div>
+        <div class="note">Domestic and international discovery use the same search flow.</div>
+      </div>
+    </div>
+    <div class="globe-card" aria-label="Global supply map preview">
+      <div class="glow"></div><div class="globe"></div>
+      <div class="route r1"></div><div class="route r2"></div>
+      <div class="pin p1"></div><div class="pin p2"></div><div class="pin p3"></div>
+      <div class="map-label"><strong>Global Supply Network</strong>India • China • UAE • USA • Europe</div>
+    </div>
+  </div>
+</section>
+
+<section id="products" class="section wrap">
+  <div class="section-head"><div><h2>Explore by category</h2><p>Start broad, then narrow by country, city and supplier.</p></div></div>
+  <div class="grid4">
+    <div class="card"><div class="icon">⚙️</div><h3>Machinery</h3><p>Industrial equipment, machines, tools and production systems.</p></div>
+    <div class="card"><div class="icon">🔌</div><h3>Electronics</h3><p>Components, devices, electrical products and accessories.</p></div>
+    <div class="card"><div class="icon">🏠</div><h3>Home & Kitchen</h3><p>Household products, kitchenware, storage and daily-use goods.</p></div>
+    <div class="card"><div class="icon">📦</div><h3>Packaging</h3><p>Packaging materials, containers, labels and industrial packing.</p></div>
+    <div class="card"><div class="icon">🧵</div><h3>Textiles</h3><p>Fabrics, garments, yarns, accessories and textile inputs.</p></div>
+    <div class="card"><div class="icon">🧪</div><h3>Chemicals</h3><p>Industrial and commercial chemicals from listed suppliers.</p></div>
+    <div class="card"><div class="icon">🏗️</div><h3>Construction</h3><p>Building materials, fittings, hardware and related products.</p></div>
+    <div class="card"><div class="icon">🍴</div><h3>Food & Agri</h3><p>Food products, ingredients, agricultural goods and inputs.</p></div>
+  </div>
+</section>
+
+<section class="section wrap">
+  <div class="section-head"><div><h2>Explore global supply</h2><p>Every country can have both domestic and international supply opportunities.</p></div></div>
+  <div class="countries">
+    <div class="country">🇮🇳 India<small>Domestic + Global</small></div>
+    <div class="country">🇨🇳 China<small>Domestic + Global</small></div>
+    <div class="country">🇦🇪 UAE<small>Domestic + Global</small></div>
+    <div class="country">🇺🇸 USA<small>Domestic + Global</small></div>
+    <div class="country">🇩🇪 Germany<small>Domestic + Global</small></div>
+    <div class="country">🇸🇬 Singapore<small>Domestic + Global</small></div>
+  </div>
+</section>
+
+<section id="suppliers" class="section wrap">
+  <div class="section-head"><div><h2>Featured suppliers</h2><p>Example supplier cards for the first website layout.</p></div></div>
+  <div class="suppliers">
+    <div class="card supplier"><div class="top"><div style="display:flex;gap:12px"><div class="logo2">AC</div><div><h3>Asia Components</h3><div class="meta">Shenzhen, China</div></div></div><span class="badge">Listed supplier</span></div><div class="tags"><span class="tag">Electronics</span><span class="tag">Components</span><span class="tag">OEM</span></div><button class="btn" onclick="contact('Asia Components')">View & Contact</button></div>
+    <div class="card supplier"><div class="top"><div style="display:flex;gap:12px"><div class="logo2">IG</div><div><h3>India Growth Industries</h3><div class="meta">Ahmedabad, India</div></div></div><span class="badge">Listed supplier</span></div><div class="tags"><span class="tag">Plastics</span><span class="tag">Household</span><span class="tag">Manufacturing</span></div><button class="btn" onclick="contact('India Growth Industries')">View & Contact</button></div>
+    <div class="card supplier"><div class="top"><div style="display:flex;gap:12px"><div class="logo2">DG</div><div><h3>Dubai General Trading</h3><div class="meta">Dubai, UAE</div></div></div><span class="badge">Listed supplier</span></div><div class="tags"><span class="tag">Trading</span><span class="tag">Building</span><span class="tag">Distribution</span></div><button class="btn" onclick="contact('Dubai General Trading')">View & Contact</button></div>
+  </div>
+</section>
+
+<section id="services" class="section wrap">
+  <div class="section-head"><div><h2>Supply ecosystem</h2><p>Useful information and service providers can grow around the supplier network.</p></div></div>
+  <div class="grid4">
+    <div class="card"><div class="icon">🚚</div><h3>Freight & Logistics</h3><p>Discover logistics providers when cross-border movement is required.</p></div>
+    <div class="card"><div class="icon">📋</div><h3>Trade Services</h3><p>Find customs, documentation and compliance service providers.</p></div>
+    <div class="card"><div class="icon">🔎</div><h3>Inspection</h3><p>Discover inspection and quality service providers.</p></div>
+    <div class="card"><div class="icon">🏢</div><h3>Warehousing</h3><p>Locate warehouse and distribution service providers.</p></div>
+  </div>
+</section>
+
+<section id="how" class="section wrap">
+  <div class="section-head"><div><h2>How SupplyDesk works</h2><p>Simple first. More services can be layered in later.</p></div></div>
+  <div class="steps">
+    <div class="step"><div class="num">01 / SEARCH</div><h3>Tell us what you need</h3><p class="meta">Search a product, material, machine or category and choose source and destination countries.</p></div>
+    <div class="step"><div class="num">02 / DISCOVER</div><h3>Compare information</h3><p class="meta">Browse supplier profiles, locations, products and available business information.</p></div>
+    <div class="step"><div class="num">03 / CONNECT</div><h3>Contact directly</h3><p class="meta">Connect with the supplier directly. SupplyDesk starts as the information and discovery layer.</p></div>
+  </div>
+</section>
+</main>
+
+<footer class="wrap">
+  <div>© 2026 SupplyDesk. Global supply information & connection platform.</div>
+  <div>Domestic • International • Direct Connection</div>
+</footer>
+
+<script>
+function demoSearch(){
+  const q=document.getElementById('q').value.trim()||'products';
+  const f=document.getElementById('from').value.replace('From: ','');
+  const t=document.getElementById('to').value.replace('To: ','');
+  alert('Demo search: '+q+' | '+f+' → '+t);
+}
+function contact(name){ alert('Demo: open supplier profile for '+name); }
+</script>
+</body>
+</html>
