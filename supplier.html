@@ -13,5 +13,45 @@ const profiles={
 "asia-components":{name:"Asia Components",city:"Shenzhen, China",type:"Electronics Supplier",about:"Supplier of electronics components and OEM products for domestic and international buyers.",products:["Electronic Components","Connectors","OEM Assemblies","Accessories"]},
 "dubai-trading":{name:"Dubai General Trading",city:"Dubai, UAE",type:"Trading & Distribution",about:"General trading and distribution company serving buyers across the UAE and regional markets.",products:["Building Materials","General Merchandise","Distribution Products","Trading Goods"]}
 };
-const p=profiles[id]||profiles["abc-plastics"];document.title=p.name+" | SupplyDesk";document.getElementById("name").textContent=p.name;document.getElementById("avatar").textContent=p.name.charAt(0);document.getElementById("meta").textContent="📍 "+p.city+" · "+p.type;document.getElementById("about").textContent=p.about;document.getElementById("products").innerHTML=p.products.map(x=>'<div class="product"><b>'+x+'</b><small>SupplyDesk listing</small></div>').join("");document.getElementById("email").href="mailto:info@example.com?subject="+encodeURIComponent("SupplyDesk enquiry - "+p.name);document.getElementById("contactText").textContent="SupplyDesk provides the information and connection. Contact the listed business directly to discuss your requirement.";
-</script></body></html>
+
+function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function renderProfile(p,verified=false){
+  document.title=p.name+" | SupplyDesk";
+  document.getElementById("name").textContent=p.name;
+  document.getElementById("avatar").textContent=p.name.charAt(0).toUpperCase();
+  document.getElementById("meta").textContent="📍 "+p.city+" · "+p.type;
+  document.getElementById("about").textContent=p.about||("Listed "+p.type+" on SupplyDesk.");
+  const products=p.products||[p.category+" · "+p.subcategory];
+  document.getElementById("products").innerHTML=products.map(x=>'<div class="product"><b>'+esc(x)+'</b><small>SupplyDesk listing</small></div>').join("");
+  const contactParts=[];
+  if(p.business_email) contactParts.push("Email: "+p.business_email);
+  if(p.business_phone) contactParts.push("Phone: "+p.business_phone);
+  document.getElementById("contactText").textContent=contactParts.length?contactParts.join(" · "):"Contact the listed business directly to discuss your requirement.";
+  const email=p.business_email||"";
+  document.getElementById("email").href=email?"mailto:"+encodeURIComponent(email)+"?subject="+encodeURIComponent("SupplyDesk enquiry - "+p.name):"#";
+  if(verified){
+    document.querySelector(".badges").innerHTML='<span class="badge">✓ SupplyDesk Verified</span><span class="badge">Direct connection</span>';
+  }
+}
+
+renderProfile(profiles[id]||profiles["abc-plastics"]);
+
+if(id && !profiles[id]){
+  fetch("/api/suppliers/"+encodeURIComponent(id))
+    .then(r=>{if(!r.ok)throw new Error("not found");return r.json()})
+    .then(data=>{
+      const p=data.supplier;
+      renderProfile({
+        name:p.trade_name||p.legal_name,
+        city:p.city+", "+p.country,
+        type:p.business_type,
+        about:p.trade_name?p.legal_name+" · "+p.business_type+" listed on SupplyDesk.":p.legal_name+" · "+p.business_type+" listed on SupplyDesk.",
+        products:[p.category+" · "+p.subcategory],
+        business_email:p.business_email,
+        business_phone:p.business_phone,
+        category:p.category,
+        subcategory:p.subcategory
+      },true);
+    })
+    .catch(()=>{});
+}</script></body></html>
