@@ -1,5 +1,3 @@
-USE `supplydesk`;
-
 CREATE TABLE IF NOT EXISTS supplier_applications (
   id CHAR(36) PRIMARY KEY,
   legal_name VARCHAR(255) NOT NULL,
