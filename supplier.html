@@ -4,7 +4,7 @@
 .brand-logo{display:flex;align-items:center;gap:10px;text-decoration:none;min-width:0}.brand-mark{width:43px;height:43px;border-radius:14px;display:grid;place-items:center;color:#fff;background:linear-gradient(145deg,#087f8c,#176aa5);box-shadow:0 9px 22px rgba(8,127,140,.2);flex:0 0 auto}.brand-mark svg{width:31px;height:31px}.brand-word{display:flex;align-items:baseline;gap:0;font-size:23px;line-height:1;font-weight:900;letter-spacing:-.055em;white-space:nowrap;color:#0d2430}.brand-word b{color:#087f8c;font-weight:900}.brand-word small{display:block;position:absolute;margin-top:31px;margin-left:1px;font-size:7px;letter-spacing:.16em;font-weight:900;color:#80939b}.brand-logo:hover .brand-mark{transform:translateY(-1px);box-shadow:0 12px 26px rgba(8,127,140,.26)}.brand-mark{transition:.2s}@media(max-width:560px){.brand-word{font-size:20px}.brand-word small{display:none}.brand-mark{width:39px;height:39px;border-radius:12px}.brand-mark svg{width:28px;height:28px}}</style></head><body>
 <nav><div class="wrap nav"><a class="brand-logo" href="index.html"><span class="brand-mark"><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" stroke-width="2.5" opacity=".95"/><path d="M11 29c6-9 12-13 26-14M12 19c7 7 14 11 25 11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".7"/><circle cx="13" cy="29" r="2.7" fill="currentColor"/><circle cx="36" cy="15" r="2.7" fill="currentColor"/><circle cx="37" cy="30" r="2.7" fill="currentColor"/><path d="M17 34c2.8-2.8 5.5-4.2 8.2-4.2 3.1 0 5.1 1.1 7.2 3.1" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></span><span class="brand-word"><span>Supply</span><b>Desk</b><small>GLOBAL SUPPLY NETWORK</small></span></a><a class="btn" href="search.html">← Back to Search</a></div></nav>
 <main class="wrap"><div class="back">Supplier profile</div><section class="profile"><div class="head"><div class="identity"><div class="avatar" id="avatar">S</div><div><h1 id="name">Supplier Profile</h1><div class="meta" id="meta"></div><div class="badges"><span class="badge">Business listing</span><span class="badge">Direct connection</span></div></div></div><a class="btn primary" href="#contact">Contact</a></div></section>
-<div class="grid"><section class="box"><h2>About the business</h2><p id="about"></p><h2 style="margin-top:25px">Products & capabilities</h2><div class="products" id="products"></div></section><aside id="contact" class="box contactbox"><h2>Connect directly</h2><p id="contactText"></p><div class="contact-icons"><button class="contact-icon" id="phoneBtn" type="button" aria-label="Connect by phone" title="Connect by phone">📞</button><button class="contact-icon" id="mailBtn" type="button" aria-label="Connect by email" title="Connect by email">✉️</button></div><div class="contact-detail" id="phoneDetail"></div><div class="contact-detail" id="mailDetail"></div><div class="actions"><button class="btn primary" id="connectBtn" type="button">Connect Now</button></div><p class="note">Tap phone or email to send a connection request to the supplier through SupplyDesk.</p></aside></div>
+<div class="grid"><section class="box"><h2>About the business</h2><p id="about"></p><h2 style="margin-top:25px">Products & capabilities</h2><div class="products" id="products"></div></section><aside id="contact" class="box contactbox"><h2>Connect directly</h2><p id="contactText"></p><div class="contact-icons"><button class="contact-icon" id="phoneBtn" type="button" aria-label="Connect by phone" title="Connect by phone">📞</button><button class="contact-icon" id="mailBtn" type="button" aria-label="Connect by email" title="Connect by email">✉️</button></div><div class="actions"><button class="btn primary" id="connectBtn" type="button">Connect Now</button></div><p class="note">Your request is sent to the supplier by SupplyDesk. The supplier contact details are kept private.</p></aside></div>
 <div class="modal" id="connectModal" aria-hidden="true">
 <div class="modal-card">
 <button class="modal-close" id="closeModal" type="button" aria-label="Close">×</button>
@@ -45,11 +45,7 @@ function renderProfile(p,verified=false){
   document.getElementById("about").textContent=p.about||("Listed "+p.type+" on SupplyDesk.");
   const products=p.products||[p.category+" · "+p.subcategory];
   document.getElementById("products").innerHTML=products.map(x=>'<div class="product"><b>'+esc(x)+'</b><small>SupplyDesk listing</small></div>').join("");
-  const phone=p.business_phone||"";
-  const email=p.business_email||"";
-  document.getElementById("contactText").textContent="Use the phone or email icon below to view the contact details.";
-  document.getElementById("phoneDetail").innerHTML=phone?'📞 <a href="tel:'+esc(phone)+'">'+esc(phone)+"</a>":"Phone number not provided.";
-  document.getElementById("mailDetail").innerHTML=email?'✉️ <a href="mailto:'+encodeURIComponent(email)+'">'+esc(email)+"</a>":"Email address not provided.";
+  document.getElementById("contactText").textContent="Choose phone or email to send a connection request through SupplyDesk. The supplier's direct contact details remain private.";
   if(verified){
     document.querySelector(".badges").innerHTML='<span class="badge">✓ SupplyDesk Verified</span><span class="badge">Direct connection</span>';
   }
@@ -94,8 +90,6 @@ form.addEventListener("submit",async e=>{
     const data=await response.json();
     if(!response.ok) throw new Error(data.error||"Could not send request.");
     statusEl.textContent="✓ Request sent. The supplier has been notified by SupplyDesk.";
-    document.getElementById("phoneDetail").classList.add("show");
-    document.getElementById("mailDetail").classList.add("show");
     setTimeout(closeConnect,1200);
   }catch(error){
     statusEl.textContent=error.message;
@@ -120,8 +114,6 @@ if(id && !profiles[id]){
         type:p.business_type,
         about:p.trade_name?p.legal_name+" · "+p.business_type+" listed on SupplyDesk.":p.legal_name+" · "+p.business_type+" listed on SupplyDesk.",
         products:[p.category+" · "+p.subcategory],
-        business_email:p.business_email,
-        business_phone:p.business_phone,
         category:p.category,
         subcategory:p.subcategory
       },true);
