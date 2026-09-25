@@ -392,14 +392,28 @@ app.get("/api/suppliers/:id", async (req, res) => {
   try {
     const [[row]] = await pool.execute(
       `SELECT id, legal_name, trade_name, business_type, country, city, address, website,
-              business_email, business_phone, contact_person, designation, category, subcategory,
-              verified, published
+              category, subcategory, verified, published
        FROM supplier_profiles
        WHERE id = ? AND verified = 1 AND published = 1`,
       [req.params.id]
     );
     if (!row) return res.status(404).json({ error: "Supplier not found." });
-    res.json({ supplier: row });
+    const supplier = {
+      id: row.id,
+      legal_name: row.legal_name,
+      trade_name: row.trade_name,
+      business_type: row.business_type,
+      country: row.country,
+      city: row.city,
+      address: row.address,
+      website: row.website,
+      category: row.category,
+      subcategory: row.subcategory,
+      verified: row.verified,
+      published: row.published
+    };
+    // Direct supplier phone, email and contact-person data are intentionally private.
+    res.json({ supplier });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Could not load supplier." });
@@ -549,6 +563,18 @@ app.patch("/api/admin/applications/:id", requireAdmin, async (req, res) => {
   } finally {
     conn.release();
   }
+});
+
+app.use((req, res, next) => {
+  const blocked = [
+    /^\/database(?:\/|$)/i,
+    /^\/\.github(?:\/|$)/i,
+    /^\/\.env(?:\.|$)/i,
+    /^\/package(?:\.json|-lock\.json)$/i,
+    /^\/HOSTINGER_SETUP\.md$/i
+  ];
+  if (blocked.some(pattern => pattern.test(req.path))) return res.status(404).send("Not found");
+  next();
 });
 
 app.use(express.static(ROOT, {
