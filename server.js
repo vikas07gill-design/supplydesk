@@ -760,6 +760,16 @@ app.post("/api/suppliers/:id/view", async (req,res) => {
   }
 });
 
+app.get("/api/suppliers/:id/products", async (req,res) => {
+  try{
+    const [rows]=await pool.execute(
+      "SELECT id,product_name,category,subcategory,description,moq,unit,market_scope FROM supplier_products WHERE supplier_id=? AND status='approved' ORDER BY updated_at DESC LIMIT 100",
+      [clean(req.params.id,80)]
+    );
+    res.json({products:rows});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not load supplier products."});}
+});
+
 app.get("/api/products", async (req,res) => {
   const q=clean(req.query.q,200).toLowerCase();
   const category=clean(req.query.category,180);
