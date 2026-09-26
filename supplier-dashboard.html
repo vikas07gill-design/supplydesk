@@ -35,8 +35,8 @@ header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0
 <section class="login">
 <div class="eyebrow">Supplier workspace</div><h1>Manage your SupplyDesk business.</h1>
 <p>Enter your registered business email. We will send a 6-digit OTP. No password or dashboard link is required.</p>
-<form id="loginForm"><div class="field"><label>Registered business email</label><input id="loginEmail" type="email" required placeholder="business@example.com"></div><button class="btn primary" style="width:100%" type="submit" id="loginBtn">Send 6-Digit OTP →</button></form>
-<div id="otpStep" style="display:none;margin-top:14px"><div class="field"><label>6-digit OTP</label><input id="loginOtp" inputmode="numeric" maxlength="6" pattern="\d{6}" placeholder="Enter OTP"></div><button class="btn primary" style="width:100%" type="button" id="verifyOtpBtn">Verify OTP →</button><button class="btn" style="width:100%;margin-top:8px" type="button" id="resendOtpBtn">Resend OTP</button></div>
+<div class="field"><label>Registered business email</label><input id="loginEmail" type="email" placeholder="business@example.com"></div><button class="btn primary" style="width:100%" type="button" id="loginBtn" onclick="requestOtp()">Send 6-Digit OTP →</button>
+<div id="otpStep" style="display:block;margin-top:14px"><div class="field"><label>6-digit OTP</label><input id="loginOtp" inputmode="numeric" maxlength="6" pattern="\d{6}" placeholder="Enter OTP"></div><button class="btn primary" style="width:100%" type="button" id="verifyOtpBtn">Verify OTP →</button><button class="btn" style="width:100%;margin-top:8px" type="button" id="resendOtpBtn">Resend OTP</button></div>
 <div id="loginStatus" class="notice hidden"></div>
 </section>
 </main>
@@ -179,7 +179,7 @@ async function loadDashboard(){
     const d=await api("/api/supplier-dashboard");dashboardData=d;showDashboard();
     history.replaceState({},document.title,"supplier-dashboard.html");
     const s=d.supplier;
-    fillBusinessDetails(data.supplier.profileDetails); document.getElementById("welcome").textContent="Welcome, "+(s.trade_name||s.legal_name);
+    fillBusinessDetails(d.supplier.profileDetails); document.getElementById("welcome").textContent="Welcome, "+(s.trade_name||s.legal_name);
     document.getElementById("views").textContent=d.metrics.profile_views_30d;
     document.getElementById("unique").textContent=d.metrics.unique_visitors_30d;
     document.getElementById("connectionsCount").textContent=d.metrics.connections_30d;
@@ -268,6 +268,7 @@ function editProduct(id){const p=findProduct(id);if(p)openProduct(p)}
 async function archiveProduct(id){if(!confirm("Remove this product from your public listings?"))return;try{await api("/api/supplier-dashboard/products/"+id,{method:"DELETE"});await loadDashboard()}catch(e){alert(e.message)}}
 
 async function requestOtp(){
+  console.log("SupplyDesk: dashboard OTP request started");
   const btn=document.getElementById("loginBtn"),s=document.getElementById("loginStatus"),email=document.getElementById("loginEmail").value.trim(),otpStep=document.getElementById("otpStep");
   if(!email){s.textContent="Please enter your registered business email.";s.className="notice error";s.classList.remove("hidden");return}
   otpStep.style.display="block";
@@ -282,7 +283,6 @@ async function requestOtp(){
     s.textContent=e.message;s.className="notice error";s.classList.remove("hidden");
   }finally{btn.disabled=false;btn.textContent="Resend 6-Digit OTP"}
 }
-document.getElementById("loginForm").onsubmit=async e=>{e.preventDefault();await requestOtp()};
 document.getElementById("resendOtpBtn").onclick=requestOtp;
 document.getElementById("verifyOtpBtn").onclick=async()=>{
   const btn=document.getElementById("verifyOtpBtn"),s=document.getElementById("loginStatus"),email=document.getElementById("loginEmail").value.trim(),otp=document.getElementById("loginOtp").value.trim();
