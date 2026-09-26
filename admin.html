@@ -10,7 +10,7 @@
 <body>
 <header><div class="wrap head"><div><h1>SupplyDesk Admin</h1><div class="muted">Supplier verification & profile update queue</div></div><button id="logout">Clear Token</button></div></header>
 <main class="wrap">
-<div class="toolbar"><input id="adminId" placeholder="Admin ID"><input id="adminPassword" type="password" placeholder="Password"><button class="primary" onclick="login()">Sign In</button><span id="roleBadge" class="badge">Not signed in</span><select id="status"><option value="">All applications</option><option value="under_review">Under Review</option><option value="query">Query</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select><button onclick="loadApps()">Applications</button><button id="updatesBtn" onclick="loadUpdates()" style="display:none">Supplier Updates</button><button id="testMailBtn" onclick="testEmail()" style="display:none">Test Email</button><button onclick="loadProducts()">Products</button></div>
+<div class="toolbar"><input id="adminId" placeholder="Admin ID"><input id="adminPassword" type="password" placeholder="Password"><button class="primary" onclick="login()">Sign In</button><span id="roleBadge" class="badge">Not signed in</span><select id="status"><option value="">All applications</option><option value="under_review">Under Review</option><option value="query">Query</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select><button onclick="loadApps()">Applications</button><button id="updatesBtn" onclick="loadUpdates()" style="display:none">Supplier Updates</button><button id="testMailBtn" onclick="testEmail()" style="display:none">Test Email</button><button id="testSupplierMailBtn" onclick="testSupplierEmail()" style="display:none">Test Supplier Email</button><button onclick="loadProducts()">Products</button></div>
 <div id="message" class="muted"></div>
 <div class="grid">
 <section class="card"><div id="list">Enter your admin token to load applications.</div></section>
@@ -22,7 +22,7 @@ const key="supplydesk_admin_token", roleKey="supplydesk_admin_role";
 const adminIdInput=document.getElementById("adminId"), adminPasswordInput=document.getElementById("adminPassword");
 function token(){return sessionStorage.getItem(key)||""}
 function role(){return sessionStorage.getItem(roleKey)||""}
-function applyRole(){const r=role();document.getElementById("roleBadge").textContent=r==="super_admin"?"SUPER ADMIN":"ADMIN";document.getElementById("updatesBtn").style.display=r?"inline-block":"none";document.getElementById("testMailBtn").style.display=r?"inline-block":"none"}
+function applyRole(){const r=role();document.getElementById("roleBadge").textContent=r==="super_admin"?"SUPER ADMIN":"ADMIN";document.getElementById("updatesBtn").style.display=r?"inline-block":"none";document.getElementById("testMailBtn").style.display=r?"inline-block":"none";document.getElementById("testSupplierMailBtn").style.display=r?"inline-block":"none"}
 async function login(){
   try{
     const r=await fetch("/api/admin/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({adminId:adminIdInput.value.trim(),password:adminPasswordInput.value})});
@@ -38,6 +38,14 @@ async function testEmail(){
     if(!recipient)return;
     const data=await api("/api/admin/test-email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({recipient})});
     document.getElementById("message").textContent="Test email sent to "+data.recipient+". Check the inbox.";
+  }catch(e){document.getElementById("message").textContent=e.message}
+}
+async function testSupplierEmail(){
+  try{
+    const supplierId=prompt("Supplier ID to test:", "ef22b165-cb89-4719-b7ca-03eb09e02828");
+    if(!supplierId)return;
+    const data=await api("/api/admin/test-supplier-email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({supplierId:supplierId.trim()})});
+    document.getElementById("message").textContent="Supplier email test sent to "+data.recipient+" for "+data.supplier+". Check that supplier inbox.";
   }catch(e){document.getElementById("message").textContent=e.message}
 }
 async function loadApps(){try{const q=document.getElementById("status").value;const data=await api("/api/admin/applications"+(q?"?status="+encodeURIComponent(q):""));document.getElementById("message").textContent="";renderList(data.applications)}catch(e){document.getElementById("message").textContent=e.message}}
