@@ -36,7 +36,15 @@ header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0
 <div class="eyebrow">Supplier workspace</div><h1>Manage your SupplyDesk business.</h1>
 <p>Enter your registered business email. We will send a 6-digit OTP. No password or dashboard link is required.</p>
 <div class="field"><label>Registered business email</label><input id="loginEmail" type="email" placeholder="business@example.com"></div><button class="btn primary" style="width:100%" type="button" id="loginBtn" onclick="requestOtp()">Send 6-Digit OTP →</button>
-<div id="loginStatus" class="notice hidden" aria-live="polite"></div><div id="buildInfo" style="font-size:11px;color:#087f8c;font-weight:800;margin-top:10px;text-align:center"></div>
+<div id="loginStatus" class="notice hidden" aria-live="polite"></div>
+<div id="buildInfo" style="font-size:11px;color:#087f8c;font-weight:800;margin-top:10px;text-align:center"></div>
+<div id="diagnosticBox" class="notice" style="margin-top:12px;background:#f7fbfc;border:1px solid #dbe7eb">
+  <strong>SupplyDesk System Check</strong>
+  <div id="diagPage">⏳ Page: checking...</div>
+  <div id="diagApi">⏳ API: checking...</div>
+  <div id="diagVersion">⏳ Build: checking...</div>
+  <div id="diagOtp">ℹ️ OTP: not tested yet</div>
+</div>
 <div id="otpStep" style="display:block;margin-top:14px"><div class="field"><label>6-digit OTP</label><input id="loginOtp" inputmode="numeric" maxlength="6" pattern="\d{6}" placeholder="Enter OTP"></div><button class="btn primary" style="width:100%" type="button" id="verifyOtpBtn">Verify OTP →</button><button class="btn" style="width:100%;margin-top:8px" type="button" id="resendOtpBtn">Resend OTP</button></div>
 </section>
 </main>
@@ -175,13 +183,21 @@ function showLogin(message=""){
 }
 function showDashboard(){document.getElementById("loginView").classList.add("hidden");document.getElementById("dashboardView").classList.remove("hidden");document.getElementById("navActions").classList.remove("hidden");}
 async function showBuildVersion(){
+  const page=document.getElementById("diagPage"),api=document.getElementById("diagApi"),ver=document.getElementById("diagVersion");
+  if(page)page.textContent="✅ Page: supplier-dashboard.html loaded";
   try{
     const r=await fetch("/api/version",{cache:"no-store"});
-    if(!r.ok)return;
+    if(!r.ok)throw new Error("HTTP "+r.status);
     const d=await r.json();
+    const build=d.build||"unknown";
     const el=document.getElementById("buildInfo");
-    if(el)el.textContent="Build: "+(d.build||"unknown");
-  }catch{}
+    if(el)el.textContent="Build: "+build;
+    if(ver)ver.textContent="✅ Build: "+build;
+    if(api)api.textContent="✅ API: /api/version reachable";
+  }catch(e){
+    if(api)api.textContent="❌ API: /api/version failed: "+e.message;
+    if(ver)ver.textContent="⚠️ Build: could not read server build";
+  }
 }
 async function loadDashboard(){
   try{
@@ -293,11 +309,19 @@ async function requestOtp(){
     s.textContent=accepted
       ? "✅ SMTP accepted the OTP for "+email+". Check Inbox and Junk/Spam. "+(data.smtpResponse||"")+(data.requestId?" Request ID: "+data.requestId:"")
       : "⚠️ The request reached SupplyDesk, but the mail server did not accept the recipient."+(rejected?" Rejected: "+data.smtpRejected.join(", "):"")+(data.requestId?" Request ID: "+data.requestId:"");
+    const diag=document.getElementById("diagOtp");
+    if(diag)diag.textContent=accepted
+      ? "✅ OTP test: API succeeded + SMTP accepted recipient | Request ID: "+(data.requestId||"n/a")
+      : "⚠️ OTP test: API succeeded but SMTP did not accept recipient | Request ID: "+(data.requestId||"n/a");
     s.className="notice success";s.classList.remove("hidden");
     document.getElementById("loginOtp").focus();
   }catch(e){
     s.textContent=e.name==="AbortError"?"❌ OTP request timed out after 20 seconds. No confirmation was received from the server. Please try again.":"❌ "+(e.message||"Could not send OTP.");
     s.className="notice error";s.classList.remove("hidden");
+    const diag=document.getElementById("diagOtp");
+    if(diag)diag.textContent=e.name==="AbortError"
+      ? "❌ OTP test: browser timed out waiting for API response"
+      : "❌ OTP test failed: "+(e.message||"Unknown error");
   }finally{
     clearTimeout(timer);btn.disabled=false;btn.textContent="Resend 6-Digit OTP";
   }
