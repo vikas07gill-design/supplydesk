@@ -123,7 +123,7 @@ const supplierUpdateLimiter = rateLimit({
 
 const supplierDashboardLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 10,
+  limit: 100,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many dashboard access requests. Please try again later." }
