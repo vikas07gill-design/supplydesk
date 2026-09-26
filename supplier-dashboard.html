@@ -268,9 +268,19 @@ function editProduct(id){const p=findProduct(id);if(p)openProduct(p)}
 async function archiveProduct(id){if(!confirm("Remove this product from your public listings?"))return;try{await api("/api/supplier-dashboard/products/"+id,{method:"DELETE"});await loadDashboard()}catch(e){alert(e.message)}}
 
 async function requestOtp(){
-  const btn=document.getElementById("loginBtn"),s=document.getElementById("loginStatus"),email=document.getElementById("loginEmail").value.trim();
+  const btn=document.getElementById("loginBtn"),s=document.getElementById("loginStatus"),email=document.getElementById("loginEmail").value.trim(),otpStep=document.getElementById("otpStep");
+  if(!email){s.textContent="Please enter your registered business email.";s.className="notice error";s.classList.remove("hidden");return}
+  otpStep.style.display="block";
   btn.disabled=true;btn.textContent="Sending OTP...";
-  try{const r=await fetch("/api/supplier-dashboard/request-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});const data=await r.json();if(!r.ok)throw new Error(data.error||"Could not send OTP.");s.textContent=data.message;s.className="notice success";s.classList.remove("hidden");const otpStep=document.getElementById("otpStep");otpStep.style.display="block";document.getElementById("loginOtp").focus();}catch(e){s.textContent=e.message;s.className="notice error";s.classList.remove("hidden")}finally{btn.disabled=false;btn.textContent="Resend 6-Digit OTP"}
+  try{
+    const r=await fetch("/api/supplier-dashboard/request-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
+    const data=await r.json();
+    if(!r.ok)throw new Error(data.error||"Could not send OTP.");
+    s.textContent=data.message+" Check Inbox and Junk/Spam.";s.className="notice success";s.classList.remove("hidden");
+    document.getElementById("loginOtp").focus();
+  }catch(e){
+    s.textContent=e.message;s.className="notice error";s.classList.remove("hidden");
+  }finally{btn.disabled=false;btn.textContent="Resend 6-Digit OTP"}
 }
 document.getElementById("loginForm").onsubmit=async e=>{e.preventDefault();await requestOtp()};
 document.getElementById("resendOtpBtn").onclick=requestOtp;
