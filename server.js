@@ -528,8 +528,12 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
   if (!supplierId || !customerName || !customerEmail) return res.status(400).json({ error: "Name and email are required." });
   if (!/^\S+@\S+\.\S+$/.test(customerEmail)) return res.status(400).json({ error: "Please enter a valid email address." });
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) return res.status(503).json({ error: "Connection email service is not configured yet." });
+  const requestId = crypto.randomUUID();
   try {
-    const [[supplier]] = await pool.execute("SELECT id, legal_name, trade_name, business_email, category, subcategory FROM supplier_profiles WHERE id = ? AND verified = 1 AND published = 1", [supplierId]);
+    const [[supplier]] = await pool.execute(
+      "SELECT id, legal_name, trade_name, business_email, category, subcategory FROM supplier_profiles WHERE id = ? AND verified = 1 AND published = 1",
+      [supplierId]
+    );
     if (!supplier || !supplier.business_email) return res.status(404).json({ error: "Supplier contact is not available." });
     const supplierName = supplier.trade_name || supplier.legal_name;
     const subject = "SupplyDesk: New connection request" + (productName ? " for " + productName : "");
@@ -544,16 +548,37 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
       "",
       "Please contact the customer directly to continue the discussion.",
       "",
-      "This connection was initiated on SupplyDesk."
+      "This connection was initiated on SupplyDesk.",
+      "Request ID: " + requestId
     ].filter(Boolean).join("\n");
-    await pool.execute("INSERT INTO connect_requests (id, supplier_id, customer_name, customer_email, customer_phone, product_name, source_action, message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [crypto.randomUUID(), supplierId, customerName, customerEmail, customerPhone, productName, sourceAction, message]);
-    await mailer.sendMail({ from: process.env.SMTP_FROM, to: supplier.business_email, replyTo: customerEmail, subject, text });
-    res.status(201).json({ ok: true, message: "Connection request sent to the supplier." });
+    await pool.execute(
+      "INSERT INTO connect_requests (id, supplier_id, customer_name, customer_email, customer_phone, product_name, source_action, message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [requestId, supplierId, customerName, customerEmail, customerPhone, productName, sourceAction, message]
+    );
+    try {
+      const info = await mailer.sendMail({
+        from: process.env.SMTP_FROM,
+        to: supplier.business_email,
+        replyTo: customerEmail,
+        subject,
+        text
+      });
+      console.log("Connection email sent:", {requestId, supplierId, to: supplier.business_email, messageId: info.messageId});
+      return res.status(201).json({ ok: true, message: "Connection request sent to the supplier." });
+    } catch (mailError) {
+      console.error("Connection email delivery failed:", {
+        requestId, supplierId, to: supplier.business_email,
+        code: mailError?.code, responseCode: mailError?.responseCode, command: mailError?.command,
+        response: mailError?.response, message: mailError?.message
+      });
+      return res.status(502).json({ error: "Connection request was saved, but the supplier email could not be delivered. Please try again.", requestId });
+    }
   } catch (error) {
-    console.error("Connection request failed:", error);
-    res.status(500).json({ error: "Could not send the connection request. Please try again." });
+    console.error("Connection request failed:", {requestId, supplierId, code:error?.code, message:error?.message});
+    res.status(500).json({ error: "Could not save the connection request. Please try again.", requestId });
   }
 });
+
 
 app.post("/api/supplier-update/request", supplierUpdateLimiter, async (req, res) => {
   const email = clean(req.body?.email, 255).toLowerCase();
