@@ -594,11 +594,14 @@ app.use((err, req, res, next) => {
 });
 
 async function start() {
+  // Production database tables are managed through database/hostinger.sql.
+  // Avoid running CREATE TABLE during app startup because the runtime DB user
+  // may not have DDL privileges.
   try {
-    await ensureConnectRequestsTable();
-    app.listen(PORT, () => console.log(\`SupplyDesk running on port \${PORT}\`));
+    await pool.query("SELECT 1");
+    app.listen(PORT, () => console.log(`SupplyDesk running on port ${PORT}`));
   } catch (error) {
-    console.error("Database initialization failed:", error);
+    console.error("Database connection failed:", error);
     process.exit(1);
   }
 }
