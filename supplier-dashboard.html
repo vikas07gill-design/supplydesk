@@ -17,7 +17,7 @@ header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0
 .hidden{display:none!important}.dashboard{padding-bottom:50px}
 .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:10px 0 18px}.metric{background:#fff;border:1px solid var(--line);border-radius:16px;padding:17px}.metric small{display:block;color:var(--muted);font-size:11px;font-weight:800}.metric strong{display:block;font-size:28px;margin-top:5px;letter-spacing:-.04em}
 .grid{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}.card{background:#fff;border:1px solid var(--line);border-radius:17px;padding:18px;margin-bottom:14px}.card h2{font-size:18px;margin:0 0 5px}.card-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:14px}.muted{color:var(--muted);font-size:12px;line-height:1.55}
-.product{border:1px solid var(--line);border-radius:13px;padding:13px;margin:9px 0}.product-head{display:flex;justify-content:space-between;gap:10px}.product-title{font-weight:900}.badge{display:inline-block;padding:4px 8px;border-radius:999px;background:var(--soft);color:#28636b;font-size:10px;font-weight:900;text-transform:capitalize}.badge.pending{background:var(--warn);color:#85671d}.badge.rejected{background:#fff0f0;color:#8f3333}.product-meta{font-size:11px;color:var(--muted);margin-top:6px}.product-actions{display:flex;gap:7px;margin-top:10px}.product-actions button{padding:7px 9px;font-size:11px}
+.product{border:1px solid var(--line);border-radius:13px;padding:13px;margin:9px 0}.product-head{display:flex;justify-content:space-between;gap:10px}.product-title{font-weight:900}.badge{display:inline-block;padding:4px 8px;border-radius:999px;background:var(--soft);color:#28636b;font-size:10px;font-weight:900;text-transform:capitalize}.badge.pending{background:var(--warn);color:#85671d}.badge.rejected{background:#fff0f0;color:#8f3333}.product-meta{font-size:11px;color:var(--muted);margin-top:6px}.product-actions{display:flex;gap:7px;margin-top:10px}.product-actions button{padding:7px 9px;font-size:11px}.product-images{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.product-images img{width:72px;height:72px;object-fit:cover;border-radius:9px;border:1px solid var(--line)}.image-note{font-size:10px;color:var(--muted);margin-top:7px}
 .connections{max-height:530px;overflow:auto}.connection{padding:12px 0;border-bottom:1px solid #edf2f4}.connection:last-child{border-bottom:0}.connection b{font-size:13px}.connection small{display:block;color:var(--muted);margin-top:4px;line-height:1.5}
 .profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.full{grid-column:1/-1}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}.empty{padding:25px 8px;text-align:center;color:var(--muted);font-size:12px}
 @media(max-width:900px){.metrics{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr}}@media(max-width:600px){.nav{height:auto;padding:12px 0}.hero h1{font-size:31px}.metrics{grid-template-columns:1fr 1fr}.profile-grid{grid-template-columns:1fr}.full{grid-column:auto}.brand .word{font-size:20px}.nav .btn{padding:8px 10px;font-size:11px}}
@@ -106,6 +106,7 @@ header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0
 <div class="field"><label>Unit</label><input id="productUnit" placeholder="pcs / kg / ton / set"></div>
 <div class="field full"><label>Market</label><select id="productMarket"><option>Both</option><option>Domestic</option><option>International</option></select></div>
 <div class="field full"><label>Description</label><textarea id="productDescription" placeholder="Tell buyers what you supply, specifications, capacity or key details."></textarea></div>
+<div class="field full"><label>Product images</label><input id="productImages" type="file" accept="image/jpeg,image/png,image/webp" multiple><div class="image-note">Up to 6 images, max 5 MB each. Images are reviewed before becoming public.</div><div id="imagePreview" class="product-images"></div></div>
 </div>
 <div id="productStatus" class="notice hidden"></div>
 <div class="actions"><button class="btn primary" type="submit" id="productBtn">Submit for Review</button></div>
@@ -181,7 +182,10 @@ function renderProfileSummary(s){document.getElementById("profileSummary").inner
 function renderProducts(items){
   const el=document.getElementById("products");
   if(!items.length){el.innerHTML='<div class="empty">No products yet. Add your first product listing.</div>';return}
-  el.innerHTML=items.map(p=>'<div class="product"><div class="product-head"><div><div class="product-title">'+esc(p.product_name)+'</div><div class="product-meta">'+esc(p.category)+' → '+esc(p.subcategory)+' · '+esc(p.market_scope)+'</div></div><span class="badge '+esc(p.status)+'">'+esc(p.status)+'</span></div><div class="product-meta">'+esc(p.description||"No description added.")+(p.moq?' · MOQ: '+esc(p.moq):"")+(p.unit?' · Unit: '+esc(p.unit):"")+'</div>'+(p.admin_notes?'<div class="notice">'+esc(p.admin_notes)+'</div>':"")+'<div class="product-actions"><button class="btn" onclick="editProduct(\''+p.id+'\')">Edit</button><button class="btn danger" onclick="archiveProduct(\''+p.id+'\')">Remove</button></div></div>').join("");
+  el.innerHTML=items.map(p=>{
+    const imgs=(p.images||[]).filter(x=>x.status!=="archived").map(x=>'<img src="/api/supplier-dashboard/products/'+encodeURIComponent(p.id)+'/images/'+encodeURIComponent(x.id)+'" alt="'+esc(p.product_name)+'">').join("");
+    return '<div class="product"><div class="product-head"><div><div class="product-title">'+esc(p.product_name)+'</div><div class="product-meta">'+esc(p.category)+' → '+esc(p.subcategory)+' · '+esc(p.market_scope)+'</div></div><span class="badge '+esc(p.status)+'">'+esc(p.status)+'</span></div><div class="product-meta">'+esc(p.description||"No description added.")+(p.moq?' · MOQ: '+esc(p.moq):"")+(p.unit?' · Unit: '+esc(p.unit):"")+'</div>'+(imgs?'<div class="product-images">'+imgs+'</div>':"")+(p.admin_notes?'<div class="notice">'+esc(p.admin_notes)+'</div>':"")+'<div class="product-actions"><button class="btn" onclick="editProduct(\''+p.id+'\')">Edit</button><button class="btn danger" onclick="archiveProduct(\''+p.id+'\')">Remove</button></div></div>';
+  }).join("");
 }
 function renderConnections(items){
   const el=document.getElementById("connections");
@@ -206,6 +210,8 @@ function openProduct(product){
   document.getElementById("productUnit").value=product?.unit||"";
   document.getElementById("productMarket").value=product?.market_scope||"Both";
   document.getElementById("productDescription").value=product?.description||"";
+  document.getElementById("productImages").value="";
+  document.getElementById("imagePreview").innerHTML=(product?.images||[]).filter(x=>x.status!=="archived").map(x=>'<img src="/api/supplier-dashboard/products/'+encodeURIComponent(product.id)+'/images/'+encodeURIComponent(x.id)+'" alt="">').join("");
   document.getElementById("productStatus").classList.add("hidden");
 }
 function closeProduct(){document.getElementById("productModal").classList.add("hidden")}
@@ -221,7 +227,17 @@ document.getElementById("loginForm").onsubmit=async e=>{
 document.getElementById("productForm").onsubmit=async e=>{
   e.preventDefault();const id=document.getElementById("productId").value;const btn=document.getElementById("productBtn"),s=document.getElementById("productStatus");btn.disabled=true;btn.textContent="Saving...";
   const body={product_name:document.getElementById("productName").value.trim(),category:document.getElementById("productCategory").value,subcategory:document.getElementById("productSubcategory").value,moq:document.getElementById("productMoq").value.trim(),unit:document.getElementById("productUnit").value.trim(),market_scope:document.getElementById("productMarket").value,description:document.getElementById("productDescription").value.trim()};
-  try{const d=await api(id?"/api/supplier-dashboard/products/"+id:"/api/supplier-dashboard/products",{method:id?"PATCH":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});s.textContent=d.message;s.className="notice success";s.classList.remove("hidden");setTimeout(async()=>{closeProduct();await loadDashboard()},700)}catch(e){s.textContent=e.message;s.className="notice error";s.classList.remove("hidden")}finally{btn.disabled=false;btn.textContent=id?"Submit Changes for Review":"Submit for Review"}
+  try{
+    const d=await api(id?"/api/supplier-dashboard/products/"+id:"/api/supplier-dashboard/products",{method:id?"PATCH":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const productId=id||d.id;
+    const files=document.getElementById("productImages").files;
+    if(files.length){
+      const fd=new FormData();for(const f of files)fd.append("productImages",f);
+      const imgResult=await api("/api/supplier-dashboard/products/"+encodeURIComponent(productId)+"/images",{method:"POST",body:fd});
+      s.textContent=imgResult.message;
+    }else s.textContent=d.message;
+    s.className="notice success";s.classList.remove("hidden");setTimeout(async()=>{closeProduct();await loadDashboard()},900)
+  }catch(e){s.textContent=e.message;s.className="notice error";s.classList.remove("hidden")}finally{btn.disabled=false;btn.textContent=id?"Submit Changes for Review":"Submit for Review"}
 };
 
 document.getElementById("profileForm").onsubmit=async e=>{
@@ -239,6 +255,9 @@ document.getElementById("profileForm").onsubmit=async e=>{
 };
 
 async function logout(){try{await api("/api/supplier-dashboard/logout",{method:"POST"})}catch{}localStorage.removeItem(dashboardKey);showLogin("You have signed out.");}
+document.getElementById("productImages").addEventListener("change",e=>{
+  document.getElementById("imagePreview").innerHTML=Array.from(e.target.files).slice(0,6).map(f=>'<div><img src="'+URL.createObjectURL(f)+'" alt=""><div class="image-note">'+esc(f.name)+'</div></div>').join("");
+});
 fillCategorySelect();
 if(new URLSearchParams(location.search).get("token"))localStorage.setItem(dashboardKey,new URLSearchParams(location.search).get("token"));
 if(token())loadDashboard();else showLogin();
