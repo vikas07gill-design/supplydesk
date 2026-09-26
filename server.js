@@ -207,16 +207,6 @@ async function sendSupplierDashboardOtp(supplier) {
   const otp = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
   const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
 
-  await pool.execute(
-    "UPDATE supplier_dashboard_otps SET used_at=NOW() WHERE supplier_id=? AND used_at IS NULL",
-    [supplier.id]
-  );
-
-  await pool.execute(
-    "INSERT INTO supplier_dashboard_otps (id,supplier_id,otp_hash,expires_at,attempts) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 10 MINUTE),0)",
-    [crypto.randomUUID(), supplier.id, otpHash]
-  );
-
   const info = await mailer.sendMail({
     from: process.env.SMTP_FROM,
     to: supplier.business_email,
@@ -230,8 +220,22 @@ async function sendSupplierDashboardOtp(supplier) {
       "Do not share this code with anyone.",
       "",
       "If you did not request dashboard access, you can ignore this email."
-    ].join("\n")
+    ].join("\n"),
+    headers: {
+      "X-SupplyDesk-OTP": "dashboard",
+      "X-SupplyDesk-Supplier": String(supplier.id)
+    }
   });
+
+  await pool.execute(
+    "UPDATE supplier_dashboard_otps SET used_at=NOW() WHERE supplier_id=? AND used_at IS NULL",
+    [supplier.id]
+  );
+
+  await pool.execute(
+    "INSERT INTO supplier_dashboard_otps (id,supplier_id,otp_hash,expires_at,attempts) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 10 MINUTE),0)",
+    [crypto.randomUUID(), supplier.id, otpHash]
+  );
 
   return { messageId: info.messageId };
 }
@@ -882,7 +886,7 @@ app.post("/api/supplier-update/:token", supplierUpdateLimiter,
 );
 
 
-app.post("/api/supplier-dashboard/request-otp", async (req,res)=>{
+app.post("/api/supplier-dashboard/request-otp", supplierDashboardLimiter, async (req,res)=>{
   const email=clean(req.body?.email,255).trim().toLowerCase();
   const requestId=crypto.randomUUID();
   if(!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({error:"Please enter a valid business email address.",requestId});
