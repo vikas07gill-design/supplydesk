@@ -48,7 +48,7 @@ async function testConnectionStorage(){
   }catch(e){document.getElementById("message").textContent=e.message}
 }
 async function testDashboardEmail(){
-  const supplierId=prompt("Enter supplier ID to send a dashboard test email:");
+  const supplierId=prompt("Enter supplier registered business email (or supplier ID):");
   if(!supplierId)return;
   try{
     const data=await api("/api/admin/test-dashboard-email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({supplierId:supplierId.trim()})});
