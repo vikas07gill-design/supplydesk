@@ -36,8 +36,8 @@ header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0
 <div class="eyebrow">Supplier workspace</div><h1>Manage your SupplyDesk business.</h1>
 <p>Enter your registered business email. We will send a 6-digit OTP. No password or dashboard link is required.</p>
 <div class="field"><label>Registered business email</label><input id="loginEmail" type="email" placeholder="business@example.com"></div><button class="btn primary" style="width:100%" type="button" id="loginBtn" onclick="requestOtp()">Send 6-Digit OTP →</button>
+<div id="loginStatus" class="notice hidden" aria-live="polite"></div>
 <div id="otpStep" style="display:block;margin-top:14px"><div class="field"><label>6-digit OTP</label><input id="loginOtp" inputmode="numeric" maxlength="6" pattern="\d{6}" placeholder="Enter OTP"></div><button class="btn primary" style="width:100%" type="button" id="verifyOtpBtn">Verify OTP →</button><button class="btn" style="width:100%;margin-top:8px" type="button" id="resendOtpBtn">Resend OTP</button></div>
-<div id="loginStatus" class="notice hidden"></div>
 </section>
 </main>
 
@@ -271,20 +271,19 @@ async function requestOtp(){
   const btn=document.getElementById("loginBtn"),s=document.getElementById("loginStatus"),email=document.getElementById("loginEmail").value.trim(),otpStep=document.getElementById("otpStep");
   if(!email){s.textContent="❌ Please enter your registered business email.";s.className="notice error";s.classList.remove("hidden");return}
   otpStep.style.display="block";
-  s.textContent="⏳ Triggering OTP request... Please wait.";s.className="notice";s.classList.remove("hidden");
+  s.textContent="⏳ Sending OTP request to SupplyDesk...";s.className="notice";s.classList.remove("hidden");
   btn.disabled=true;btn.textContent="Sending OTP...";
   const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),15000);
+  const timer=setTimeout(()=>controller.abort(),20000);
   try{
-    s.textContent="📨 Connecting to SupplyDesk email service...";
     const r=await fetch("/api/supplier-dashboard/request-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email}),signal:controller.signal});
     const data=await r.json().catch(()=>({}));
-    if(!r.ok)throw new Error(data.error||("Server returned HTTP "+r.status));
-    s.textContent="✅ OTP request triggered successfully. Check Inbox and Junk/Spam for the 6-digit code."+(data.requestId?" Request ID: "+data.requestId:"");
+    if(!r.ok)throw new Error((data.error||("Server returned HTTP "+r.status))+(data.requestId?" | Request ID: "+data.requestId:""));
+    s.textContent="✅ OTP email sent successfully to "+email+". Please check Inbox and Junk/Spam. "+(data.requestId?"Request ID: "+data.requestId:"");
     s.className="notice success";s.classList.remove("hidden");
     document.getElementById("loginOtp").focus();
   }catch(e){
-    s.textContent=e.name==="AbortError"?"❌ The OTP request timed out after 15 seconds. Please try again.":"❌ "+(e.message||"Could not send OTP.");
+    s.textContent=e.name==="AbortError"?"❌ OTP request timed out after 20 seconds. No confirmation was received from the server. Please try again.":"❌ "+(e.message||"Could not send OTP.");
     s.className="notice error";s.classList.remove("hidden");
   }finally{
     clearTimeout(timer);btn.disabled=false;btn.textContent="Resend 6-Digit OTP";
