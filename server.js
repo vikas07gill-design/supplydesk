@@ -180,6 +180,22 @@ const updateUpload = multer({
   }
 });
 
+const productImageStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(UPLOAD_DIR, "supplier-products", clean(req.params.id, 80));
+    fs.mkdirSync(dir, { recursive: true }); cb(null, dir);
+  },
+  filename: (req, file, cb) => cb(null, crypto.randomUUID() + path.extname(file.originalname).toLowerCase())
+});
+const productImageUpload = multer({
+  storage: productImageStorage,
+  limits: { files: 6, fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (!["image/jpeg","image/png","image/webp"].includes(file.mimetype)) return cb(new Error("Product images must be JPG, PNG or WEBP."));
+    cb(null, true);
+  }
+});
+
 const mailer = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT || 465),
@@ -693,6 +709,9 @@ app.get("/api/supplier-dashboard/products", requireSupplierDashboard, async (req
     "SELECT id,product_name,category,subcategory,description,moq,unit,market_scope,status,admin_notes,created_at,updated_at FROM supplier_products WHERE supplier_id=? AND status <> 'archived' ORDER BY updated_at DESC",
     [req.supplier.id]
   );
+  const ids=products.map(p=>p.id); let files=[];
+  if(ids.length){const ph=ids.map(()=>"?").join(",");[files]=await pool.execute("SELECT id,product_id,original_name,mime_type,file_size,status,created_at FROM supplier_product_files WHERE product_id IN ("+ph+") AND status <> 'archived' ORDER BY created_at",ids);}
+  const by={};for(const f of files)(by[f.product_id] ||= []).push(f);for(const p of products)p.images=by[p.id]||[];
   res.json({products});
 });
 
@@ -741,6 +760,47 @@ app.delete("/api/supplier-dashboard/products/:id", requireSupplierDashboard, asy
   const [result]=await pool.execute("UPDATE supplier_products SET status='archived' WHERE id=? AND supplier_id=?",[clean(req.params.id,80),req.supplier.id]);
   if(!result.affectedRows) return res.status(404).json({error:"Product not found."});
   res.json({ok:true});
+});
+
+app.post("/api/supplier-dashboard/products/:id/images", requireSupplierDashboard, (req,res,next)=>productImageUpload.array("productImages",6)(req,res,next), async (req,res)=>{
+  const productId=clean(req.params.id,80);
+  try{
+    const [[product]]=await pool.execute("SELECT id FROM supplier_products WHERE id=? AND supplier_id=? AND status <> 'archived'",[productId,req.supplier.id]);
+    if(!product){for(const f of (req.files||[]))fs.rmSync(f.path,{force:true});return res.status(404).json({error:"Product not found."});}
+    if(!req.files?.length)return res.status(400).json({error:"Please select at least one product image."});
+    const rows=req.files.map(f=>[crypto.randomUUID(),productId,clean(f.originalname,255),path.basename(f.path),path.relative(UPLOAD_DIR,f.path).split(path.sep).join("/"),f.mimetype,f.size,"pending"]);
+    await pool.query("INSERT INTO supplier_product_files (id,product_id,original_name,stored_name,relative_path,mime_type,file_size,status) VALUES ?",[rows]);
+    await pool.execute("UPDATE supplier_products SET status='pending',admin_notes=NULL,reviewed_at=NULL,reviewed_by=NULL WHERE id=? AND supplier_id=?",[productId,req.supplier.id]);
+    res.status(201).json({ok:true,message:"Images uploaded. The product is back in review and will be published after SupplyDesk approval."});
+  }catch(error){for(const f of (req.files||[]))fs.rmSync(f.path,{force:true});console.error(error);res.status(500).json({error:"Could not upload product images."});}
+});
+
+app.delete("/api/supplier-dashboard/products/:productId/images/:imageId", requireSupplierDashboard, async (req,res)=>{
+  try{
+    const [[f]]=await pool.execute("SELECT f.id FROM supplier_product_files f JOIN supplier_products p ON p.id=f.product_id WHERE f.id=? AND f.product_id=? AND p.supplier_id=? AND f.status <> 'archived'",[clean(req.params.imageId,80),clean(req.params.productId,80),req.supplier.id]);
+    if(!f)return res.status(404).json({error:"Image not found."});
+    await pool.execute("UPDATE supplier_product_files SET status='archived' WHERE id=?",[f.id]);res.json({ok:true});
+  }catch(error){res.status(500).json({error:"Could not remove image."});}
+});
+
+app.get("/api/products/:productId/images/:imageId", async (req,res)=>{
+  try{
+    const [[f]]=await pool.execute("SELECT f.relative_path,f.original_name,f.mime_type FROM supplier_product_files f JOIN supplier_products p ON p.id=f.product_id JOIN supplier_profiles s ON s.id=p.supplier_id WHERE f.id=? AND f.product_id=? AND f.status='approved' AND p.status='approved' AND s.verified=1 AND s.published=1",[clean(req.params.imageId,80),clean(req.params.productId,80)]);
+    if(!f)return res.status(404).json({error:"Image not found."});
+    const absolute=path.resolve(UPLOAD_DIR,f.relative_path),root=path.resolve(UPLOAD_DIR);
+    if(!absolute.startsWith(root+path.sep)||!fs.existsSync(absolute))return res.status(404).json({error:"Image not found."});
+    res.setHeader("Content-Type",f.mime_type);res.setHeader("Content-Disposition",`inline; filename="${f.original_name.replace(/["\\]/g,"")}"`);res.sendFile(absolute);
+  }catch(error){res.status(500).json({error:"Could not load image."});}
+});
+
+app.get("/api/admin/product-files/:id", requireAdmin, async (req,res)=>{
+  try{
+    const [[f]]=await pool.execute("SELECT relative_path,original_name,mime_type FROM supplier_product_files WHERE id=?",[clean(req.params.id,80)]);
+    if(!f)return res.status(404).json({error:"Image not found."});
+    const absolute=path.resolve(UPLOAD_DIR,f.relative_path),root=path.resolve(UPLOAD_DIR);
+    if(!absolute.startsWith(root+path.sep)||!fs.existsSync(absolute))return res.status(404).json({error:"Image not found."});
+    res.setHeader("Content-Type",f.mime_type);res.setHeader("Content-Disposition",`inline; filename="${f.original_name.replace(/["\\]/g,"")}"`);res.sendFile(absolute);
+  }catch(error){res.status(500).json({error:"Could not open image."});}
 });
 
 app.post("/api/suppliers/:id/view", async (req,res) => {
@@ -807,11 +867,13 @@ app.get("/api/products/:id", async (req,res) => {
       [req.params.id]
     );
     if(!p) return res.status(404).json({error:"Product not found."});
+    const [images]=await pool.execute("SELECT id,original_name FROM supplier_product_files WHERE product_id=? AND status='approved' ORDER BY created_at",[p.id]);
     res.json({product:{
       id:p.id,name:p.product_name,category:p.category,subcategory:p.subcategory,description:p.description,
       moq:p.moq,unit:p.unit,market_scope:p.market_scope,supplierId:p.supplier_id,
       supplierName:p.trade_name||p.legal_name,supplierType:p.business_type,country:p.country,city:p.city,
-      website:p.website
+      website:p.website,
+      images:images.map(x=>({id:x.id,name:x.original_name,url:"/api/products/"+encodeURIComponent(p.id)+"/images/"+encodeURIComponent(x.id)}))
     }});
   }catch(error){console.error(error);res.status(500).json({error:"Could not load product."});}
 });
@@ -926,11 +988,18 @@ app.get("/api/admin/products", requireAdmin, async (req,res)=>{
   }catch(error){console.error(error);res.status(500).json({error:"Could not load products."});}
 });
 
+app.get("/api/admin/products/:id/images", requireAdmin, async (req,res)=>{
+  try{const [images]=await pool.execute("SELECT id,product_id,original_name,mime_type,file_size,status,admin_notes,created_at FROM supplier_product_files WHERE product_id=? AND status <> 'archived' ORDER BY created_at",[clean(req.params.id,80)]);res.json({images});}
+  catch(error){res.status(500).json({error:"Could not load product images."});}
+});
+
 app.patch("/api/admin/products/:id", requireAdmin, async (req,res)=>{
   const status=clean(req.body?.status,30), notes=clean(req.body?.adminNotes,4000);
   if(!["approved","rejected","pending"].includes(status)) return res.status(400).json({error:"Invalid product status."});
   try{
     const [result]=await pool.execute("UPDATE supplier_products SET status=?,admin_notes=?,reviewed_at=NOW(),reviewed_by=? WHERE id=?",[status,notes||null,"admin",clean(req.params.id,80)]);
+    if(status==="approved") await pool.execute("UPDATE supplier_product_files SET status='approved',admin_notes=?,reviewed_at=NOW(),reviewed_by='admin' WHERE product_id=? AND status='pending'",[notes||null,clean(req.params.id,80)]);
+    if(status==="rejected") await pool.execute("UPDATE supplier_product_files SET status='rejected',admin_notes=?,reviewed_at=NOW(),reviewed_by='admin' WHERE product_id=? AND status='pending'",[notes||null,clean(req.params.id,80)]);
     if(!result.affectedRows) return res.status(404).json({error:"Product not found."});
     res.json({ok:true,status});
   }catch(error){console.error(error);res.status(500).json({error:"Could not review product."});}
