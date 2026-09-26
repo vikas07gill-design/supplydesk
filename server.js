@@ -121,6 +121,42 @@ const supplierUpdateLimiter = rateLimit({
   message: { error: "Too many update requests. Please try again later." }
 });
 
+const supplierDashboardLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many dashboard access requests. Please try again later." }
+});
+
+function dashboardTokenHash(token) {
+  return crypto.createHash("sha256").update(String(token)).digest("hex");
+}
+
+async function requireSupplierDashboard(req, res, next) {
+  const rawToken = clean(req.get("x-supplier-dashboard-token"), 128);
+  if (!rawToken) return res.status(401).json({ error: "Dashboard access required." });
+  try {
+    const [[supplier]] = await pool.execute(
+      `SELECT s.id, s.application_id, s.legal_name, s.trade_name, s.business_type, s.country, s.city,
+              s.address, s.website, s.business_email, s.business_phone, s.contact_person, s.designation,
+              s.category, s.subcategory, s.verified, s.published, t.id AS token_id, t.expires_at
+       FROM supplier_dashboard_tokens t
+       JOIN supplier_profiles s ON s.id = t.supplier_id
+       WHERE t.token_hash = ? AND t.revoked_at IS NULL
+         AND t.expires_at > NOW() AND s.verified = 1 AND s.published = 1`,
+      [dashboardTokenHash(rawToken)]
+    );
+    if (!supplier) return res.status(401).json({ error: "Dashboard link is expired or invalid." });
+    await pool.execute("UPDATE supplier_dashboard_tokens SET last_used_at=NOW() WHERE id=?", [supplier.token_id]);
+    req.supplier = supplier;
+    next();
+  } catch (error) {
+    console.error("Supplier dashboard auth failed:", error);
+    res.status(500).json({ error: "Could not authenticate dashboard." });
+  }
+}
+
 const updateStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     const updateId = req.updateId || crypto.randomUUID();
@@ -535,6 +571,241 @@ app.post("/api/supplier-update/:token", supplierUpdateLimiter,
   }
 );
 
+
+app.post("/api/supplier-dashboard/request-access", supplierDashboardLimiter, async (req, res) => {
+  const email = clean(req.body?.email, 255).toLowerCase();
+  if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: "Please enter a valid business email address." });
+  try {
+    const [[supplier]] = await pool.execute(
+      "SELECT id, legal_name, trade_name, business_email FROM supplier_profiles WHERE business_email=? AND verified=1 AND published=1",
+      [email]
+    );
+    if (supplier) {
+      const rawToken = crypto.randomBytes(32).toString("hex");
+      await pool.execute(
+        "INSERT INTO supplier_dashboard_tokens (id,supplier_id,token_hash,expires_at) VALUES (?,?,?,DATE_ADD(NOW(), INTERVAL 24 HOUR))",
+        [crypto.randomUUID(), supplier.id, dashboardTokenHash(rawToken)]
+      );
+      const origin = String(process.env.PUBLIC_ORIGIN || "").replace(/\/$/, "");
+      const link = origin + "/supplier-dashboard.html?token=" + encodeURIComponent(rawToken);
+      await mailer.sendMail({
+        from: process.env.SMTP_FROM,
+        to: supplier.business_email,
+        subject: "SupplyDesk: Your supplier dashboard access",
+        text: [
+          "You requested access to your SupplyDesk supplier dashboard.",
+          "",
+          "Open this secure link within 24 hours:",
+          link,
+          "",
+          "From the dashboard you can manage products, submit profile updates for review and view your SupplyDesk activity.",
+          "",
+          "If you did not request this, you can ignore this email."
+        ].join("\n")
+      });
+    }
+    res.json({ok:true,message:"If the email belongs to a verified SupplyDesk supplier, a dashboard link has been sent."});
+  } catch(error) {
+    console.error("Supplier dashboard access failed:",error);
+    res.status(500).json({error:"Could not send the dashboard link. Please try again."});
+  }
+});
+
+app.get("/api/supplier-dashboard", requireSupplierDashboard, async (req,res) => {
+  try {
+    const supplierId=req.supplier.id;
+    const [[counts]]=await pool.execute(
+      `SELECT
+        (SELECT COUNT(*) FROM supplier_products WHERE supplier_id=? AND status <> 'archived') AS product_count,
+        (SELECT COUNT(*) FROM supplier_products WHERE supplier_id=? AND status='approved') AS approved_products,
+        (SELECT COUNT(*) FROM supplier_products WHERE supplier_id=? AND status='pending') AS pending_products,
+        (SELECT COUNT(*) FROM supplier_profile_views WHERE supplier_id=? AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS profile_views_30d,
+        (SELECT COUNT(DISTINCT visitor_hash) FROM supplier_profile_views WHERE supplier_id=? AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS unique_visitors_30d,
+        (SELECT COUNT(*) FROM connect_requests WHERE supplier_id=? AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS connections_30d`,
+      [supplierId,supplierId,supplierId,supplierId,supplierId,supplierId]
+    );
+    const [products]=await pool.execute(
+      "SELECT id,product_name,category,subcategory,description,moq,unit,market_scope,status,admin_notes,created_at,updated_at FROM supplier_products WHERE supplier_id=? AND status <> 'archived' ORDER BY updated_at DESC LIMIT 100",
+      [supplierId]
+    );
+    const [connections]=await pool.execute(
+      "SELECT id,customer_name,customer_email,customer_phone,product_name,source_action,message,created_at FROM connect_requests WHERE supplier_id=? ORDER BY created_at DESC LIMIT 20",
+      [supplierId]
+    );
+    const [[pendingUpdate]]=await pool.execute(
+      "SELECT id,status,submitted_at,admin_notes FROM supplier_update_requests WHERE supplier_id=? AND status IN ('pending','query') ORDER BY submitted_at DESC LIMIT 1",
+      [supplierId]
+    );
+    res.json({
+      supplier:{
+        id:req.supplier.id,legal_name:req.supplier.legal_name,trade_name:req.supplier.trade_name,business_type:req.supplier.business_type,
+        country:req.supplier.country,city:req.supplier.city,address:req.supplier.address,website:req.supplier.website,
+        business_email:req.supplier.business_email,business_phone:req.supplier.business_phone,contact_person:req.supplier.contact_person,
+        designation:req.supplier.designation,category:req.supplier.category,subcategory:req.supplier.subcategory,verified:true
+      },
+      metrics:{
+        product_count:Number(counts.product_count||0),approved_products:Number(counts.approved_products||0),
+        pending_products:Number(counts.pending_products||0),profile_views_30d:Number(counts.profile_views_30d||0),
+        unique_visitors_30d:Number(counts.unique_visitors_30d||0),connections_30d:Number(counts.connections_30d||0)
+      },
+      products,connections,pendingUpdate
+    });
+  } catch(error) {
+    console.error("Supplier dashboard load failed:",error);
+    res.status(500).json({error:"Could not load dashboard."});
+  }
+});
+
+app.post("/api/supplier-dashboard/logout", requireSupplierDashboard, async (req,res) => {
+  const rawToken=clean(req.get("x-supplier-dashboard-token"),128);
+  await pool.execute("UPDATE supplier_dashboard_tokens SET revoked_at=NOW() WHERE token_hash=?",[dashboardTokenHash(rawToken)]);
+  res.json({ok:true});
+});
+
+app.post("/api/supplier-dashboard/profile-update", requireSupplierDashboard, async (req,res) => {
+  const allowed=["legal_name","trade_name","business_type","country","city","address","business_email","business_phone","contact_person","designation","website","category","subcategory"];
+  const changes={};
+  for(const key of allowed){
+    if(req.body && Object.prototype.hasOwnProperty.call(req.body,key)){
+      const value=clean(req.body[key], key==="address"?4000:500);
+      if(value) changes[key]=value;
+    }
+  }
+  if(changes.business_email && !/^\S+@\S+\.\S+$/.test(changes.business_email)) return res.status(400).json({error:"Please enter a valid business email."});
+  if(changes.category && (!catalog[changes.category] || (changes.subcategory && !catalog[changes.category].includes(changes.subcategory)))) return res.status(400).json({error:"Invalid category or sub-category."});
+  if(changes.subcategory && !catalog[changes.category || req.supplier.category]?.includes(changes.subcategory)) return res.status(400).json({error:"Invalid sub-category."});
+  if(!Object.keys(changes).length) return res.status(400).json({error:"No changes submitted."});
+  try{
+    const id=crypto.randomUUID();
+    await pool.execute(
+      "INSERT INTO supplier_update_requests (id,supplier_id,status,payload_json) VALUES (?,?, 'pending', ?)",
+      [id,req.supplier.id,JSON.stringify(changes)]
+    );
+    res.status(201).json({ok:true,message:"Profile changes submitted for SupplyDesk review. Your public profile will stay unchanged until approval."});
+  }catch(error){
+    console.error("Dashboard profile update failed:",error);
+    res.status(500).json({error:"Could not submit profile update."});
+  }
+});
+
+app.get("/api/supplier-dashboard/products", requireSupplierDashboard, async (req,res) => {
+  const [products]=await pool.execute(
+    "SELECT id,product_name,category,subcategory,description,moq,unit,market_scope,status,admin_notes,created_at,updated_at FROM supplier_products WHERE supplier_id=? AND status <> 'archived' ORDER BY updated_at DESC",
+    [req.supplier.id]
+  );
+  res.json({products});
+});
+
+app.post("/api/supplier-dashboard/products", requireSupplierDashboard, async (req,res) => {
+  const productName=clean(req.body?.product_name,255);
+  const category=clean(req.body?.category,180);
+  const subcategory=clean(req.body?.subcategory,180);
+  const description=clean(req.body?.description,3000)||null;
+  const moq=clean(req.body?.moq,120)||null;
+  const unit=clean(req.body?.unit,80)||null;
+  const marketScope=["Domestic","International","Both"].includes(req.body?.market_scope)?req.body.market_scope:"Both";
+  if(!productName||!category||!subcategory) return res.status(400).json({error:"Product name, category and sub-category are required."});
+  if(!catalog[category]||!catalog[category].includes(subcategory)) return res.status(400).json({error:"Invalid category or sub-category."});
+  try{
+    const id=crypto.randomUUID();
+    await pool.execute(
+      "INSERT INTO supplier_products (id,supplier_id,product_name,category,subcategory,description,moq,unit,market_scope,status) VALUES (?,?,?,?,?,?,?,?,?,'pending')",
+      [id,req.supplier.id,productName,category,subcategory,description,moq,unit,marketScope]
+    );
+    res.status(201).json({ok:true,id,message:"Product submitted for SupplyDesk review."});
+  }catch(error){
+    console.error("Supplier product create failed:",error);
+    res.status(500).json({error:"Could not add product."});
+  }
+});
+
+app.patch("/api/supplier-dashboard/products/:id", requireSupplierDashboard, async (req,res) => {
+  const id=clean(req.params.id,80);
+  const [[product]]=await pool.execute("SELECT * FROM supplier_products WHERE id=? AND supplier_id=? AND status <> 'archived'",[id,req.supplier.id]);
+  if(!product) return res.status(404).json({error:"Product not found."});
+  const fields={};
+  for(const key of ["product_name","category","subcategory","description","moq","unit"]){
+    if(Object.prototype.hasOwnProperty.call(req.body||{},key)) fields[key]=clean(req.body[key], key==="description"?3000:500)||null;
+  }
+  if(Object.prototype.hasOwnProperty.call(req.body||{},"market_scope")) fields.market_scope=["Domestic","International","Both"].includes(req.body.market_scope)?req.body.market_scope:"Both";
+  const category=fields.category||product.category, subcategory=fields.subcategory||product.subcategory;
+  if(!catalog[category]||!catalog[category].includes(subcategory)) return res.status(400).json({error:"Invalid category or sub-category."});
+  const keys=Object.keys(fields);
+  if(!keys.length) return res.status(400).json({error:"No changes submitted."});
+  const set=keys.map(k=k+"=?").join(",");
+  await pool.execute("UPDATE supplier_products SET "+set+", status='pending', admin_notes=NULL, reviewed_at=NULL, reviewed_by=NULL WHERE id=? AND supplier_id=?",[...keys.map(k=>fields[k]),id,req.supplier.id]);
+  res.json({ok:true,message:"Product changes submitted for review."});
+});
+
+app.delete("/api/supplier-dashboard/products/:id", requireSupplierDashboard, async (req,res) => {
+  const [result]=await pool.execute("UPDATE supplier_products SET status='archived' WHERE id=? AND supplier_id=?",[clean(req.params.id,80),req.supplier.id]);
+  if(!result.affectedRows) return res.status(404).json({error:"Product not found."});
+  res.json({ok:true});
+});
+
+app.post("/api/suppliers/:id/view", async (req,res) => {
+  const supplierId=clean(req.params.id,80);
+  try{
+    const [[supplier]]=await pool.execute("SELECT id FROM supplier_profiles WHERE id=? AND verified=1 AND published=1",[supplierId]);
+    if(!supplier) return res.status(404).json({error:"Supplier not found."});
+    const visitorHash=crypto.createHash("sha256").update(String(process.env.ADMIN_TOKEN||"")+"|"+String(req.ip||"")+"|"+String(req.get("user-agent")||"")).digest("hex");
+    await pool.execute(
+      "INSERT IGNORE INTO supplier_profile_views (id,supplier_id,visitor_hash,viewed_on) VALUES (?,?,?,CURRENT_DATE())",
+      [crypto.randomUUID(),supplierId,visitorHash]
+    );
+    res.json({ok:true});
+  }catch(error){
+    console.error("Supplier view tracking failed:",error);
+    res.status(500).json({error:"Could not record view."});
+  }
+});
+
+app.get("/api/products", async (req,res) => {
+  const q=clean(req.query.q,200).toLowerCase();
+  const category=clean(req.query.category,180);
+  const country=clean(req.query.country,100);
+  const params=[];
+  let sql=`SELECT p.id,p.product_name,p.category,p.subcategory,p.description,p.moq,p.unit,p.market_scope,
+                   s.id AS supplier_id,s.legal_name,s.trade_name,s.business_type,s.country,s.city
+            FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id
+            WHERE p.status='approved' AND s.verified=1 AND s.published=1`;
+  if(category){sql+=" AND p.category=?";params.push(category);}
+  if(country){sql+=" AND s.country=?";params.push(country);}
+  if(q){
+    sql+=" AND (LOWER(p.product_name) LIKE ? OR LOWER(p.category) LIKE ? OR LOWER(p.subcategory) LIKE ? OR LOWER(COALESCE(p.description,'')) LIKE ? OR LOWER(s.legal_name) LIKE ? OR LOWER(COALESCE(s.trade_name,'')) LIKE ?)";
+    const like="%"+q+"%"; params.push(like,like,like,like,like,like);
+  }
+  sql+=" ORDER BY p.updated_at DESC LIMIT 200";
+  try{
+    const [rows]=await pool.execute(sql,params);
+    res.json({products:rows.map(p=>({
+      id:p.id,name:p.product_name,type:"product",city:p.city,country:p.country,
+      market:p.market_scope,desc:p.description||`${p.category} · ${p.subcategory}`,category:p.category,
+      subcategories:[p.subcategory],tags:[p.category,p.subcategory,p.business_type],supplierId:p.supplier_id,
+      supplierName:p.trade_name||p.legal_name,verified:true
+    }))});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not load products."});}
+});
+
+app.get("/api/products/:id", async (req,res) => {
+  try{
+    const [[p]]=await pool.execute(
+      `SELECT p.id,p.product_name,p.category,p.subcategory,p.description,p.moq,p.unit,p.market_scope,
+              s.id AS supplier_id,s.legal_name,s.trade_name,s.business_type,s.country,s.city,s.website
+       FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id
+       WHERE p.id=? AND p.status='approved' AND s.verified=1 AND s.published=1`,
+      [req.params.id]
+    );
+    if(!p) return res.status(404).json({error:"Product not found."});
+    res.json({product:{
+      id:p.id,name:p.product_name,category:p.category,subcategory:p.subcategory,description:p.description,
+      moq:p.moq,unit:p.unit,market_scope:p.market_scope,supplierId:p.supplier_id,
+      supplierName:p.trade_name||p.legal_name,supplierType:p.business_type,country:p.country,city:p.city,
+      website:p.website
+    }});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not load product."});}
+});
+
 app.get("/api/suppliers/:id", async (req, res) => {
   try {
     const [[row]] = await pool.execute(
@@ -631,6 +902,28 @@ app.patch("/api/admin/supplier-updates/:id", requireAdmin, async (req,res)=>{
     res.json({ok:true,status});
   } catch(error) { await conn.rollback(); console.error(error); res.status(500).json({error:"Could not update supplier profile."}); }
   finally { conn.release(); }
+});
+
+
+app.get("/api/admin/products", requireAdmin, async (req,res)=>{
+  try{
+    const status=["pending","approved","rejected","archived"].includes(clean(req.query.status,30))?clean(req.query.status,30):"pending";
+    const [rows]=await pool.execute(
+      "SELECT p.id,p.product_name,p.category,p.subcategory,p.description,p.moq,p.unit,p.market_scope,p.status,p.admin_notes,p.created_at,p.updated_at,s.legal_name,s.trade_name,s.country,s.city FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id WHERE p.status=? ORDER BY p.created_at DESC LIMIT 200",
+      [status]
+    );
+    res.json({products:rows});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not load products."});}
+});
+
+app.patch("/api/admin/products/:id", requireAdmin, async (req,res)=>{
+  const status=clean(req.body?.status,30), notes=clean(req.body?.adminNotes,4000);
+  if(!["approved","rejected","pending"].includes(status)) return res.status(400).json({error:"Invalid product status."});
+  try{
+    const [result]=await pool.execute("UPDATE supplier_products SET status=?,admin_notes=?,reviewed_at=NOW(),reviewed_by=? WHERE id=?",[status,notes||null,"admin",clean(req.params.id,80)]);
+    if(!result.affectedRows) return res.status(404).json({error:"Product not found."});
+    res.json({ok:true,status});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not review product."});}
 });
 
 app.get("/api/admin/supplier-update-files/:id", requireAdmin, async (req,res)=>{
