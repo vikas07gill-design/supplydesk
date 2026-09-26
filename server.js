@@ -122,7 +122,7 @@ const supplierUpdateLimiter = rateLimit({
 });
 
 const supplierDashboardLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
+  windowMs: 15 * 60 * 1000,
   limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
@@ -863,8 +863,12 @@ app.post("/api/supplier-dashboard/request-otp", supplierDashboardLimiter, async 
   const email=clean(req.body?.email,255).toLowerCase();
   if(!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({error:"Please enter a valid business email address."});
   try{
-    const [[supplier]]=await pool.execute("SELECT id,business_email FROM supplier_profiles WHERE business_email=? AND verified=1 AND published=1",[email]);
+    const [[supplier]]=await pool.execute(
+      "SELECT id,business_email FROM supplier_profiles WHERE LOWER(TRIM(business_email))=LOWER(TRIM(?)) AND verified=1 AND published=1 LIMIT 1",
+      [email]
+    );
     if(supplier){
+      console.log("Supplier dashboard OTP requested:", {supplierId:supplier.id, email:supplier.business_email});
       const otp=String(crypto.randomInt(0,1000000)).padStart(6,"0");
       const otpHash=crypto.createHash("sha256").update(otp).digest("hex");
       await pool.execute("UPDATE supplier_dashboard_otps SET used_at=NOW() WHERE supplier_id=? AND used_at IS NULL",[supplier.id]);
