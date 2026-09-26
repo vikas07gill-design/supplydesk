@@ -997,6 +997,20 @@ app.get("/api/admin/applications", requireAdmin, async (req, res) => {
   }
 });
 
+app.patch("/api/super-admin/suppliers/:id/email", requireSuperAdmin, async (req,res)=>{
+  const email=String(req.body?.businessEmail||"").trim().toLowerCase();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return res.status(400).json({error:"Please enter a valid business email."});
+  try{
+    const [[supplier]]=await pool.execute("SELECT id,application_id FROM supplier_profiles WHERE id=?",[clean(req.params.id,80)]);
+    if(!supplier)return res.status(404).json({error:"Supplier not found."});
+    const [[existing]]=await pool.execute("SELECT id FROM supplier_profiles WHERE business_email=? AND id<>? LIMIT 1",[email,supplier.id]);
+    if(existing)return res.status(409).json({error:"This email is already linked to another supplier."});
+    await pool.execute("UPDATE supplier_profiles SET business_email=? WHERE id=?",[email,supplier.id]);
+    if(supplier.application_id)await pool.execute("UPDATE supplier_applications SET business_email=? WHERE id=?",[email,supplier.application_id]);
+    res.json({ok:true,businessEmail:email,message:"Supplier business email updated successfully."});
+  }catch(error){console.error("Supplier email update failed:",error);res.status(500).json({error:"Could not update supplier email."});}
+});
+
 app.get("/api/super-admin/suppliers/:id", requireSuperAdmin, async (req,res)=>{
   try{
     const [[supplier]]=await pool.execute("SELECT * FROM supplier_profiles WHERE id=?",[clean(req.params.id,80)]);
