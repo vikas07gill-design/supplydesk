@@ -12,6 +12,7 @@ const nodemailer = require("nodemailer");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
+const BUILD_VERSION = process.env.SUPPLYDESK_BUILD || "otp-fix-2026-09-26-01";
 const ROOT = __dirname;
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(ROOT, "private-uploads");
 
@@ -33,6 +34,15 @@ app.set("trust proxy", 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: "same-site" } }));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+app.use((req, res, next) => {
+  res.setHeader("X-SupplyDesk-Build", BUILD_VERSION);
+  if (req.path.endsWith(".html")) {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+  }
+  next();
+});
 
 const applicationLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -439,6 +449,10 @@ app.get("/api/health", async (req, res) => {
   } catch {
     res.status(503).json({ ok: false, database: "unavailable" });
   }
+});
+
+app.get("/api/version", (req, res) => {
+  res.json({ ok: true, build: BUILD_VERSION, node: process.version, serverTime: new Date().toISOString() });
 });
 
 app.get("/api/categories", (req, res) => {
@@ -902,7 +916,7 @@ app.post("/api/supplier-dashboard/request-otp", supplierDashboardLimiter, async 
     console.log("Supplier dashboard OTP email starting:",{requestId,supplierId:supplier.id,to:supplier.business_email});
     const info=await sendSupplierDashboardOtp(supplier);
     console.log("Supplier dashboard OTP email sent:",{requestId,supplierId:supplier.id,to:supplier.business_email,messageId:info.messageId});
-    res.json({ok:true,message:"OTP sent successfully. Check your email.",requestId});
+    res.json({ok:true,message:"OTP sent successfully. Check your email.",requestId,messageId:info.messageId,accepted:Array.isArray(info.accepted)?info.accepted:[]});
   }catch(error){
     console.error("Supplier dashboard OTP email failed:",{
       requestId,code:error?.code,responseCode:error?.responseCode,command:error?.command,response:error?.response,message:error?.message
