@@ -50,6 +50,21 @@ header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0
 <div class="metric"><small>Approved products</small><strong id="approvedProducts">0</strong></div>
 </div>
 <div id="dashboardStatus"></div>
+<div class="card"><div class="card-head"><div><h2>Business Profile</h2><div class="muted">Add the information customers need to understand your capability. Changes require SupplyDesk approval.</div></div></div>
+<div class="profile-grid">
+<div class="field full"><label>Company Profile / About</label><textarea id="detailAbout" maxlength="2000" placeholder="Company background, experience, capabilities and what you supply."></textarea></div>
+<div class="field full"><label>Capabilities</label><textarea id="detailCapabilities" maxlength="1500" placeholder="Manufacturing, trading, sourcing, processing or service capabilities."></textarea></div>
+<div class="field"><label>Industries Served</label><input id="detailIndustries" placeholder="Automotive, packaging, electronics..."></div>
+<div class="field"><label>Markets Served</label><input id="detailMarkets" placeholder="India, UAE, Europe, domestic..."></div>
+<div class="field"><label>Monthly Capacity</label><input id="detailCapacity" placeholder="e.g. 500 MT / month"></div>
+<div class="field"><label>Typical Lead Time</label><input id="detailLeadTime" placeholder="e.g. 15-30 days"></div>
+<div class="field"><label>Payment Terms</label><input id="detailPayment" placeholder="Advance, LC, 30 days..."></div>
+<div class="field"><label>Incoterms</label><input id="detailIncoterms" placeholder="EXW, FOB, CIF, DDP..."></div>
+<div class="field"><label>Shipping Modes</label><input id="detailShipping" placeholder="Sea, Air, Road, Courier"></div>
+<div class="field"><label>Certifications</label><input id="detailCertifications" placeholder="ISO, CE, BIS, etc."></div>
+<div class="field"><label>OEM Available</label><select id="detailOem"><option value="">Select</option><option>Yes</option><option>No</option></select></div>
+<div class="field"><label>Custom Manufacturing</label><select id="detailCustom"><option value="">Select</option><option>Yes</option><option>No</option></select></div>
+</div><div class="actions"><button class="btn primary" onclick="submitBusinessProfile()">Submit Business Profile for Review</button></div><div id="profileDetailStatus" class="notice hidden"></div></div>
 
 <div class="grid">
 <section>
@@ -163,7 +178,7 @@ async function loadDashboard(){
     const d=await api("/api/supplier-dashboard");dashboardData=d;showDashboard();
     history.replaceState({},document.title,"supplier-dashboard.html");
     const s=d.supplier;
-    document.getElementById("welcome").textContent="Welcome, "+(s.trade_name||s.legal_name);
+    fillBusinessDetails(data.supplier.profileDetails); document.getElementById("welcome").textContent="Welcome, "+(s.trade_name||s.legal_name);
     document.getElementById("views").textContent=d.metrics.profile_views_30d;
     document.getElementById("unique").textContent=d.metrics.unique_visitors_30d;
     document.getElementById("connectionsCount").textContent=d.metrics.connections_30d;
@@ -179,6 +194,15 @@ function fillProfile(s){
   Object.entries(map).forEach(([id,key])=>document.getElementById(id).value=s[key]||"");
 }
 function renderProfileSummary(s){document.getElementById("profileSummary").innerHTML='<strong>'+esc(s.trade_name||s.legal_name)+'</strong><br>'+esc(s.city)+', '+esc(s.country)+'<br>'+esc(s.category)+' → '+esc(s.subcategory)+'<br><span class="badge">✓ SupplyDesk Verified</span>';document.getElementById("viewProfile").href="supplier.html?id="+encodeURIComponent(s.id)}
+function fillBusinessDetails(d){
+  d=d||{}; const map={detailAbout:"about",detailCapabilities:"capabilities",detailIndustries:"industries",detailMarkets:"markets",detailCapacity:"monthlyCapacity",detailLeadTime:"leadTime",detailPayment:"paymentTerms",detailIncoterms:"incoterms",detailShipping:"shippingModes",detailCertifications:"certifications",detailOem:"oem",detailCustom:"customManufacturing"};
+  Object.entries(map).forEach(([id,k])=>{const el=document.getElementById(id);if(el)el.value=d[k]||""});
+}
+async function submitBusinessProfile(){
+  const s=document.getElementById("profileDetailStatus"),btn=event.currentTarget;
+  const profileDetails={about:document.getElementById("detailAbout").value,capabilities:document.getElementById("detailCapabilities").value,industries:document.getElementById("detailIndustries").value,markets:document.getElementById("detailMarkets").value,monthlyCapacity:document.getElementById("detailCapacity").value,leadTime:document.getElementById("detailLeadTime").value,paymentTerms:document.getElementById("detailPayment").value,incoterms:document.getElementById("detailIncoterms").value,shippingModes:document.getElementById("detailShipping").value,certifications:document.getElementById("detailCertifications").value,oem:document.getElementById("detailOem").value,customManufacturing:document.getElementById("detailCustom").value};
+  btn.disabled=true;try{const d=await api("/api/supplier-dashboard/profile-update",{method:"POST",body:JSON.stringify({profileDetails}),headers:{"Content-Type":"application/json"}});s.textContent=d.message;s.className="notice success";s.classList.remove("hidden")}catch(e){s.textContent=e.message;s.className="notice error";s.classList.remove("hidden")}finally{btn.disabled=false}
+}
 function renderProducts(items){
   const el=document.getElementById("products");
   if(!items.length){el.innerHTML='<div class="empty">No products yet. Add your first product listing.</div>';return}
