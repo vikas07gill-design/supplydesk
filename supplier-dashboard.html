@@ -227,7 +227,15 @@ document.getElementById("productForm").onsubmit=async e=>{
 document.getElementById("profileForm").onsubmit=async e=>{
   e.preventDefault();const btn=document.getElementById("profileBtn");btn.disabled=true;btn.textContent="Submitting...";
   const body={};new FormData(e.currentTarget).forEach((v,k)=>body[k]=String(v).trim());
-  try{const d=await api("/api/supplier-dashboard/profile-update",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});document.getElementById("dashboardStatus").innerHTML='<div class="notice success">'+esc(d.message)+'</div>'}catch(e){document.getElementById("dashboardStatus").innerHTML='<div class="notice error">'+esc(e.message)+'</div>}finally{btn.disabled=false;btn.textContent="Submit Profile Update for Review"}
+  try{
+    const d=await api("/api/supplier-dashboard/profile-update",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    document.getElementById("dashboardStatus").innerHTML="<div class=\"notice success\">"+esc(d.message)+"</div>";
+  }catch(err){
+    document.getElementById("dashboardStatus").innerHTML="<div class=\"notice error\">"+esc(err.message)+"</div>";
+  }finally{
+    btn.disabled=false;
+    btn.textContent="Submit Profile Update for Review";
+  }
 };
 
 async function logout(){try{await api("/api/supplier-dashboard/logout",{method:"POST"})}catch{}localStorage.removeItem(dashboardKey);showLogin("You have signed out.");}
