@@ -1007,14 +1007,14 @@ app.get("/api/super-admin/suppliers/:id", requireSuperAdmin, async (req,res)=>{
   }catch(error){console.error(error);res.status(500).json({error:"Could not load confidential supplier details."});}
 });
 
-app.get("/api/admin/supplier-updates", requireAdmin, async (req,res)=>{
+app.get("/api/admin/supplier-updates", requireSuperAdmin, async (req,res)=>{
   try {
     const [rows]=await pool.execute("SELECT u.id,u.status,u.created_at,u.reviewed_at,s.legal_name,s.trade_name,s.business_email,s.country,s.city FROM supplier_update_requests u JOIN supplier_profiles s ON s.id=u.supplier_id ORDER BY u.created_at DESC LIMIT 200");
     res.json({updates:rows});
   } catch(error) { console.error(error); res.status(500).json({error:"Could not load supplier updates."}); }
 });
 
-app.get("/api/admin/supplier-updates/:id", requireAdmin, async (req,res)=>{
+app.get("/api/admin/supplier-updates/:id", requireSuperAdmin, async (req,res)=>{
   try {
     const [[update]]=await pool.execute("SELECT u.*,s.legal_name,s.trade_name,s.business_email,s.business_phone,s.contact_person,s.category,s.subcategory FROM supplier_update_requests u JOIN supplier_profiles s ON s.id=u.supplier_id WHERE u.id=?",[req.params.id]);
     if(!update)return res.status(404).json({error:"Update not found."});
@@ -1023,7 +1023,7 @@ app.get("/api/admin/supplier-updates/:id", requireAdmin, async (req,res)=>{
   } catch(error) { console.error(error); res.status(500).json({error:"Could not load supplier update."}); }
 });
 
-app.patch("/api/admin/supplier-updates/:id", requireAdmin, async (req,res)=>{
+app.patch("/api/admin/supplier-updates/:id", requireSuperAdmin, async (req,res)=>{
   const status=clean(req.body?.status,30), notes=clean(req.body?.adminNotes,4000);
   if(!["approved","query","rejected"].includes(status))return res.status(400).json({error:"Invalid update status."});
   const conn=await pool.getConnection();
@@ -1079,7 +1079,7 @@ app.patch("/api/admin/products/:id", requireAdmin, async (req,res)=>{
   }catch(error){console.error(error);res.status(500).json({error:"Could not review product."});}
 });
 
-app.get("/api/admin/supplier-update-files/:id", requireAdmin, async (req,res)=>{
+app.get("/api/admin/supplier-update-files/:id", requireSuperAdmin, async (req,res)=>{
   try {
     const [[file]]=await pool.execute("SELECT original_name,mime_type,relative_path FROM supplier_update_files WHERE id=?",[req.params.id]);
     if(!file)return res.status(404).json({error:"File not found."});
@@ -1091,7 +1091,7 @@ app.get("/api/admin/supplier-update-files/:id", requireAdmin, async (req,res)=>{
   } catch(error) { console.error(error); res.status(500).json({error:"Could not open file."}); }
 });
 
-app.get("/api/admin/files/:id", requireAdmin, async (req, res) => {
+app.get("/api/admin/files/:id", requireSuperAdmin, async (req, res) => {
   try {
     const [[file]] = await pool.execute(
       "SELECT stored_name, relative_path, original_name, mime_type FROM supplier_files WHERE id = ?",
