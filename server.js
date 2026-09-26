@@ -314,12 +314,12 @@ app.get("/api/admin/test-connection-storage", requireAdmin, async (req,res)=>{
 });
 
 app.post("/api/admin/test-dashboard-email", requireAdmin, async (req,res)=>{
-  const supplierId=clean(req.body?.supplierId,80);
-  if(!supplierId)return res.status(400).json({error:"Supplier ID is required."});
+  const supplierId=clean(req.body?.supplierId,255);
+  if(!supplierId)return res.status(400).json({error:"Supplier ID or registered business email is required."});
   try{
     const [[supplier]]=await pool.execute(
-      "SELECT id,legal_name,trade_name,business_email,verified,published FROM supplier_profiles WHERE id=?",
-      [supplierId]
+      "SELECT id,legal_name,trade_name,business_email,verified,published FROM supplier_profiles WHERE id=? OR LOWER(business_email)=LOWER(?) LIMIT 1",
+      [supplierId,supplierId]
     );
     if(!supplier)return res.status(404).json({error:"Supplier not found."});
     if(!supplier.verified || !supplier.published)return res.status(400).json({error:"Supplier is not verified/published."});
