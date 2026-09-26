@@ -110,18 +110,15 @@ document.getElementById('category').onchange=()=>{
   render();
 };
 
-async function loadLiveSuppliers(){
+async function loadLiveData(){
   try{
-    const response=await fetch('/api/suppliers');
-    if(!response.ok) return;
-    const json=await response.json();
-    const live=(json.suppliers||[]).map(x=>({...x,market:'All markets'}));
-    data=[...live,...demoData];
-    render();
-  }catch(e){
-    render();
-  }
+    const [supplierResponse,productResponse]=await Promise.all([fetch('/api/suppliers'),fetch('/api/products')]);
+    const suppliers=supplierResponse.ok?(await supplierResponse.json()).suppliers||[]:[];
+    const products=productResponse.ok?(await productResponse.json()).products||[]:[];
+    data=[...suppliers.map(x=>({...x,market:x.market||'All markets'})),...products.map(x=>({...x,market:x.market||'All markets'})),...demoData];
+  }catch(e){}
+  render();
 }
 
 render();
-loadLiveSuppliers();</script></body></html>
+loadLiveData();</script></body></html>
