@@ -275,7 +275,20 @@ async function updateConnectionStatus(id,status){
 function renderConnections(items){
   const el=document.getElementById("connections");
   if(!items.length){el.innerHTML='<div class="empty">No connection requests yet.</div>';return}
-  el.innerHTML=items.map(c=>'<div class="connection"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b>'+esc(c.customer_name)+'</b><span class="badge">'+esc(connectionStatusLabel(c.status||"new"))+'</span></div><small><a href="mailto:'+esc(c.customer_email)+'">'+esc(c.customer_email)+'</a>'+(c.customer_phone?' · '+esc(c.customer_phone):"")+'</small><small>'+(c.product_name?'Requirement: '+esc(c.product_name):"General supplier enquiry")+' · '+new Date(c.created_at).toLocaleString()+'</small>'+(c.message?'<small>'+esc(c.message)+'</small>':"")+'<div class="product-actions"><button class="btn" onclick="updateConnectionStatus(\\''+esc(c.id)+'\\',\\'contacted\\')">Contacted</button><button class="btn" onclick="updateConnectionStatus(\\''+esc(c.id)+'\\',\\'in_discussion\\')">In Discussion</button><button class="btn" onclick="updateConnectionStatus(\\''+esc(c.id)+'\\',\\'closed\\')">Closed</button></div></div>').join("");
+  el.innerHTML=items.map(c=>`
+    <div class="connection">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+        <b>${esc(c.customer_name)}</b><span class="badge">${esc(connectionStatusLabel(c.status||"new"))}</span>
+      </div>
+      <small><a href="mailto:${esc(c.customer_email)}">${esc(c.customer_email)}</a>${c.customer_phone?' · '+esc(c.customer_phone):''}</small>
+      <small>${c.product_name?'Requirement: '+esc(c.product_name):'General supplier enquiry'} · ${new Date(c.created_at).toLocaleString()}</small>
+      ${c.message?'<small>'+esc(c.message)+'</small>':''}
+      <div class="product-actions">
+        <button class="btn" onclick="updateConnectionStatus('${esc(c.id)}','contacted')">Contacted</button>
+        <button class="btn" onclick="updateConnectionStatus('${esc(c.id)}','in_discussion')">In Discussion</button>
+        <button class="btn" onclick="updateConnectionStatus('${esc(c.id)}','closed')">Closed</button>
+      </div>
+    </div>`).join("");
 }
 function fillCategorySelect(){
   const cat=document.getElementById("productCategory"),sub=document.getElementById("productSubcategory");
