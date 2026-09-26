@@ -12,7 +12,7 @@ const nodemailer = require("nodemailer");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-const BUILD_VERSION = process.env.SUPPLYDESK_BUILD || "otp-fix-2026-09-26-01";
+const BUILD_VERSION = process.env.SUPPLYDESK_BUILD || "dashboard-otp-mekr-fix-2026-09-27-01";
 const ROOT = __dirname;
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(ROOT, "private-uploads");
 
@@ -213,30 +213,51 @@ const mailer = nodemailer.createTransport({
   auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD }
 });
 
-async function sendSupplierDashboardOtp(supplier) {
+async function sendSupplierDashboardOtp(supplier, requestId = "") {
   const otp = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
   const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
+  const traceId = String(requestId || crypto.randomUUID()).replace(/[^a-zA-Z0-9-]/g, "").slice(0, 36);
+  const subject = "SupplyDesk dashboard verification code" + (traceId ? " [" + traceId + "]" : "");
+
+  // Keep OTP mail deliberately standard. Some corporate mail gateways score
+  // custom X-* headers or unusual transactional metadata more aggressively.
+  const text = [
+    "Hello,",
+    "",
+    "Your SupplyDesk supplier dashboard verification code is:",
+    "",
+    otp,
+    "",
+    "This code is valid for 10 minutes.",
+    "Do not share this code with anyone.",
+    "",
+    "If you did not request dashboard access, you can ignore this email.",
+    "",
+    "SupplyDesk",
+    "Reference: " + traceId
+  ].join("\n");
+
+  const html = [
+    "<p>Hello,</p>",
+    "<p>Your SupplyDesk supplier dashboard verification code is:</p>",
+    '<p style="font-size:28px;font-weight:700;letter-spacing:6px">' + otp + "</p>",
+    "<p>This code is valid for <strong>10 minutes</strong>.</p>",
+    "<p>Do not share this code with anyone.</p>",
+    "<p>If you did not request dashboard access, you can ignore this email.</p>",
+    "<p>SupplyDesk<br><small>Reference: " + traceId + "</small></p>"
+  ].join("");
 
   const info = await mailer.sendMail({
     from: process.env.SMTP_FROM,
+    replyTo: process.env.SMTP_FROM,
     to: supplier.business_email,
-    subject: "SupplyDesk: Your 6-digit dashboard OTP",
-    text: [
-      "Your SupplyDesk supplier dashboard verification code is:",
-      "",
-      otp,
-      "",
-      "This OTP is valid for 10 minutes.",
-      "Do not share this code with anyone.",
-      "",
-      "If you did not request dashboard access, you can ignore this email."
-    ].join("\n"),
-    headers: {
-      "X-SupplyDesk-OTP": "dashboard",
-      "X-SupplyDesk-Supplier": String(supplier.id)
-    }
+    subject,
+    text,
+    html
   });
 
+  // Invalidate older codes only after SMTP has accepted the new message.
+  // This prevents a failed send from destroying the previously valid OTP.
   await pool.execute(
     "UPDATE supplier_dashboard_otps SET used_at=NOW() WHERE supplier_id=? AND used_at IS NULL",
     [supplier.id]
@@ -251,7 +272,10 @@ async function sendSupplierDashboardOtp(supplier) {
     messageId: info.messageId,
     accepted: Array.isArray(info.accepted) ? info.accepted : [],
     rejected: Array.isArray(info.rejected) ? info.rejected : [],
-    response: info.response || ""
+    response: info.response || "",
+    traceId,
+    recipient: supplier.business_email,
+    subject
   };
 }
 
