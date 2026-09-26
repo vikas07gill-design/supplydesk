@@ -268,20 +268,27 @@ function editProduct(id){const p=findProduct(id);if(p)openProduct(p)}
 async function archiveProduct(id){if(!confirm("Remove this product from your public listings?"))return;try{await api("/api/supplier-dashboard/products/"+id,{method:"DELETE"});await loadDashboard()}catch(e){alert(e.message)}}
 
 async function requestOtp(){
-  console.log("SupplyDesk: dashboard OTP request started");
   const btn=document.getElementById("loginBtn"),s=document.getElementById("loginStatus"),email=document.getElementById("loginEmail").value.trim(),otpStep=document.getElementById("otpStep");
-  if(!email){s.textContent="Please enter your registered business email.";s.className="notice error";s.classList.remove("hidden");return}
+  if(!email){s.textContent="❌ Please enter your registered business email.";s.className="notice error";s.classList.remove("hidden");return}
   otpStep.style.display="block";
+  s.textContent="⏳ Triggering OTP request... Please wait.";s.className="notice";s.classList.remove("hidden");
   btn.disabled=true;btn.textContent="Sending OTP...";
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),15000);
   try{
-    const r=await fetch("/api/supplier-dashboard/request-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
-    const data=await r.json();
-    if(!r.ok)throw new Error(data.error||"Could not send OTP.");
-    s.textContent=data.message+" Check Inbox and Junk/Spam.";s.className="notice success";s.classList.remove("hidden");
+    s.textContent="📨 Connecting to SupplyDesk email service...";
+    const r=await fetch("/api/supplier-dashboard/request-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email}),signal:controller.signal});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(data.error||("Server returned HTTP "+r.status));
+    s.textContent="✅ OTP request triggered successfully. Check Inbox and Junk/Spam for the 6-digit code.";
+    s.className="notice success";s.classList.remove("hidden");
     document.getElementById("loginOtp").focus();
   }catch(e){
-    s.textContent=e.message;s.className="notice error";s.classList.remove("hidden");
-  }finally{btn.disabled=false;btn.textContent="Resend 6-Digit OTP"}
+    s.textContent=e.name==="AbortError"?"❌ The OTP request timed out after 15 seconds. Please try again.":"❌ "+(e.message||"Could not send OTP.");
+    s.className="notice error";s.classList.remove("hidden");
+  }finally{
+    clearTimeout(timer);btn.disabled=false;btn.textContent="Resend 6-Digit OTP";
+  }
 }
 document.getElementById("resendOtpBtn").onclick=requestOtp;
 document.getElementById("verifyOtpBtn").onclick=async()=>{
