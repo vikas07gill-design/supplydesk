@@ -298,6 +298,45 @@ app.post("/api/admin/test-email", requireAdmin, async (req,res)=>{
   }
 });
 
+app.post("/api/admin/test-supplier-email", requireAdmin, async (req,res)=>{
+  const supplierId=clean(req.body?.supplierId,80);
+  if(!supplierId)return res.status(400).json({error:"Supplier ID is required."});
+  try{
+    const [[supplier]]=await pool.execute(
+      "SELECT id,legal_name,trade_name,business_email,verified,published FROM supplier_profiles WHERE id=?",
+      [supplierId]
+    );
+    if(!supplier)return res.status(404).json({error:"Supplier not found."});
+    if(!supplier.verified || !supplier.published)return res.status(400).json({error:"Supplier is not verified/published."});
+    if(!supplier.business_email)return res.status(400).json({error:"Supplier business email is missing."});
+    const info=await mailer.sendMail({
+      from:process.env.SMTP_FROM,
+      to:supplier.business_email,
+      subject:"SupplyDesk supplier email test",
+      text:[
+        "This is a test email from SupplyDesk.",
+        "",
+        "The supplier connection email channel is being tested.",
+        "Supplier: "+(supplier.trade_name||supplier.legal_name),
+        "Triggered by Admin: "+req.admin.admin_id,
+        "Sent at: "+new Date().toISOString()
+      ].join("\n")
+    });
+    const masked=supplier.business_email.replace(/^(.{2}).*(@.*)$/,"$1***$2");
+    res.json({ok:true,supplier:supplier.trade_name||supplier.legal_name,recipient:masked,messageId:info.messageId});
+  }catch(error){
+    console.error("Supplier email test failed:",{
+      supplierId,
+      code:error?.code,
+      responseCode:error?.responseCode,
+      command:error?.command,
+      response:error?.response,
+      message:error?.message
+    });
+    res.status(502).json({error:"Supplier email test failed: "+(error?.code||"SEND_ERROR")+" "+(error?.responseCode||"")+" "+(error?.message||"Unknown SMTP error")});
+  }
+});
+
 app.post("/api/admin/logout", requireAdmin, async (req,res)=>{
   const raw=clean(req.get("x-admin-token"),256);
   await pool.execute("DELETE FROM admin_sessions WHERE token_hash=?",[tokenHash(raw)]);
