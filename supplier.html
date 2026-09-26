@@ -119,4 +119,26 @@ if(id && !profiles[id]){
       },true);
     })
     .catch(()=>{});
-}</script></body></html>
+}</script><script>
+(async()=>{
+  const supplierId=new URLSearchParams(location.search).get("id")||"";
+  if(!supplierId)return;
+  fetch("/api/suppliers/"+encodeURIComponent(supplierId)+"/view",{method:"POST"}).catch(()=>{});
+  const demoIds=new Set(["abc-plastics","india-growth","asia-components","dubai-trading"]);
+  if(demoIds.has(supplierId))return;
+  try{
+    const r=await fetch("/api/suppliers/"+encodeURIComponent(supplierId)+"/products");
+    if(!r.ok)return;
+    const d=await r.json(),items=d.products||[];
+    if(!items.length)return;
+    const section=document.createElement("section");
+    section.className="card";
+    section.style.marginTop="18px";
+    section.innerHTML='<h2>Products listed on SupplyDesk</h2><div id="liveSupplierProducts" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:12px"></div>';
+    const target=document.querySelector("main");
+    if(target)target.appendChild(section);
+    const grid=section.querySelector("#liveSupplierProducts");
+    grid.innerHTML=items.map(p=>'<a href="product.html?id='+encodeURIComponent(p.id)+'" style="border:1px solid #dbe7eb;border-radius:12px;padding:13px;background:#fff"><b>'+String(p.product_name).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))+'</b><small style="display:block;color:#657983;margin-top:5px">'+String(p.category).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))+' · '+String(p.subcategory).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))+'</small></a>').join("");
+  }catch(e){}
+})();
+</script></body></html>
