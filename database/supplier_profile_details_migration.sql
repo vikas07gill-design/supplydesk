@@ -1,0 +1,1 @@
+ALTER TABLE supplier_profiles ADD COLUMN profile_details_json TEXT NULL;
