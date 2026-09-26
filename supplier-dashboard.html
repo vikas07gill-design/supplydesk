@@ -221,10 +221,17 @@ async function hydrateDashboardImages(){
     }catch{}
   }
 }
+function connectionStatusLabel(v){return ({new:"New",contacted:"Contacted",in_discussion:"In Discussion",closed:"Closed"})[v]||v}
+async function updateConnectionStatus(id,status){
+  try{
+    await api("/api/supplier-dashboard/connections/"+encodeURIComponent(id),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});
+    await loadDashboard();
+  }catch(e){alert(e.message)}
+}
 function renderConnections(items){
   const el=document.getElementById("connections");
   if(!items.length){el.innerHTML='<div class="empty">No connection requests yet.</div>';return}
-  el.innerHTML=items.map(c=>'<div class="connection"><b>'+esc(c.customer_name)+'</b><small>'+esc(c.customer_email)+(c.customer_phone?' · '+esc(c.customer_phone):"")+'</small><small>'+(c.product_name?'Requirement: '+esc(c.product_name):"General supplier enquiry")+' · '+new Date(c.created_at).toLocaleString()+'</small>'+(c.message?'<small>'+esc(c.message)+'</small>':"")+'</div>').join("");
+  el.innerHTML=items.map(c=>'<div class="connection"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b>'+esc(c.customer_name)+'</b><span class="badge">'+esc(connectionStatusLabel(c.status||"new"))+'</span></div><small><a href="mailto:'+esc(c.customer_email)+'">'+esc(c.customer_email)+'</a>'+(c.customer_phone?' · '+esc(c.customer_phone):"")+'</small><small>'+(c.product_name?'Requirement: '+esc(c.product_name):"General supplier enquiry")+' · '+new Date(c.created_at).toLocaleString()+'</small>'+(c.message?'<small>'+esc(c.message)+'</small>':"")+'<div class="product-actions"><button class="btn" onclick="updateConnectionStatus(\\''+esc(c.id)+'\\',\\'contacted\\')">Contacted</button><button class="btn" onclick="updateConnectionStatus(\\''+esc(c.id)+'\\',\\'in_discussion\\')">In Discussion</button><button class="btn" onclick="updateConnectionStatus(\\''+esc(c.id)+'\\',\\'closed\\')">Closed</button></div></div>').join("");
 }
 function fillCategorySelect(){
   const cat=document.getElementById("productCategory"),sub=document.getElementById("productSubcategory");
