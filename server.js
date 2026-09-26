@@ -215,14 +215,68 @@ function clean(value, max = 2000) {
   return String(value || "").trim().slice(0, max);
 }
 
-function requireAdmin(req, res, next) {
-  const expected = String(process.env.ADMIN_TOKEN || "").trim();
-  const received = String(req.get("x-admin-token") || "").trim();
-  if (!expected || received.length !== expected.length || received.length < 20 || !crypto.timingSafeEqual(Buffer.from(received), Buffer.from(expected))) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-  next();
+function tokenHash(token) {
+  return crypto.createHash("sha256").update(String(token)).digest("hex");
 }
+
+function safeEqual(a,b){
+  const x=Buffer.from(String(a||"")), y=Buffer.from(String(b||""));
+  return x.length===y.length && x.length>0 && crypto.timingSafeEqual(x,y);
+}
+
+async function getAdminSession(req){
+  const token=clean(req.get("x-admin-token"),256);
+  if(!token)return null;
+  const [[session]]=await pool.execute(
+    "SELECT id,role,admin_id FROM admin_sessions WHERE token_hash=? AND expires_at>NOW()",
+    [tokenHash(token)]
+  );
+  if(session){
+    await pool.execute("UPDATE admin_sessions SET last_used_at=NOW() WHERE id=?",[session.id]);
+    return session;
+  }
+  const legacy=String(process.env.ADMIN_TOKEN||"").trim();
+  if(legacy && safeEqual(token,legacy)) return {id:null,role:"admin",admin_id:"legacy-admin"};
+  return null;
+}
+
+async function requireAdmin(req,res,next){
+  try{
+    const session=await getAdminSession(req);
+    if(!session)return res.status(401).json({error:"Unauthorized"});
+    req.admin=session; next();
+  }catch(error){console.error("Admin auth failed:",error);res.status(500).json({error:"Could not authenticate admin."});}
+}
+
+async function requireSuperAdmin(req,res,next){
+  try{
+    const session=await getAdminSession(req);
+    if(!session || session.role!=="super_admin")return res.status(403).json({error:"Super Admin access required."});
+    req.admin=session; next();
+  }catch(error){console.error("Super Admin auth failed:",error);res.status(500).json({error:"Could not authenticate Super Admin."});}
+}
+
+app.post("/api/admin/login", async (req,res)=>{
+  const adminId=clean(req.body?.adminId,120);
+  const password=String(req.body?.password||"");
+  const normalId=String(process.env.ADMIN_ID||"").trim();
+  const normalPassword=String(process.env.ADMIN_PASSWORD||"");
+  const superId=String(process.env.SUPER_ADMIN_ID||"").trim();
+  const superPassword=String(process.env.SUPER_ADMIN_PASSWORD||"");
+  let role=null;
+  if(superId && safeEqual(adminId,superId) && safeEqual(password,superPassword)) role="super_admin";
+  else if(normalId && safeEqual(adminId,normalId) && safeEqual(password,normalPassword)) role="admin";
+  else return res.status(401).json({error:"Invalid Admin ID or password."});
+  const rawToken=crypto.randomBytes(32).toString("hex");
+  await pool.execute("INSERT INTO admin_sessions (id,token_hash,role,admin_id,expires_at) VALUES (?,?,?,?,DATE_ADD(NOW(),INTERVAL 12 HOUR))",[crypto.randomUUID(),tokenHash(rawToken),role,adminId]);
+  res.json({ok:true,token:rawToken,role,expiresInHours:12});
+});
+
+app.post("/api/admin/logout", requireAdmin, async (req,res)=>{
+  const raw=clean(req.get("x-admin-token"),256);
+  await pool.execute("DELETE FROM admin_sessions WHERE token_hash=?",[tokenHash(raw)]);
+  res.json({ok:true});
+});
 
 function safeDeleteApplicationFiles(applicationId) {
   const dir = path.join(UPLOAD_DIR, applicationId);
@@ -943,6 +997,16 @@ app.get("/api/admin/applications", requireAdmin, async (req, res) => {
   }
 });
 
+app.get("/api/super-admin/suppliers/:id", requireSuperAdmin, async (req,res)=>{
+  try{
+    const [[supplier]]=await pool.execute("SELECT * FROM supplier_profiles WHERE id=?",[clean(req.params.id,80)]);
+    if(!supplier)return res.status(404).json({error:"Supplier not found."});
+    const [[application]]=await pool.execute("SELECT * FROM supplier_applications WHERE id=?",[supplier.application_id]);
+    const [connections]=await pool.execute("SELECT id,customer_name,customer_email,customer_phone,product_name,source_action,message,created_at FROM connect_requests WHERE supplier_id=? ORDER BY created_at DESC LIMIT 200",[supplier.id]);
+    res.json({supplier,application,connections});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not load confidential supplier details."});}
+});
+
 app.get("/api/admin/supplier-updates", requireAdmin, async (req,res)=>{
   try {
     const [rows]=await pool.execute("SELECT u.id,u.status,u.created_at,u.reviewed_at,s.legal_name,s.trade_name,s.business_email,s.country,s.city FROM supplier_update_requests u JOIN supplier_profiles s ON s.id=u.supplier_id ORDER BY u.created_at DESC LIMIT 200");
@@ -1050,28 +1114,29 @@ app.get("/api/admin/files/:id", requireAdmin, async (req, res) => {
   }
 });
 
-app.get("/api/admin/applications/:id", requireAdmin, async (req, res) => {
+app.get("/api/admin/applications/:id", requireAdmin, async (req,res) => {
   try {
     const [[application]] = await pool.execute(
-      "SELECT * FROM supplier_applications WHERE id = ?",
+      "SELECT id,legal_name,trade_name,business_type,year_established,country,city,address,website,category,subcategory,status,admin_notes,submitted_at,reviewed_at FROM supplier_applications WHERE id=?",
       [req.params.id]
     );
-    if (!application) return res.status(404).json({ error: "Application not found." });
-
-    const [files] = await pool.execute(
-      "SELECT id, file_type, original_name, mime_type, file_size, created_at FROM supplier_files WHERE application_id = ? ORDER BY created_at",
-      [req.params.id]
-    );
-    const [[verification]] = await pool.execute(
-      "SELECT * FROM supplier_verification WHERE application_id = ?",
-      [req.params.id]
-    );
-    res.json({ application, files, verification });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Could not load application." });
-  }
+    if(!application)return res.status(404).json({error:"Application not found."});
+    const [files]=await pool.execute("SELECT id,file_type,original_name,mime_type,file_size,created_at FROM supplier_files WHERE application_id=? ORDER BY created_at",[req.params.id]);
+    const [[verification]]=await pool.execute("SELECT registration_checked,documents_checked,photos_checked,address_checked,verification_notes,verified_at,verified_by FROM supplier_verification WHERE application_id=?",[req.params.id]);
+    res.json({application,files,verification});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not load application."});}
 });
+
+app.get("/api/super-admin/applications/:id", requireSuperAdmin, async (req,res)=>{
+  try{
+    const [[application]]=await pool.execute("SELECT * FROM supplier_applications WHERE id=?",[req.params.id]);
+    if(!application)return res.status(404).json({error:"Application not found."});
+    const [files]=await pool.execute("SELECT id,file_type,original_name,mime_type,file_size,created_at FROM supplier_files WHERE application_id=? ORDER BY created_at",[req.params.id]);
+    const [[verification]]=await pool.execute("SELECT * FROM supplier_verification WHERE application_id=?",[req.params.id]);
+    res.json({application,files,verification});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not load confidential supplier details."});}
+});
+
 
 app.patch("/api/admin/applications/:id", requireAdmin, async (req, res) => {
   const status = clean(req.body?.status, 40);
