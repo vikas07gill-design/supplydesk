@@ -36,7 +36,7 @@ header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0
 <div class="eyebrow">Supplier workspace</div><h1>Manage your SupplyDesk business.</h1>
 <p>Enter your registered business email. We will send a 6-digit OTP. No password or dashboard link is required.</p>
 <div class="field"><label>Registered business email</label><input id="loginEmail" type="email" placeholder="business@example.com"></div><button class="btn primary" style="width:100%" type="button" id="loginBtn" onclick="requestOtp()">Send 6-Digit OTP →</button>
-<div id="loginStatus" class="notice hidden" aria-live="polite"></div><div id="buildInfo" style="font-size:10px;color:#8a9aa1;margin-top:8px;text-align:center"></div>
+<div id="loginStatus" class="notice hidden" aria-live="polite"></div><div id="buildInfo" style="font-size:11px;color:#087f8c;font-weight:800;margin-top:10px;text-align:center"></div>
 <div id="otpStep" style="display:block;margin-top:14px"><div class="field"><label>6-digit OTP</label><input id="loginOtp" inputmode="numeric" maxlength="6" pattern="\d{6}" placeholder="Enter OTP"></div><button class="btn primary" style="width:100%" type="button" id="verifyOtpBtn">Verify OTP →</button><button class="btn" style="width:100%;margin-top:8px" type="button" id="resendOtpBtn">Resend OTP</button></div>
 </section>
 </main>
@@ -288,7 +288,11 @@ async function requestOtp(){
     const r=await fetch("/api/supplier-dashboard/request-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email}),signal:controller.signal});
     const data=await r.json().catch(()=>({}));
     if(!r.ok)throw new Error((data.error||("Server returned HTTP "+r.status))+(data.requestId?" | Request ID: "+data.requestId:""));
-    s.textContent="✅ OTP accepted by the mail server for "+email+". Please check Inbox and Junk/Spam. "+(data.requestId?"Request ID: "+data.requestId:"");
+    const accepted = Array.isArray(data.smtpAccepted) ? data.smtpAccepted.length : 0;
+    const rejected = Array.isArray(data.smtpRejected) ? data.smtpRejected.length : 0;
+    s.textContent=accepted
+      ? "✅ SMTP accepted the OTP for "+email+". Check Inbox and Junk/Spam. "+(data.smtpResponse||"")+(data.requestId?" Request ID: "+data.requestId:"")
+      : "⚠️ The request reached SupplyDesk, but the mail server did not accept the recipient."+(rejected?" Rejected: "+data.smtpRejected.join(", "):"")+(data.requestId?" Request ID: "+data.requestId:"");
     s.className="notice success";s.classList.remove("hidden");
     document.getElementById("loginOtp").focus();
   }catch(e){
