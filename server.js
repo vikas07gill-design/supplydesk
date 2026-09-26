@@ -997,19 +997,6 @@ app.get("/api/admin/applications", requireAdmin, async (req, res) => {
   }
 });
 
-app.patch("/api/super-admin/suppliers/:id/email", requireSuperAdmin, async (req,res)=>{
-  const email=String(req.body?.businessEmail||"").trim().toLowerCase();
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return res.status(400).json({error:"Please enter a valid business email."});
-  try{
-    const [[supplier]]=await pool.execute("SELECT id,application_id FROM supplier_profiles WHERE id=?",[clean(req.params.id,80)]);
-    if(!supplier)return res.status(404).json({error:"Supplier not found."});
-    const [[existing]]=await pool.execute("SELECT id FROM supplier_profiles WHERE business_email=? AND id<>? LIMIT 1",[email,supplier.id]);
-    if(existing)return res.status(409).json({error:"This email is already linked to another supplier."});
-    await pool.execute("UPDATE supplier_profiles SET business_email=? WHERE id=?",[email,supplier.id]);
-    if(supplier.application_id)await pool.execute("UPDATE supplier_applications SET business_email=? WHERE id=?",[email,supplier.application_id]);
-    res.json({ok:true,businessEmail:email,message:"Supplier business email updated successfully."});
-  }catch(error){console.error("Supplier email update failed:",error);res.status(500).json({error:"Could not update supplier email."});}
-});
 
 app.get("/api/super-admin/suppliers/:id", requireSuperAdmin, async (req,res)=>{
   try{
@@ -1021,23 +1008,25 @@ app.get("/api/super-admin/suppliers/:id", requireSuperAdmin, async (req,res)=>{
   }catch(error){console.error(error);res.status(500).json({error:"Could not load confidential supplier details."});}
 });
 
-app.get("/api/admin/supplier-updates", requireSuperAdmin, async (req,res)=>{
+app.get("/api/admin/supplier-updates", requireAdmin, async (req,res)=>{
   try {
-    const [rows]=await pool.execute("SELECT u.id,u.status,u.created_at,u.reviewed_at,s.legal_name,s.trade_name,s.business_email,s.country,s.city FROM supplier_update_requests u JOIN supplier_profiles s ON s.id=u.supplier_id ORDER BY u.created_at DESC LIMIT 200");
+    const [rows]=await pool.execute("SELECT u.id,u.status,u.created_at,u.reviewed_at,s.legal_name,s.trade_name,s.country,s.city FROM supplier_update_requests u JOIN supplier_profiles s ON s.id=u.supplier_id ORDER BY u.created_at DESC LIMIT 200");
     res.json({updates:rows});
   } catch(error) { console.error(error); res.status(500).json({error:"Could not load supplier updates."}); }
 });
 
-app.get("/api/admin/supplier-updates/:id", requireSuperAdmin, async (req,res)=>{
+app.get("/api/admin/supplier-updates/:id", requireAdmin, async (req,res)=>{
   try {
-    const [[update]]=await pool.execute("SELECT u.*,s.legal_name,s.trade_name,s.business_email,s.business_phone,s.contact_person,s.category,s.subcategory FROM supplier_update_requests u JOIN supplier_profiles s ON s.id=u.supplier_id WHERE u.id=?",[req.params.id]);
+    const [[update]]=await pool.execute("SELECT u.*,s.legal_name,s.trade_name,s.category,s.subcategory FROM supplier_update_requests u JOIN supplier_profiles s ON s.id=u.supplier_id WHERE u.id=?",[req.params.id]);
     if(!update)return res.status(404).json({error:"Update not found."});
     const [files]=await pool.execute("SELECT id,file_type,original_name,mime_type,file_size FROM supplier_update_files WHERE update_id=? ORDER BY created_at",[req.params.id]);
-    res.json({update,payload:JSON.parse(update.payload_json||"{}"),files});
+    const payload=JSON.parse(update.payload_json||"{}");
+    if(req.admin.role!=="super_admin"){delete payload.business_email;delete payload.business_phone;delete payload.contact_person;delete payload.designation;delete payload.registration_number;delete payload.tax_number;delete payload.import_export_number;}
+    res.json({update,payload,files:req.admin.role==="super_admin"?files:[]});
   } catch(error) { console.error(error); res.status(500).json({error:"Could not load supplier update."}); }
 });
 
-app.patch("/api/admin/supplier-updates/:id", requireSuperAdmin, async (req,res)=>{
+app.patch("/api/admin/supplier-updates/:id", requireAdmin, async (req,res)=>{
   const status=clean(req.body?.status,30), notes=clean(req.body?.adminNotes,4000);
   if(!["approved","query","rejected"].includes(status))return res.status(400).json({error:"Invalid update status."});
   const conn=await pool.getConnection();
@@ -1047,6 +1036,10 @@ app.patch("/api/admin/supplier-updates/:id", requireSuperAdmin, async (req,res)=
     if(!u){await conn.rollback();return res.status(404).json({error:"Update not found."});}
     const changes=JSON.parse(u.payload_json||"{}");
     if(status==="approved"){
+      if(changes.business_email){
+        const [[dup]]=await conn.execute("SELECT id FROM supplier_profiles WHERE business_email=? AND id<>? LIMIT 1",[changes.business_email,u.supplier_id]);
+        if(dup){await conn.rollback();return res.status(409).json({error:"This business email is already linked to another supplier."});}
+      }
       const map={legal_name:"legal_name",trade_name:"trade_name",business_type:"business_type",country:"country",city:"city",address:"address",business_email:"business_email",business_phone:"business_phone",contact_person:"contact_person",designation:"designation",website:"website",category:"category",subcategory:"subcategory"};
       const keys=Object.keys(changes).filter(k=>map[k]);
       if(keys.length){
