@@ -190,10 +190,20 @@ function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&l
 function token(){return localStorage.getItem(dashboardKey)||new URLSearchParams(location.search).get("token")||""}
 async function api(url,options={}){
   const headers=Object.assign({"x-supplier-dashboard-token":token()},options.headers||{});
-  const r=await fetch(url,Object.assign({},options,{headers}));
-  const d=await r.json().catch(()=>({}));
-  if(!r.ok)throw new Error(d.error||"Request failed");
-  return d;
+  const controller=new AbortController();
+  const timeoutMs=Number(options.timeoutMs||15000);
+  const timer=setTimeout(()=>controller.abort(),timeoutMs);
+  try{
+    const fetchOptions=Object.assign({},options,{headers,signal:controller.signal});
+    delete fetchOptions.timeoutMs;
+    const r=await fetch(url,fetchOptions);
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.error||("HTTP "+r.status));
+    return d;
+  }catch(e){
+    if(e.name==="AbortError")throw new Error("Dashboard request timed out after "+Math.round(timeoutMs/1000)+" seconds. Please try again.");
+    throw e;
+  }finally{clearTimeout(timer);}
 }
 function showLogin(message=""){
   document.getElementById("loginView").classList.remove("hidden");document.getElementById("dashboardView").classList.add("hidden");document.getElementById("navActions").classList.add("hidden");
@@ -360,9 +370,24 @@ async function requestOtp(){
 document.getElementById("resendOtpBtn").onclick=requestOtp;
 showBuildVersion();
 document.getElementById("verifyOtpBtn").onclick=async()=>{
-  const btn=document.getElementById("verifyOtpBtn"),s=document.getElementById("loginStatus"),email=document.getElementById("loginEmail").value.trim(),otp=document.getElementById("loginOtp").value.trim();
+  const btn=document.getElementById("verifyOtpBtn"),s=document.getElementById("loginStatus"),email=document.getElementById("loginEmail").value.trim().toLowerCase(),otp=document.getElementById("loginOtp").value.trim();
   btn.disabled=true;btn.textContent="Verifying...";
-  try{const r=await fetch("/api/supplier-dashboard/verify-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,otp})});const data=await r.json();if(!r.ok)throw new Error(data.error||"Could not verify OTP.");localStorage.setItem(dashboardKey,data.token);await loadDashboard();}catch(e){s.textContent=e.message;s.className="notice error";s.classList.remove("hidden")}finally{btn.disabled=false;btn.textContent="Verify OTP →"}
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+  try{
+    const r=await fetch("/api/supplier-dashboard/verify-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,otp}),signal:controller.signal});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(data.error||("OTP verification failed (HTTP "+r.status+")."));
+    if(!data.token)throw new Error("OTP verified but the server did not return a dashboard token.");
+    localStorage.setItem(dashboardKey,data.token);
+    await loadDashboard();
+  }catch(e){
+    s.textContent=e.name==="AbortError"
+      ?"OTP verification is taking too long. The server did not respond within 15 seconds. Please try again."
+      :(e.message||"Could not verify OTP.");
+    s.className="notice error";s.classList.remove("hidden");
+  }finally{
+    clearTimeout(timer);btn.disabled=false;btn.textContent="Verify OTP →";
+  }
 };
 
 document.getElementById("productForm").onsubmit=async e=>{
