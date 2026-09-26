@@ -582,16 +582,18 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
   if (!supplierId || !customerName || !customerEmail) return res.status(400).json({ error: "Name and email are required." });
   if (!/^\S+@\S+\.\S+$/.test(customerEmail)) return res.status(400).json({ error: "Please enter a valid email address." });
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) return res.status(503).json({ error: "Connection email service is not configured yet." });
+
   const requestId = crypto.randomUUID();
   try {
     const [[supplier]] = await pool.execute(
-      "SELECT id, legal_name, trade_name, business_email, category, subcategory FROM supplier_profiles WHERE id = ? AND verified = 1 AND published = 1",
+      "SELECT id, legal_name, trade_name, business_email, category, subcategory FROM supplier_profiles WHERE id=? AND verified=1 AND published=1",
       [supplierId]
     );
     if (!supplier || !supplier.business_email) return res.status(404).json({ error: "Supplier contact is not available." });
+
     const supplierName = supplier.trade_name || supplier.legal_name;
     const subject = "SupplyDesk: New connection request" + (productName ? " for " + productName : "");
-    const text = [
+    const supplierText = [
       "A customer wants to connect with " + supplierName + " through SupplyDesk.",
       "",
       "Customer: " + customerName,
@@ -605,34 +607,114 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
       "This connection was initiated on SupplyDesk.",
       "Request ID: " + requestId
     ].filter(Boolean).join("\n");
+
     await pool.execute(
-      "INSERT INTO connect_requests (id, supplier_id, customer_name, customer_email, customer_phone, product_name, source_action, message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      [requestId, supplierId, customerName, customerEmail, customerPhone, productName, sourceAction, message]
+      "INSERT INTO connect_requests (id,supplier_id,customer_name,customer_email,customer_phone,product_name,source_action,message,status) VALUES (?,?,?,?,?,?,?,?,?)",
+      [requestId,supplierId,customerName,customerEmail,customerPhone,productName,sourceAction,message,"new"]
     );
+
     try {
       const info = await mailer.sendMail({
         from: process.env.SMTP_FROM,
         to: supplier.business_email,
         replyTo: customerEmail,
         subject,
-        text
+        text: supplierText
       });
-      console.log("Connection email sent:", {requestId, supplierId, to: supplier.business_email, messageId: info.messageId});
-      return res.status(201).json({ ok: true, message: "Connection request sent to the supplier." });
+      console.log("Connection email sent:", {requestId,supplierId,to:supplier.business_email,messageId:info.messageId});
     } catch (mailError) {
       console.error("Connection email delivery failed:", {
-        requestId, supplierId, to: supplier.business_email,
-        code: mailError?.code, responseCode: mailError?.responseCode, command: mailError?.command,
-        response: mailError?.response, message: mailError?.message
+        requestId,supplierId,to:supplier.business_email,
+        code:mailError?.code,responseCode:mailError?.responseCode,command:mailError?.command,
+        response:mailError?.response,message:mailError?.message
       });
-      return res.status(502).json({ error: "Connection request was saved, but the supplier email could not be delivered. Please try again.", requestId });
+      return res.status(502).json({error:"Connection request was saved, but the supplier email could not be delivered. Please try again.",requestId});
     }
+
+    // Customer confirmation is best-effort. A supplier request remains successful
+    // even if the customer's mailbox rejects the confirmation email.
+    try {
+      await mailer.sendMail({
+        from: process.env.SMTP_FROM,
+        to: customerEmail,
+        subject: "SupplyDesk: Connection request sent to " + supplierName,
+        text: [
+          "Your connection request has been sent to " + supplierName + " through SupplyDesk.",
+          "",
+          productName ? "Requirement: " + productName : "",
+          "The supplier has been notified and may contact you directly.",
+          "",
+          "Request ID: " + requestId,
+          "",
+          "SupplyDesk is an information and connection platform. Any commercial discussion or transaction is arranged directly between you and the supplier."
+        ].filter(Boolean).join("\n")
+      });
+    } catch (customerMailError) {
+      console.error("Customer confirmation email failed:", {
+        requestId,to:customerEmail,code:customerMailError?.code,
+        responseCode:customerMailError?.responseCode,message:customerMailError?.message
+      });
+    }
+
+    return res.status(201).json({
+      ok:true,
+      message:"Connection request sent to the supplier. A confirmation has also been sent to your email."
+    });
   } catch (error) {
-    console.error("Connection request failed:", {requestId, supplierId, code:error?.code, message:error?.message});
-    res.status(500).json({ error: "Could not save the connection request. Please try again.", requestId });
+    console.error("Connection request failed:", {requestId,supplierId,code:error?.code,message:error?.message});
+    res.status(500).json({error:"Could not save the connection request. Please try again.",requestId});
   }
 });
 
+// Admin: connection request queue
+app.get("/api/admin/connect-requests", requireAdmin, async (req,res)=>{
+  const status=clean(req.query.status,40);
+  const allowed=["new","contacted","in_discussion","closed"];
+  const params=[];
+  let sql=`SELECT c.id,c.supplier_id,c.customer_name,c.customer_email,c.customer_phone,c.product_name,c.source_action,c.message,c.status,c.created_at,c.updated_at,
+                   s.legal_name,s.trade_name,s.country,s.city
+            FROM connect_requests c
+            JOIN supplier_profiles s ON s.id=c.supplier_id`;
+  if(allowed.includes(status)){sql+=" WHERE c.status=?";params.push(status);}
+  sql+=" ORDER BY c.created_at DESC LIMIT 300";
+  try{
+    const [rows]=await pool.execute(sql,params);
+    res.json({requests:rows});
+  }catch(error){
+    console.error("Admin connection requests failed:",error);
+    res.status(500).json({error:"Could not load connection requests."});
+  }
+});
+
+app.patch("/api/admin/connect-requests/:id", requireAdmin, async (req,res)=>{
+  const status=clean(req.body?.status,40);
+  if(!["new","contacted","in_discussion","closed"].includes(status)) return res.status(400).json({error:"Invalid connection request status."});
+  try{
+    const [result]=await pool.execute("UPDATE connect_requests SET status=?,updated_at=NOW() WHERE id=?",[status,clean(req.params.id,80)]);
+    if(!result.affectedRows)return res.status(404).json({error:"Connection request not found."});
+    res.json({ok:true,status});
+  }catch(error){
+    console.error("Admin connection request update failed:",error);
+    res.status(500).json({error:"Could not update connection request."});
+  }
+});
+
+// Supplier: update the status of one of its own requests
+app.patch("/api/supplier-dashboard/connections/:id", requireSupplierDashboard, async (req,res)=>{
+  const status=clean(req.body?.status,40);
+  if(!["new","contacted","in_discussion","closed"].includes(status)) return res.status(400).json({error:"Invalid connection request status."});
+  try{
+    const [result]=await pool.execute(
+      "UPDATE connect_requests SET status=?,updated_at=NOW() WHERE id=? AND supplier_id=?",
+      [status,clean(req.params.id,80),req.supplier.id]
+    );
+    if(!result.affectedRows)return res.status(404).json({error:"Connection request not found."});
+    res.json({ok:true,status});
+  }catch(error){
+    console.error("Supplier connection status update failed:",error);
+    res.status(500).json({error:"Could not update connection request."});
+  }
+});
 
 app.post("/api/supplier-update/request", supplierUpdateLimiter, async (req, res) => {
   const email = clean(req.body?.email, 255).toLowerCase();
@@ -804,7 +886,7 @@ app.get("/api/supplier-dashboard", requireSupplierDashboard, async (req,res) => 
       [supplierId]
     );
     const [connections]=await pool.execute(
-      "SELECT id,customer_name,customer_email,customer_phone,product_name,source_action,message,created_at FROM connect_requests WHERE supplier_id=? ORDER BY created_at DESC LIMIT 20",
+      "SELECT id,customer_name,customer_email,customer_phone,product_name,source_action,message,status,created_at,updated_at FROM connect_requests WHERE supplier_id=? ORDER BY created_at DESC LIMIT 50",
       [supplierId]
     );
     const [[pendingUpdate]]=await pool.execute(
