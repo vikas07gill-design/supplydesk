@@ -272,6 +272,32 @@ app.post("/api/admin/login", async (req,res)=>{
   res.json({ok:true,token:rawToken,role,expiresInHours:12});
 });
 
+app.post("/api/admin/test-email", requireAdmin, async (req,res)=>{
+  const recipient=clean(req.body?.recipient,255).toLowerCase() || String(process.env.SMTP_USER||"").trim().toLowerCase();
+  if(!/^\\S+@\\S+\\.\\S+$/.test(recipient)) return res.status(400).json({error:"A valid test email recipient is required."});
+  if(!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) {
+    return res.status(503).json({error:"SMTP environment variables are not configured."});
+  }
+  try{
+    const info=await mailer.sendMail({
+      from:process.env.SMTP_FROM,
+      to:recipient,
+      subject:"SupplyDesk SMTP Test Email",
+      text:[
+        "This is a test email from SupplyDesk.",
+        "",
+        "SMTP connection and authentication are working correctly.",
+        "Sent at: "+new Date().toISOString(),
+        "Triggered by Admin: "+req.admin.admin_id
+      ].join("\n")
+    });
+    res.json({ok:true,recipient,messageId:info.messageId});
+  }catch(error){
+    console.error("SMTP test email failed:",error);
+    res.status(502).json({error:"SMTP test failed: "+(error?.code||"SEND_ERROR")+" "+(error?.responseCode||"")+" "+(error?.message||"Unknown SMTP error")});
+  }
+});
+
 app.post("/api/admin/logout", requireAdmin, async (req,res)=>{
   const raw=clean(req.get("x-admin-token"),256);
   await pool.execute("DELETE FROM admin_sessions WHERE token_hash=?",[tokenHash(raw)]);
