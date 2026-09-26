@@ -873,43 +873,39 @@ app.post("/api/supplier-update/:token", supplierUpdateLimiter,
 );
 
 
-app.post("/api/supplier-dashboard/request-access", supplierDashboardLimiter, async (req, res) => {
-  const email = clean(req.body?.email, 255).toLowerCase();
-  if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: "Please enter a valid business email address." });
-  try {
-    const [[supplier]] = await pool.execute(
-      "SELECT id, legal_name, trade_name, business_email FROM supplier_profiles WHERE business_email=? AND verified=1 AND published=1",
-      [email]
-    );
-    if (supplier) {
-      const rawToken = crypto.randomBytes(32).toString("hex");
-      await pool.execute(
-        "INSERT INTO supplier_dashboard_tokens (id,supplier_id,token_hash,expires_at) VALUES (?,?,?,DATE_ADD(NOW(), INTERVAL 24 HOUR))",
-        [crypto.randomUUID(), supplier.id, dashboardTokenHash(rawToken)]
-      );
-      const origin = String(process.env.PUBLIC_ORIGIN || "").replace(/\/$/, "");
-      const link = origin + "/supplier-dashboard.html?token=" + encodeURIComponent(rawToken);
-      await mailer.sendMail({
-        from: process.env.SMTP_FROM,
-        to: supplier.business_email,
-        subject: "SupplyDesk: Your supplier dashboard access",
-        text: [
-          "You requested access to your SupplyDesk supplier dashboard.",
-          "",
-          "Open this secure link within 24 hours:",
-          link,
-          "",
-          "From the dashboard you can manage products, submit profile updates for review and view your SupplyDesk activity.",
-          "",
-          "If you did not request this, you can ignore this email."
-        ].join("\n")
-      });
+app.post("/api/supplier-dashboard/request-otp", supplierDashboardLimiter, async (req,res)=>{
+  const email=clean(req.body?.email,255).toLowerCase();
+  if(!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({error:"Please enter a valid business email address."});
+  try{
+    const [[supplier]]=await pool.execute("SELECT id,business_email FROM supplier_profiles WHERE business_email=? AND verified=1 AND published=1",[email]);
+    if(supplier){
+      const otp=String(crypto.randomInt(0,1000000)).padStart(6,"0");
+      const otpHash=crypto.createHash("sha256").update(otp).digest("hex");
+      await pool.execute("UPDATE supplier_dashboard_otps SET used_at=NOW() WHERE supplier_id=? AND used_at IS NULL",[supplier.id]);
+      await pool.execute("INSERT INTO supplier_dashboard_otps (id,supplier_id,otp_hash,expires_at,attempts) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 10 MINUTE),0)",[crypto.randomUUID(),supplier.id,otpHash]);
+      await mailer.sendMail({from:process.env.SMTP_FROM,to:supplier.business_email,subject:"SupplyDesk: Your 6-digit dashboard OTP",text:["Your SupplyDesk supplier dashboard verification code is:","",otp,"","This OTP is valid for 10 minutes.","Do not share this code with anyone.","","If you did not request dashboard access, you can ignore this email."].join("\n")});
     }
-    res.json({ok:true,message:"If the email belongs to a verified SupplyDesk supplier, a dashboard link has been sent."});
-  } catch(error) {
-    console.error("Supplier dashboard access failed:",error);
-    res.status(500).json({error:"Could not send the dashboard link. Please try again."});
-  }
+    res.json({ok:true,message:"If the email belongs to a verified SupplyDesk supplier, a 6-digit OTP has been sent to that email."});
+  }catch(error){console.error("Supplier dashboard OTP request failed:",error);res.status(500).json({error:"Could not send the OTP. Please try again."});}
+});
+
+app.post("/api/supplier-dashboard/verify-otp", supplierDashboardLimiter, async (req,res)=>{
+  const email=clean(req.body?.email,255).toLowerCase(), otp=clean(req.body?.otp,6);
+  if(!/^\S+@\S+\.\S+$/.test(email)||!/^\d{6}$/.test(otp)) return res.status(400).json({error:"Enter the 6-digit OTP sent to your business email."});
+  try{
+    const [[row]]=await pool.execute(`SELECT o.id AS otp_id,o.otp_hash,o.expires_at,o.attempts,o.used_at,s.id,s.business_email
+      FROM supplier_dashboard_otps o JOIN supplier_profiles s ON s.id=o.supplier_id
+      WHERE s.business_email=? AND s.verified=1 AND s.published=1 AND o.used_at IS NULL AND o.expires_at>NOW()
+      ORDER BY o.created_at DESC LIMIT 1`,[email]);
+    if(!row)return res.status(401).json({error:"OTP expired or not found. Please request a new OTP."});
+    if(Number(row.attempts)>=5)return res.status(429).json({error:"Too many incorrect attempts. Please request a new OTP."});
+    const hash=crypto.createHash("sha256").update(otp).digest("hex");
+    if(hash!==row.otp_hash){await pool.execute("UPDATE supplier_dashboard_otps SET attempts=attempts+1 WHERE id=?",[row.otp_id]);return res.status(401).json({error:"Incorrect OTP. Please try again."});}
+    await pool.execute("UPDATE supplier_dashboard_otps SET used_at=NOW() WHERE id=?",[row.otp_id]);
+    const rawToken=crypto.randomBytes(32).toString("hex");
+    await pool.execute("INSERT INTO supplier_dashboard_tokens (id,supplier_id,token_hash,expires_at) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 24 HOUR))",[crypto.randomUUID(),row.id,dashboardTokenHash(rawToken)]);
+    res.json({ok:true,token:rawToken,message:"OTP verified. Dashboard access granted."});
+  }catch(error){console.error("Supplier dashboard OTP verification failed:",error);res.status(500).json({error:"Could not verify the OTP. Please try again."});}
 });
 
 app.get("/api/supplier-dashboard", requireSupplierDashboard, async (req,res) => {
