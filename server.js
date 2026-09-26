@@ -298,6 +298,21 @@ app.post("/api/admin/test-email", requireAdmin, async (req,res)=>{
   }
 });
 
+app.get("/api/admin/test-connection-storage", requireAdmin, async (req,res)=>{
+  try{
+    const [[table]] = await pool.query("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='connect_requests'");
+    if(!table) return res.status(500).json({ok:false,error:"connect_requests table does not exist in the active database."});
+    const [columns]=await pool.query("SHOW COLUMNS FROM connect_requests");
+    const [fk]=await pool.query(
+      "SELECT CONSTRAINT_NAME,REFERENCED_TABLE_NAME,REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='connect_requests' AND COLUMN_NAME='supplier_id' AND REFERENCED_TABLE_NAME IS NOT NULL"
+    );
+    res.json({ok:true,table:"connect_requests",columns:columns.map(x=>({field:x.Field,type:x.Type,null:x.Null,key:x.Key,default:x.Default})),foreignKey:fk});
+  }catch(error){
+    console.error("Connection storage diagnostic failed:",error);
+    res.status(500).json({ok:false,error:"Storage diagnostic failed: "+(error?.code||"DB_ERROR")+" "+(error?.message||"Unknown database error")});
+  }
+});
+
 app.post("/api/admin/test-supplier-email", requireAdmin, async (req,res)=>{
   const supplierId=clean(req.body?.supplierId,80);
   if(!supplierId)return res.status(400).json({error:"Supplier ID is required."});
