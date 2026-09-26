@@ -247,7 +247,12 @@ async function sendSupplierDashboardOtp(supplier) {
     [crypto.randomUUID(), supplier.id, otpHash]
   );
 
-  return { messageId: info.messageId };
+  return {
+    messageId: info.messageId,
+    accepted: Array.isArray(info.accepted) ? info.accepted : [],
+    rejected: Array.isArray(info.rejected) ? info.rejected : [],
+    response: info.response || ""
+  };
 }
 
 async function ensureConnectRequestsTable() {
@@ -916,7 +921,15 @@ app.post("/api/supplier-dashboard/request-otp", supplierDashboardLimiter, async 
     console.log("Supplier dashboard OTP email starting:",{requestId,supplierId:supplier.id,to:supplier.business_email});
     const info=await sendSupplierDashboardOtp(supplier);
     console.log("Supplier dashboard OTP email sent:",{requestId,supplierId:supplier.id,to:supplier.business_email,messageId:info.messageId});
-    res.json({ok:true,message:"OTP sent successfully. Check your email.",requestId,messageId:info.messageId,accepted:Array.isArray(info.accepted)?info.accepted:[]});
+    res.json({
+      ok:true,
+      message:"OTP sent successfully. Check your email.",
+      requestId,
+      messageId:info.messageId,
+      smtpAccepted: info.accepted || [],
+      smtpRejected: info.rejected || [],
+      smtpResponse: info.response || ""
+    });
   }catch(error){
     console.error("Supplier dashboard OTP email failed:",{
       requestId,code:error?.code,responseCode:error?.responseCode,command:error?.command,response:error?.response,message:error?.message
@@ -1518,6 +1531,13 @@ app.use((req, res, next) => {
   ];
   if (blocked.some(pattern => pattern.test(req.path))) return res.status(404).send("Not found");
   next();
+});
+
+app.get(["/supplier-dashboard","/supplier-dashboard-login"], (req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.sendFile(path.join(ROOT, "supplier-dashboard.html"));
 });
 
 app.use(express.static(ROOT, {
