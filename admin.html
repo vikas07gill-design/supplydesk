@@ -10,7 +10,7 @@
 <body>
 <header><div class="wrap head"><div><h1>SupplyDesk Admin</h1><div class="muted">Supplier verification & profile update queue</div></div><button id="logout">Clear Token</button></div></header>
 <main class="wrap">
-<div class="toolbar"><input id="token" type="password" placeholder="Admin token"><button class="primary" onclick="saveToken()">Use Token</button><select id="status"><option value="">All applications</option><option value="under_review">Under Review</option><option value="query">Query</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select><button onclick="loadApps()">Applications</button><button onclick="loadUpdates()">Supplier Updates</button></div>
+<div class="toolbar"><input id="token" type="password" placeholder="Admin token"><button class="primary" onclick="saveToken()">Use Token</button><select id="status"><option value="">All applications</option><option value="under_review">Under Review</option><option value="query">Query</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select><button onclick="loadApps()">Applications</button><button onclick="loadUpdates()">Supplier Updates</button><button onclick="loadProducts()">Products</button></div>
 <div id="message" class="muted"></div>
 <div class="grid">
 <section class="card"><div id="list">Enter your admin token to load applications.</div></section>
@@ -37,6 +37,33 @@ async function loadUpdates(){
 function renderUpdates(items){
   if(!items.length){document.getElementById("list").innerHTML="<div class='muted'>No supplier updates found.</div>";return}
   document.getElementById("list").innerHTML='<div class="row header"><div>Business</div><div>Location</div><div>Submitted</div><div>Status</div><div></div></div>'+items.map(u=>`<div class="row"><div><strong>${esc(u.trade_name||u.legal_name)}</strong><br><span class="muted">${esc(u.business_email)}</span></div><div>${esc(u.city)}, ${esc(u.country)}</div><div>${esc(new Date(u.created_at).toLocaleString())}</div><div><span class="badge">${esc(u.status)}</span></div><div><button onclick="openUpdate('${u.id}')">Review</button></div></div>`).join("");
+}
+async function loadProducts(){
+  try{
+    const data=await api("/api/admin/products?status=pending");
+    document.getElementById("message").textContent="";
+    renderProducts(data.products);
+  }catch(e){document.getElementById("message").textContent=e.message}
+}
+function renderProducts(items){
+  if(!items.length){document.getElementById("list").innerHTML="<div class='muted'>No pending product listings.</div>";return}
+  document.getElementById("list").innerHTML='<div class="row header"><div>Product</div><div>Supplier</div><div>Category</div><div>Status</div><div></div></div>'+items.map(p=>`<div class="row"><div><strong>${esc(p.product_name)}</strong><br><span class="muted">${esc(p.market_scope)}</span></div><div>${esc(p.trade_name||p.legal_name)}<br><span class="muted">${esc(p.city)}, ${esc(p.country)}</span></div><div>${esc(p.category)}<br>${esc(p.subcategory)}</div><div><span class="badge">${esc(p.status)}</span></div><div><button onclick="openProductReview('${p.id}')">Review</button></div></div>`).join("");
+}
+async function openProductReview(id){
+  try{
+    const data=await api("/api/admin/products?status=pending");
+    const p=(data.products||[]).find(x=>x.id===id);
+    if(!p)throw new Error("Product not found.");
+    document.getElementById("detail").innerHTML=`<h2>${esc(p.product_name)}</h2><div class="status"><strong>Status:</strong> ${esc(p.status)}</div><div class="kv"><b>Supplier</b><span>${esc(p.trade_name||p.legal_name)}</span><b>Location</b><span>${esc(p.city)}, ${esc(p.country)}</span><b>Category</b><span>${esc(p.category)} → ${esc(p.subcategory)}</span><b>Market</b><span>${esc(p.market_scope)}</span><b>MOQ</b><span>${esc(p.moq||"Not provided")}</span><b>Unit</b><span>${esc(p.unit||"Not provided")}</span><b>Description</b><span>${esc(p.description||"Not provided")}</span></div><h3>Admin decision</h3><textarea id="productNotes" placeholder="Verification notes">${esc(p.admin_notes||"")}</textarea><div class="actions"><button class="approve" onclick="setProductStatus('${p.id}','approved')">Approve & Publish</button><button class="danger" onclick="setProductStatus('${p.id}','rejected')">Reject</button></div>`;
+  }catch(e){document.getElementById("message").textContent=e.message}
+}
+async function setProductStatus(id,status){
+  try{
+    const notes=document.getElementById("productNotes")?.value||"";
+    await api("/api/admin/products/"+id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,adminNotes:notes})});
+    document.getElementById("message").textContent=status==="approved"?"Product approved and published.":"Product rejected.";
+    await loadProducts();
+  }catch(e){document.getElementById("message").textContent=e.message}
 }
 async function openUpdate(id){
   try{
