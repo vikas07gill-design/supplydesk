@@ -203,6 +203,39 @@ const mailer = nodemailer.createTransport({
   auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD }
 });
 
+async function sendSupplierDashboardOtp(supplier) {
+  const otp = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+  const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
+
+  await pool.execute(
+    "UPDATE supplier_dashboard_otps SET used_at=NOW() WHERE supplier_id=? AND used_at IS NULL",
+    [supplier.id]
+  );
+
+  await pool.execute(
+    "INSERT INTO supplier_dashboard_otps (id,supplier_id,otp_hash,expires_at,attempts) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 10 MINUTE),0)",
+    [crypto.randomUUID(), supplier.id, otpHash]
+  );
+
+  const info = await mailer.sendMail({
+    from: process.env.SMTP_FROM,
+    to: supplier.business_email,
+    subject: "SupplyDesk: Your 6-digit dashboard OTP",
+    text: [
+      "Your SupplyDesk supplier dashboard verification code is:",
+      "",
+      otp,
+      "",
+      "This OTP is valid for 10 minutes.",
+      "Do not share this code with anyone.",
+      "",
+      "If you did not request dashboard access, you can ignore this email."
+    ].join("\n")
+  });
+
+  return { messageId: info.messageId };
+}
+
 async function ensureConnectRequestsTable() {
   await pool.execute("CREATE TABLE IF NOT EXISTS connect_requests (id CHAR(36) PRIMARY KEY, supplier_id CHAR(36) NOT NULL, customer_name VARCHAR(180) NOT NULL, customer_email VARCHAR(255) NOT NULL, customer_phone VARCHAR(80) NULL, product_name VARCHAR(255) NULL, source_action ENUM('phone','email','contact') NOT NULL DEFAULT 'contact', message TEXT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT fk_connect_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE, INDEX idx_connect_supplier (supplier_id, created_at), INDEX idx_connect_customer (customer_email, created_at)) ENGINE=InnoDB");
 }
@@ -318,30 +351,20 @@ app.post("/api/admin/test-dashboard-otp", requireAdmin, async (req,res)=>{
   if(!lookup)return res.status(400).json({error:"Supplier ID or registered business email is required."});
   try{
     const [[supplier]]=await pool.execute(
-      "SELECT id,legal_name,trade_name,business_email,verified,published FROM supplier_profiles WHERE id=? OR LOWER(business_email)=LOWER(?) LIMIT 1",
+      "SELECT id,legal_name,trade_name,business_email,verified,published FROM supplier_profiles WHERE id=? OR LOWER(TRIM(business_email))=LOWER(TRIM(?)) LIMIT 1",
       [lookup,lookup]
     );
     if(!supplier)return res.status(404).json({error:"Supplier not found for that ID/email."});
     if(!supplier.verified||!supplier.published)return res.status(400).json({error:"Supplier exists but is not verified and published."});
     if(!supplier.business_email)return res.status(400).json({error:"Supplier business email is missing."});
-    const otp=String(crypto.randomInt(0,1000000)).padStart(6,"0");
-    const hash=crypto.createHash("sha256").update(otp).digest("hex");
-    await pool.execute("UPDATE supplier_dashboard_otps SET used_at=NOW() WHERE supplier_id=? AND used_at IS NULL",[supplier.id]);
-    await pool.execute("INSERT INTO supplier_dashboard_otps (id,supplier_id,otp_hash,expires_at,attempts) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 10 MINUTE),0)",[crypto.randomUUID(),supplier.id,hash]);
-    const info=await mailer.sendMail({
-      from:process.env.SMTP_FROM,to:supplier.business_email,
-      subject:"SupplyDesk: Your 6-digit dashboard OTP",
-      text:["Your SupplyDesk supplier dashboard verification code is:","",otp,"","This OTP is valid for 10 minutes.","Do not share this code with anyone."].join("\n")
-    });
+    const info=await sendSupplierDashboardOtp(supplier);
     const masked=supplier.business_email.replace(/^(.{2}).*(@.*)$/,"$1***$2");
     res.json({ok:true,recipient:masked,messageId:info.messageId});
   }catch(error){
     console.error("Admin dashboard OTP test failed:",{code:error?.code,responseCode:error?.responseCode,command:error?.command,response:error?.response,message:error?.message});
-    res.status(502).json({error:"OTP email failed: "+(error?.code||"SEND_ERROR")+" "+(error?.responseCode||"")+" "+(error?.message||"Unknown error")});
+    res.status(502).json({error:"OTP email failed: "+(error?.code||"SEND_ERROR")+" "+(error?.responseCode||"")+" "+(error?.message||"Unknown SMTP error")});
   }
 });
-
-
 
 app.post("/api/admin/test-supplier-email", requireAdmin, async (req,res)=>{
   const supplierId=clean(req.body?.supplierId,80);
@@ -859,24 +882,29 @@ app.post("/api/supplier-update/:token", supplierUpdateLimiter,
 );
 
 
-app.post("/api/supplier-dashboard/request-otp", supplierDashboardLimiter, async (req,res)=>{
-  const email=clean(req.body?.email,255).toLowerCase();
-  if(!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({error:"Please enter a valid business email address."});
+app.post("/api/supplier-dashboard/request-otp", async (req,res)=>{
+  const email=clean(req.body?.email,255).trim().toLowerCase();
+  const requestId=crypto.randomUUID();
+  if(!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({error:"Please enter a valid business email address.",requestId});
   try{
     const [[supplier]]=await pool.execute(
-      "SELECT id,business_email FROM supplier_profiles WHERE LOWER(TRIM(business_email))=LOWER(TRIM(?)) AND verified=1 AND published=1 LIMIT 1",
+      "SELECT id,business_email,verified,published FROM supplier_profiles WHERE LOWER(TRIM(business_email))=LOWER(TRIM(?)) LIMIT 1",
       [email]
     );
-    if(supplier){
-      console.log("Supplier dashboard OTP requested:", {supplierId:supplier.id, email:supplier.business_email});
-      const otp=String(crypto.randomInt(0,1000000)).padStart(6,"0");
-      const otpHash=crypto.createHash("sha256").update(otp).digest("hex");
-      await pool.execute("UPDATE supplier_dashboard_otps SET used_at=NOW() WHERE supplier_id=? AND used_at IS NULL",[supplier.id]);
-      await pool.execute("INSERT INTO supplier_dashboard_otps (id,supplier_id,otp_hash,expires_at,attempts) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 10 MINUTE),0)",[crypto.randomUUID(),supplier.id,otpHash]);
-      await mailer.sendMail({from:process.env.SMTP_FROM,to:supplier.business_email,subject:"SupplyDesk: Your 6-digit dashboard OTP",text:["Your SupplyDesk supplier dashboard verification code is:","",otp,"","This OTP is valid for 10 minutes.","Do not share this code with anyone.","","If you did not request dashboard access, you can ignore this email."].join("\n")});
-    }
-    res.json({ok:true,message:"If the email belongs to a verified SupplyDesk supplier, a 6-digit OTP has been sent to that email."});
-  }catch(error){console.error("Supplier dashboard OTP request failed:",error);res.status(500).json({error:"Could not send the OTP. Please try again."});}
+    if(!supplier) return res.status(404).json({error:"This email is not registered as a verified SupplyDesk supplier.",requestId});
+    if(!supplier.verified||!supplier.published) return res.status(403).json({error:"This supplier account is not currently enabled for dashboard access.",requestId});
+    if(!supplier.business_email) return res.status(400).json({error:"Supplier business email is missing.",requestId});
+
+    console.log("Supplier dashboard OTP email starting:",{requestId,supplierId:supplier.id,to:supplier.business_email});
+    const info=await sendSupplierDashboardOtp(supplier);
+    console.log("Supplier dashboard OTP email sent:",{requestId,supplierId:supplier.id,to:supplier.business_email,messageId:info.messageId});
+    res.json({ok:true,message:"OTP sent successfully. Check your email.",requestId});
+  }catch(error){
+    console.error("Supplier dashboard OTP email failed:",{
+      requestId,code:error?.code,responseCode:error?.responseCode,command:error?.command,response:error?.response,message:error?.message
+    });
+    res.status(502).json({error:"OTP email could not be sent. Please try again.",requestId});
+  }
 });
 
 app.post("/api/supplier-dashboard/verify-otp", supplierDashboardLimiter, async (req,res)=>{
