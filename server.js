@@ -313,49 +313,35 @@ app.get("/api/admin/test-connection-storage", requireAdmin, async (req,res)=>{
   }
 });
 
-app.post("/api/admin/test-dashboard-email", requireAdmin, async (req,res)=>{
-  const supplierId=clean(req.body?.supplierId,255);
-  if(!supplierId)return res.status(400).json({error:"Supplier ID or registered business email is required."});
+app.post("/api/admin/test-dashboard-otp", requireAdmin, async (req,res)=>{
+  const lookup=clean(req.body?.supplierId,255);
+  if(!lookup)return res.status(400).json({error:"Supplier ID or registered business email is required."});
   try{
     const [[supplier]]=await pool.execute(
       "SELECT id,legal_name,trade_name,business_email,verified,published FROM supplier_profiles WHERE id=? OR LOWER(business_email)=LOWER(?) LIMIT 1",
-      [supplierId,supplierId]
+      [lookup,lookup]
     );
-    if(!supplier)return res.status(404).json({error:"Supplier not found."});
-    if(!supplier.verified || !supplier.published)return res.status(400).json({error:"Supplier is not verified/published."});
+    if(!supplier)return res.status(404).json({error:"Supplier not found for that ID/email."});
+    if(!supplier.verified||!supplier.published)return res.status(400).json({error:"Supplier exists but is not verified and published."});
     if(!supplier.business_email)return res.status(400).json({error:"Supplier business email is missing."});
-    const rawToken=crypto.randomBytes(32).toString("hex");
-    await pool.execute(
-      "INSERT INTO supplier_dashboard_tokens (id,supplier_id,token_hash,expires_at) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 24 HOUR))",
-      [crypto.randomUUID(),supplier.id,dashboardTokenHash(rawToken)]
-    );
-    const origin=String(process.env.PUBLIC_ORIGIN||"").replace(/\/$/,"");
-    const link=origin+"/supplier-dashboard.html?token="+encodeURIComponent(rawToken);
+    const otp=String(crypto.randomInt(0,1000000)).padStart(6,"0");
+    const hash=crypto.createHash("sha256").update(otp).digest("hex");
+    await pool.execute("UPDATE supplier_dashboard_otps SET used_at=NOW() WHERE supplier_id=? AND used_at IS NULL",[supplier.id]);
+    await pool.execute("INSERT INTO supplier_dashboard_otps (id,supplier_id,otp_hash,expires_at,attempts) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 10 MINUTE),0)",[crypto.randomUUID(),supplier.id,hash]);
     const info=await mailer.sendMail({
-      from:process.env.SMTP_FROM,
-      to:supplier.business_email,
-      subject:"SupplyDesk: Your supplier dashboard access",
-      text:[
-        "You requested access to your SupplyDesk supplier dashboard.",
-        "",
-        "Open this secure link within 24 hours:",
-        link,
-        "",
-        "From the dashboard you can manage products, submit profile updates for review and view your SupplyDesk activity.",
-        "",
-        "If you did not request this, you can ignore this email."
-      ].join("\n")
+      from:process.env.SMTP_FROM,to:supplier.business_email,
+      subject:"SupplyDesk: Your 6-digit dashboard OTP",
+      text:["Your SupplyDesk supplier dashboard verification code is:","",otp,"","This OTP is valid for 10 minutes.","Do not share this code with anyone."].join("\n")
     });
     const masked=supplier.business_email.replace(/^(.{2}).*(@.*)$/,"$1***$2");
-    res.json({ok:true,supplier:supplier.trade_name||supplier.legal_name,recipient:masked,messageId:info.messageId,link});
+    res.json({ok:true,recipient:masked,messageId:info.messageId});
   }catch(error){
-    console.error("Dashboard email test failed:",{
-      supplierId,code:error?.code,responseCode:error?.responseCode,
-      command:error?.command,response:error?.response,message:error?.message
-    });
-    res.status(502).json({error:"Dashboard email test failed: "+(error?.code||"SEND_ERROR")+" "+(error?.responseCode||"")+" "+(error?.message||"Unknown error")});
+    console.error("Admin dashboard OTP test failed:",{code:error?.code,responseCode:error?.responseCode,command:error?.command,response:error?.response,message:error?.message});
+    res.status(502).json({error:"OTP email failed: "+(error?.code||"SEND_ERROR")+" "+(error?.responseCode||"")+" "+(error?.message||"Unknown error")});
   }
 });
+
+
 
 app.post("/api/admin/test-supplier-email", requireAdmin, async (req,res)=>{
   const supplierId=clean(req.body?.supplierId,80);
