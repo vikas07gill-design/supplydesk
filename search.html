@@ -63,7 +63,7 @@ function render(){
     (!sub||x.subcategories?.includes(sub)) &&
     (!country||x.country===country) &&
     (!city||x.city===city) &&
-    (!market||x.market===market||x.market==='All markets') &&
+    (!market||x.market===market||x.market==='All markets'||x.market==='Both') &&
     match(x,q)
   );
 
