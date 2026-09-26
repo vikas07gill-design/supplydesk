@@ -732,7 +732,7 @@ app.patch("/api/supplier-dashboard/products/:id", requireSupplierDashboard, asyn
   if(!catalog[category]||!catalog[category].includes(subcategory)) return res.status(400).json({error:"Invalid category or sub-category."});
   const keys=Object.keys(fields);
   if(!keys.length) return res.status(400).json({error:"No changes submitted."});
-  const set=keys.map(k=k+"=?").join(",");
+  const set=keys.map(k=>k+"=?").join(",");
   await pool.execute("UPDATE supplier_products SET "+set+", status='pending', admin_notes=NULL, reviewed_at=NULL, reviewed_by=NULL WHERE id=? AND supplier_id=?",[...keys.map(k=>fields[k]),id,req.supplier.id]);
   res.json({ok:true,message:"Product changes submitted for review."});
 });
