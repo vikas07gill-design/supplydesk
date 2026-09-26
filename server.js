@@ -274,7 +274,7 @@ app.post("/api/admin/login", async (req,res)=>{
 
 app.post("/api/admin/test-email", requireAdmin, async (req,res)=>{
   const recipient=clean(req.body?.recipient,255).toLowerCase() || String(process.env.SMTP_USER||"").trim().toLowerCase();
-  if(!/^\\S+@\\S+\\.\\S+$/.test(recipient)) return res.status(400).json({error:"A valid test email recipient is required."});
+  if(!/^\S+@\S+\.\S+$/.test(recipient)) return res.status(400).json({error:"A valid test email recipient is required."});
   if(!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) {
     return res.status(503).json({error:"SMTP environment variables are not configured."});
   }
