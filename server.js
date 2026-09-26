@@ -140,7 +140,7 @@ async function requireSupplierDashboard(req, res, next) {
     const [[supplier]] = await pool.execute(
       `SELECT s.id, s.application_id, s.legal_name, s.trade_name, s.business_type, s.country, s.city,
               s.address, s.website, s.business_email, s.business_phone, s.contact_person, s.designation,
-              s.category, s.subcategory, s.verified, s.published, t.id AS token_id, t.expires_at
+              s.category, s.subcategory, s.profile_details_json, s.verified, s.published, t.id AS token_id, t.expires_at
        FROM supplier_dashboard_tokens t
        JOIN supplier_profiles s ON s.id = t.supplier_id
        WHERE t.token_hash = ? AND t.revoked_at IS NULL
@@ -711,7 +711,7 @@ app.get("/api/supplier-dashboard", requireSupplierDashboard, async (req,res) => 
         id:req.supplier.id,legal_name:req.supplier.legal_name,trade_name:req.supplier.trade_name,business_type:req.supplier.business_type,
         country:req.supplier.country,city:req.supplier.city,address:req.supplier.address,website:req.supplier.website,
         business_email:req.supplier.business_email,business_phone:req.supplier.business_phone,contact_person:req.supplier.contact_person,
-        designation:req.supplier.designation,category:req.supplier.category,subcategory:req.supplier.subcategory,verified:true
+        designation:req.supplier.designation,category:req.supplier.category,subcategory:req.supplier.subcategory,profileDetails:(()=>{try{return JSON.parse(req.supplier.profile_details_json||"{}")}catch{return {}}})(),verified:true
       },
       metrics:{
         product_count:Number(counts.product_count||0),approved_products:Number(counts.approved_products||0),
@@ -735,6 +735,15 @@ app.post("/api/supplier-dashboard/logout", requireSupplierDashboard, async (req,
 app.post("/api/supplier-dashboard/profile-update", requireSupplierDashboard, async (req,res) => {
   const allowed=["legal_name","trade_name","business_type","country","city","address","business_email","business_phone","contact_person","designation","website","category","subcategory"];
   const changes={};
+  if(req.body?.profileDetails && typeof req.body.profileDetails==="object"){
+    const d=req.body.profileDetails;
+    changes.profile_details={
+      about:clean(d.about,2000),capabilities:clean(d.capabilities,1500),industries:clean(d.industries,1000),
+      markets:clean(d.markets,1000),monthlyCapacity:clean(d.monthlyCapacity,300),leadTime:clean(d.leadTime,300),
+      paymentTerms:clean(d.paymentTerms,500),incoterms:clean(d.incoterms,500),shippingModes:clean(d.shippingModes,500),
+      certifications:clean(d.certifications,1000),oem:clean(d.oem,100),customManufacturing:clean(d.customManufacturing,100)
+    };
+  }
   for(const key of allowed){
     if(req.body && Object.prototype.hasOwnProperty.call(req.body,key)){
       const value=clean(req.body[key], key==="address"?4000:500);
@@ -1042,11 +1051,11 @@ app.patch("/api/admin/supplier-updates/:id", requireAdmin, async (req,res)=>{
         const [[dup]]=await conn.execute("SELECT id FROM supplier_profiles WHERE business_email=? AND id<>? LIMIT 1",[changes.business_email,u.supplier_id]);
         if(dup){await conn.rollback();return res.status(409).json({error:"This business email is already linked to another supplier."});}
       }
-      const map={legal_name:"legal_name",trade_name:"trade_name",business_type:"business_type",country:"country",city:"city",address:"address",business_email:"business_email",business_phone:"business_phone",contact_person:"contact_person",designation:"designation",website:"website",category:"category",subcategory:"subcategory"};
+      const map={legal_name:"legal_name",trade_name:"trade_name",business_type:"business_type",country:"country",city:"city",address:"address",business_email:"business_email",business_phone:"business_phone",contact_person:"contact_person",designation:"designation",website:"website",category:"category",subcategory:"subcategory",profile_details:"profile_details_json"};
       const keys=Object.keys(changes).filter(k=>map[k]);
       if(keys.length){
         const set=keys.map(k=>map[k]+"=?").join(",");
-        const values=keys.map(k=>changes[k]);
+        const values=keys.map(k=>k==="profile_details"?JSON.stringify(changes[k]||{}):changes[k]);
         await conn.execute("UPDATE supplier_profiles SET "+set+" WHERE id=?",[...values,u.supplier_id]);
         const appSet=keys.map(k=>"a."+map[k]+"=?").join(",");
         await conn.execute("UPDATE supplier_applications a JOIN supplier_profiles s ON s.application_id=a.id SET "+appSet+" WHERE s.id=?",[...values,u.supplier_id]);
