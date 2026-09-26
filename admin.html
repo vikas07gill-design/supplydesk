@@ -84,7 +84,6 @@ async function setProductStatus(id,status){
   }catch(e){document.getElementById("message").textContent=e.message}
 }
 async function openUpdate(id){
-  if(role()!=="super_admin"){document.getElementById("message").textContent="Super Admin access required.";return}
   try{
     const d=await api("/api/admin/supplier-updates/"+id),u=d.update,p=d.payload||{};
     const labels={legal_name:"Legal name",trade_name:"Trade / brand",business_type:"Business type",country:"Country",city:"City",address:"Address",business_email:"Business email",business_phone:"Business phone",contact_person:"Contact person",designation:"Designation",website:"Website",category:"Category",subcategory:"Sub-category"};
@@ -93,7 +92,6 @@ async function openUpdate(id){
   }catch(e){document.getElementById("message").textContent=e.message}
 }
 async function setUpdateStatus(id,status){
-  if(role()!=="super_admin"){document.getElementById("message").textContent="Super Admin access required.";return}
   try{
     const notes=document.getElementById("notes")?.value||"";
     await api("/api/admin/supplier-updates/"+id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,adminNotes:notes})});
@@ -102,7 +100,7 @@ async function setUpdateStatus(id,status){
   }catch(e){document.getElementById("message").textContent=e.message}
 }
 async function viewUpdateFile(id){
-  if(role()!=="super_admin"){document.getElementById("message").textContent="Super Admin access required.";return}
+  if(role()!=="super_admin"){document.getElementById("message").textContent="Only Super Admin can view supplier documents.";return}
   try{
     const r=await fetch("/api/admin/supplier-update-files/"+encodeURIComponent(id),{headers:{"x-admin-token":token()}});
     if(!r.ok)throw new Error("Could not open file.");
