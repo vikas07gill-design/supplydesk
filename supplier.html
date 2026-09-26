@@ -90,8 +90,13 @@ form.addEventListener("submit",async e=>{
       sourceAction:lastAction,
       message:document.getElementById("customerMessage").value.trim()
     })});
-    const data=await response.json();
-    if(!response.ok) throw new Error(data.error||"Could not send request.");
+    const raw=await response.text();
+    let data={};
+    try{data=raw?JSON.parse(raw):{};}catch{}
+    if(!response.ok){
+      const detail=data.error||("Server returned HTTP "+response.status+".");
+      throw new Error(detail+(data.requestId?" [Request ID: "+data.requestId+"]":""));
+    }
     statusEl.textContent="✓ Request sent. The supplier has been notified by SupplyDesk.";
     setTimeout(closeConnect,1200);
   }catch(error){
