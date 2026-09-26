@@ -113,6 +113,37 @@ const connectLimiter = rateLimit({
   message: { error: "Too many connection requests. Please try again later." }
 });
 
+const supplierUpdateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many update requests. Please try again later." }
+});
+
+const updateStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const updateId = req.updateId || crypto.randomUUID();
+    req.updateId = updateId;
+    const dir = path.join(UPLOAD_DIR, "supplier-updates", updateId);
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, crypto.randomUUID() + ext);
+  }
+});
+
+const updateUpload = multer({
+  storage: updateStorage,
+  limits: { files: 12, fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (!allowedDocTypes.has(file.mimetype)) return cb(new Error("Only PDF, JPG, PNG and WEBP files are allowed."));
+    cb(null, true);
+  }
+});
+
 const mailer = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT || 465),
@@ -122,6 +153,10 @@ const mailer = nodemailer.createTransport({
 
 async function ensureConnectRequestsTable() {
   await pool.execute("CREATE TABLE IF NOT EXISTS connect_requests (id CHAR(36) PRIMARY KEY, supplier_id CHAR(36) NOT NULL, customer_name VARCHAR(180) NOT NULL, customer_email VARCHAR(255) NOT NULL, customer_phone VARCHAR(80) NULL, product_name VARCHAR(255) NULL, source_action ENUM('phone','email','contact') NOT NULL DEFAULT 'contact', message TEXT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT fk_connect_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE, INDEX idx_connect_supplier (supplier_id, created_at), INDEX idx_connect_customer (customer_email, created_at)) ENGINE=InnoDB");
+}
+
+function hashToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
 }
 
 function clean(value, max = 2000) {
@@ -388,6 +423,118 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
   }
 });
 
+app.post("/api/supplier-update/request", supplierUpdateLimiter, async (req, res) => {
+  const email = clean(req.body?.email, 255).toLowerCase();
+  if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: "Please enter a valid business email address." });
+  try {
+    const [[supplier]] = await pool.execute(
+      "SELECT id, legal_name, trade_name, business_email FROM supplier_profiles WHERE business_email = ? AND verified = 1 AND published = 1",
+      [email]
+    );
+    if (!supplier) return res.json({ ok: true, message: "If the email belongs to a verified SupplyDesk supplier, an update link has been sent." });
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    await pool.execute(
+      "INSERT INTO supplier_update_tokens (id, supplier_id, token_hash, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 30 MINUTE))",
+      [crypto.randomUUID(), supplier.id, hashToken(rawToken)]
+    );
+    const origin = String(process.env.PUBLIC_ORIGIN || "").replace(/\/$/, "");
+    const link = origin + "/supplier-update.html?token=" + encodeURIComponent(rawToken);
+    await mailer.sendMail({
+      from: process.env.SMTP_FROM,
+      to: supplier.business_email,
+      subject: "SupplyDesk: Update your supplier profile",
+      text: [
+        "You requested to update your SupplyDesk supplier profile.",
+        "",
+        "Open this secure link within 30 minutes:",
+        link,
+        "",
+        "Your current public profile will remain unchanged until SupplyDesk reviews and approves the update.",
+        "",
+        "If you did not request this, you can ignore this email."
+      ].join("\n")
+    });
+    res.json({ ok: true, message: "If the email belongs to a verified SupplyDesk supplier, an update link has been sent." });
+  } catch (error) {
+    console.error("Supplier update link failed:", error);
+    res.status(500).json({ error: "Could not send the update link. Please try again." });
+  }
+});
+
+app.get("/api/supplier-update/:token", async (req, res) => {
+  try {
+    const tokenHash = hashToken(clean(req.params.token, 128));
+    const [[row]] = await pool.execute(
+      "SELECT t.id AS token_id, t.expires_at, t.used_at, s.id, s.legal_name, s.trade_name, s.business_type, s.country, s.city, s.address, s.business_email, s.business_phone, s.contact_person, s.designation, s.website, s.category, s.subcategory FROM supplier_update_tokens t JOIN supplier_profiles s ON s.id = t.supplier_id WHERE t.token_hash = ? AND s.verified = 1 AND s.published = 1",
+      [tokenHash]
+    );
+    if (!row || row.used_at || new Date(row.expires_at).getTime() < Date.now()) return res.status(410).json({ error: "This update link has expired or has already been used." });
+    res.json({ supplier: {
+      id: row.id, legalName: row.legal_name, tradeName: row.trade_name, businessType: row.business_type,
+      country: row.country, city: row.city, address: row.address, email: row.business_email,
+      phone: row.business_phone, contact: row.contact_person, designation: row.designation,
+      website: row.website, category: row.category, subcategory: row.subcategory
+    }});
+  } catch (error) {
+    console.error("Supplier update lookup failed:", error);
+    res.status(500).json({ error: "Could not load the supplier profile." });
+  }
+});
+
+app.post("/api/supplier-update/:token", supplierUpdateLimiter,
+  (req, res, next) => updateUpload.fields([
+    { name: "registrationDoc", maxCount: 1 },
+    { name: "taxDoc", maxCount: 1 },
+    { name: "licenceDoc", maxCount: 1 },
+    { name: "addressProof", maxCount: 1 },
+    { name: "businessPhotos", maxCount: 8 }
+  ])(req, res, next),
+  async (req, res) => {
+    const tokenHash = hashToken(clean(req.params.token, 128));
+    try {
+      const [[supplier]] = await pool.execute(
+        "SELECT t.id AS token_id, t.used_at, t.expires_at, s.* FROM supplier_update_tokens t JOIN supplier_profiles s ON s.id=t.supplier_id WHERE t.token_hash=? AND s.verified=1 AND s.published=1",
+        [tokenHash]
+      );
+      if (!supplier || supplier.used_at || new Date(supplier.expires_at).getTime() < Date.now()) return res.status(410).json({ error: "This update link has expired or has already been used." });
+      const body=req.body||{};
+      const fields={
+        legal_name: clean(body.legalName,255), trade_name: clean(body.tradeName,255),
+        business_type: clean(body.businessType,100), country: clean(body.country,100), city: clean(body.city,150),
+        address: clean(body.address,4000), business_email: clean(body.email,255).toLowerCase(),
+        business_phone: clean(body.phone,80), contact_person: clean(body.contact,180), designation: clean(body.designation,150),
+        website: clean(body.website,500), category: clean(body.category,180), subcategory: clean(body.subcategory,180)
+      };
+      if (fields.business_email && !/^\S+@\S+\.\S+$/.test(fields.business_email)) return res.status(400).json({error:"Please enter a valid business email."});
+      if (fields.category && (!catalog[fields.category] || !catalog[fields.category].includes(fields.subcategory))) return res.status(400).json({error:"Invalid category or sub-category."});
+      const changes={};
+      for (const [key,value] of Object.entries(fields)) if (value && String(value)!==String(supplier[key]||"")) changes[key]=value;
+      if (!Object.keys(changes).length && !(req.files && Object.keys(req.files).length)) return res.status(400).json({error:"No changes or new documents were submitted."});
+      const updateId=req.updateId || crypto.randomUUID();
+      const fileRows=[];
+      const saveFiles=(field,type)=>{ for(const file of (req.files?.[field]||[])){ const relative=path.relative(UPLOAD_DIR,file.path).split(path.sep).join("/"); fileRows.push([crypto.randomUUID(),updateId,type,clean(file.originalname,255),path.basename(file.path),relative,file.mimetype,file.size]); } };
+      saveFiles("registrationDoc","business_registration"); saveFiles("taxDoc","tax_registration"); saveFiles("licenceDoc","licence_certificate"); saveFiles("addressProof","address_proof"); saveFiles("businessPhotos","business_photo");
+      const conn=await pool.getConnection();
+      try {
+        await conn.beginTransaction();
+        await conn.execute("INSERT INTO supplier_update_requests (id,supplier_id,status,payload_json) VALUES (?,?,?,?)",[updateId,supplier.id,"pending",JSON.stringify(changes)]);
+        if(fileRows.length) await conn.query("INSERT INTO supplier_update_files (id,update_id,file_type,original_name,stored_name,relative_path,mime_type,file_size) VALUES ?",[fileRows]);
+        await conn.execute("UPDATE supplier_update_tokens SET used_at=NOW() WHERE id=?",[supplier.token_id]);
+        await conn.commit();
+      } catch(error) {
+        await conn.rollback();
+        const dir=path.join(UPLOAD_DIR,"supplier-updates",updateId);
+        if(fs.existsSync(dir)) fs.rmSync(dir,{recursive:true,force:true});
+        throw error;
+      } finally { conn.release(); }
+      res.status(201).json({ok:true,message:"Update submitted. Your current profile remains unchanged until SupplyDesk verifies and approves the changes."});
+    } catch(error) {
+      console.error("Supplier update submission failed:",error);
+      res.status(500).json({error:"Could not submit the update. Please try again."});
+    }
+  }
+);
+
 app.get("/api/suppliers/:id", async (req, res) => {
   try {
     const [[row]] = await pool.execute(
@@ -441,6 +588,61 @@ app.get("/api/admin/applications", requireAdmin, async (req, res) => {
     console.error(error);
     res.status(500).json({ error: "Could not load applications." });
   }
+});
+
+app.get("/api/admin/supplier-updates", requireAdmin, async (req,res)=>{
+  try {
+    const [rows]=await pool.execute("SELECT u.id,u.status,u.created_at,u.reviewed_at,s.legal_name,s.trade_name,s.business_email,s.country,s.city FROM supplier_update_requests u JOIN supplier_profiles s ON s.id=u.supplier_id ORDER BY u.created_at DESC LIMIT 200");
+    res.json({updates:rows});
+  } catch(error) { console.error(error); res.status(500).json({error:"Could not load supplier updates."}); }
+});
+
+app.get("/api/admin/supplier-updates/:id", requireAdmin, async (req,res)=>{
+  try {
+    const [[update]]=await pool.execute("SELECT u.*,s.legal_name,s.trade_name,s.business_email,s.business_phone,s.contact_person,s.category,s.subcategory FROM supplier_update_requests u JOIN supplier_profiles s ON s.id=u.supplier_id WHERE u.id=?",[req.params.id]);
+    if(!update)return res.status(404).json({error:"Update not found."});
+    const [files]=await pool.execute("SELECT id,file_type,original_name,mime_type,file_size FROM supplier_update_files WHERE update_id=? ORDER BY created_at",[req.params.id]);
+    res.json({update,payload:JSON.parse(update.payload_json||"{}"),files});
+  } catch(error) { console.error(error); res.status(500).json({error:"Could not load supplier update."}); }
+});
+
+app.patch("/api/admin/supplier-updates/:id", requireAdmin, async (req,res)=>{
+  const status=clean(req.body?.status,30), notes=clean(req.body?.adminNotes,4000);
+  if(!["approved","query","rejected"].includes(status))return res.status(400).json({error:"Invalid update status."});
+  const conn=await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [[u]]=await conn.execute("SELECT * FROM supplier_update_requests WHERE id=? FOR UPDATE",[req.params.id]);
+    if(!u){await conn.rollback();return res.status(404).json({error:"Update not found."});}
+    const changes=JSON.parse(u.payload_json||"{}");
+    if(status==="approved"){
+      const map={legal_name:"legal_name",trade_name:"trade_name",business_type:"business_type",country:"country",city:"city",address:"address",business_email:"business_email",business_phone:"business_phone",contact_person:"contact_person",designation:"designation",website:"website",category:"category",subcategory:"subcategory"};
+      const keys=Object.keys(changes).filter(k=>map[k]);
+      if(keys.length){
+        const set=keys.map(k=>map[k]+"=?").join(",");
+        const values=keys.map(k=>changes[k]);
+        await conn.execute("UPDATE supplier_profiles SET "+set+" WHERE id=?",[...values,u.supplier_id]);
+        const appSet=keys.map(k=>"a."+map[k]+"=?").join(",");
+        await conn.execute("UPDATE supplier_applications a JOIN supplier_profiles s ON s.application_id=a.id SET "+appSet+" WHERE s.id=?",[...values,u.supplier_id]);
+      }
+    }
+    await conn.execute("UPDATE supplier_update_requests SET status=?,admin_notes=?,reviewed_at=NOW(),reviewed_by=? WHERE id=?",[status,notes||null,"admin",req.params.id]);
+    await conn.commit();
+    res.json({ok:true,status});
+  } catch(error) { await conn.rollback(); console.error(error); res.status(500).json({error:"Could not update supplier profile."}); }
+  finally { conn.release(); }
+});
+
+app.get("/api/admin/supplier-update-files/:id", requireAdmin, async (req,res)=>{
+  try {
+    const [[file]]=await pool.execute("SELECT original_name,mime_type,relative_path FROM supplier_update_files WHERE id=?",[req.params.id]);
+    if(!file)return res.status(404).json({error:"File not found."});
+    const absolute=path.resolve(UPLOAD_DIR,file.relative_path), root=path.resolve(UPLOAD_DIR);
+    if(!absolute.startsWith(root+path.sep)||!fs.existsSync(absolute))return res.status(404).json({error:"File not found."});
+    res.setHeader("Content-Type",file.mime_type);
+    res.setHeader("Content-Disposition",`inline; filename="${file.original_name.replace(/["\\]/g,"")}"`);
+    res.sendFile(absolute);
+  } catch(error) { console.error(error); res.status(500).json({error:"Could not open file."}); }
 });
 
 app.get("/api/admin/files/:id", requireAdmin, async (req, res) => {
