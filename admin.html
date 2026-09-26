@@ -10,7 +10,7 @@
 <body>
 <header><div class="wrap head"><div><h1>SupplyDesk Admin</h1><div class="muted">Supplier verification & profile update queue</div></div><button id="logout">Clear Token</button></div></header>
 <main class="wrap">
-<div class="toolbar"><input id="adminId" placeholder="Admin ID"><input id="adminPassword" type="password" placeholder="Password"><button class="primary" onclick="login()">Sign In</button><span id="roleBadge" class="badge">Not signed in</span><select id="status"><option value="">All applications</option><option value="under_review">Under Review</option><option value="query">Query</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select><button onclick="loadApps()">Applications</button><button id="updatesBtn" onclick="loadUpdates()" style="display:none">Supplier Updates</button><button id="testMailBtn" onclick="testEmail()" style="display:none">Test Email</button><button id="testSupplierMailBtn" onclick="testSupplierEmail()" style="display:none">Test Supplier Email</button><button id="testStorageBtn" onclick="testConnectionStorage()" style="display:none">Test Connection DB</button><button onclick="loadProducts()">Products</button></div>
+<div class="toolbar"><input id="adminId" placeholder="Admin ID"><input id="adminPassword" type="password" placeholder="Password"><button class="primary" onclick="login()">Sign In</button><span id="roleBadge" class="badge">Not signed in</span><select id="status"><option value="">All applications</option><option value="under_review">Under Review</option><option value="query">Query</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select><button onclick="loadApps()">Applications</button><button id="updatesBtn" onclick="loadUpdates()" style="display:none">Supplier Updates</button><button id="connectionsBtn" onclick="loadConnections()" style="display:none">Connection Requests</button><button id="testMailBtn" onclick="testEmail()" style="display:none">Test Email</button><button id="testSupplierMailBtn" onclick="testSupplierEmail()" style="display:none">Test Supplier Email</button><button id="testStorageBtn" onclick="testConnectionStorage()" style="display:none">Test Connection DB</button><button onclick="loadProducts()">Products</button></div>
 <div id="message" class="muted"></div>
 <div class="grid">
 <section class="card"><div id="list">Enter your admin token to load applications.</div></section>
@@ -22,7 +22,7 @@ const key="supplydesk_admin_token", roleKey="supplydesk_admin_role";
 const adminIdInput=document.getElementById("adminId"), adminPasswordInput=document.getElementById("adminPassword");
 function token(){return sessionStorage.getItem(key)||""}
 function role(){return sessionStorage.getItem(roleKey)||""}
-function applyRole(){const r=role();document.getElementById("roleBadge").textContent=r==="super_admin"?"SUPER ADMIN":"ADMIN";document.getElementById("updatesBtn").style.display=r?"inline-block":"none";document.getElementById("testMailBtn").style.display=r?"inline-block":"none";document.getElementById("testSupplierMailBtn").style.display=r?"inline-block":"none";document.getElementById("testStorageBtn").style.display=r?"inline-block":"none"}
+function applyRole(){const r=role();document.getElementById("roleBadge").textContent=r==="super_admin"?"SUPER ADMIN":"ADMIN";document.getElementById("updatesBtn").style.display=r?"inline-block":"none";document.getElementById("connectionsBtn").style.display=r?"inline-block":"none";document.getElementById("testMailBtn").style.display=r?"inline-block":"none";document.getElementById("testSupplierMailBtn").style.display=r?"inline-block":"none";document.getElementById("testStorageBtn").style.display=r?"inline-block":"none"}
 async function login(){
   try{
     const r=await fetch("/api/admin/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({adminId:adminIdInput.value.trim(),password:adminPasswordInput.value})});
@@ -57,6 +57,33 @@ async function testSupplierEmail(){
 }
 async function loadApps(){try{const q=document.getElementById("status").value;const data=await api("/api/admin/applications"+(q?"?status="+encodeURIComponent(q):""));document.getElementById("message").textContent="";renderList(data.applications)}catch(e){document.getElementById("message").textContent=e.message}}
 function renderList(items){if(!items.length){document.getElementById("list").innerHTML="<div class='muted'>No applications found.</div>";return}document.getElementById("list").innerHTML='<div class="row header"><div>Business</div><div>Location</div><div>Category</div><div>Status</div><div></div></div>'+items.map(a=>`<div class="row"><div><strong>${esc(a.legal_name)}</strong><br><span class="muted">${esc(a.business_type)}</span></div><div>${esc(a.city)}, ${esc(a.country)}</div><div>${esc(a.category)}<br>${esc(a.subcategory)}</div><div><span class="badge">${esc(a.status)}</span></div><div><button onclick="openApp('${a.id}')">Review</button></div></div>`).join("")}
+async function loadConnections(){
+  if(!role()){document.getElementById("message").textContent="Sign in as Admin or Super Admin to review connection requests.";return}
+  try{
+    const data=await api("/api/admin/connect-requests");
+    document.getElementById("message").textContent="";
+    renderConnectionsAdmin(data.requests||[]);
+  }catch(e){document.getElementById("message").textContent=e.message}
+}
+function connectionStatusLabel(v){return ({new:"New",contacted:"Contacted",in_discussion:"In Discussion",closed:"Closed"})[v]||v}
+function renderConnectionsAdmin(items){
+  if(!items.length){document.getElementById("list").innerHTML="<div class='muted'>No connection requests found.</div>";return}
+  document.getElementById("list").innerHTML='<div class="row header"><div>Customer</div><div>Supplier</div><div>Requirement</div><div>Status</div><div></div></div>'+items.map(c=>`<div class="row"><div><strong>${esc(c.customer_name)}</strong><br><span class="muted">${esc(c.customer_email)}</span></div><div>${esc(c.trade_name||c.legal_name)}<br><span class="muted">${esc(c.city)}, ${esc(c.country)}</span></div><div>${esc(c.product_name||"General enquiry")}<br><span class="muted">${esc(new Date(c.created_at).toLocaleString())}</span></div><div><span class="badge">${esc(connectionStatusLabel(c.status))}</span></div><div><button onclick="openConnectionAdmin('${c.id}')">Review</button></div></div>`).join("");
+}
+async function openConnectionAdmin(id){
+  try{
+    const data=await api("/api/admin/connect-requests"),c=(data.requests||[]).find(x=>x.id===id);
+    if(!c)throw new Error("Connection request not found.");
+    document.getElementById("detail").innerHTML=`<h2>${esc(c.customer_name)}</h2><div class="status"><strong>Status:</strong> ${esc(connectionStatusLabel(c.status))}</div><div class="kv"><b>Customer email</b><span><a href="mailto:${esc(c.customer_email)}">${esc(c.customer_email)}</a></span><b>Mobile</b><span>${esc(c.customer_phone||"Not provided")}</span><b>Supplier</b><span>${esc(c.trade_name||c.legal_name)}</span><b>Location</b><span>${esc(c.city)}, ${esc(c.country)}</span><b>Requirement</b><span>${esc(c.product_name||"General supplier enquiry")}</span><b>Source</b><span>${esc(c.source_action)}</span><b>Received</b><span>${esc(new Date(c.created_at).toLocaleString())}</span><b>Message</b><span>${esc(c.message||"No message")}</span></div><h3>Update status</h3><div class="actions"><button onclick="setConnectionStatus('${c.id}','new')">New</button><button onclick="setConnectionStatus('${c.id}','contacted')">Contacted</button><button class="approve" onclick="setConnectionStatus('${c.id}','in_discussion')">In Discussion</button><button class="danger" onclick="setConnectionStatus('${c.id}','closed')">Closed</button></div>`;
+  }catch(e){document.getElementById("message").textContent=e.message}
+}
+async function setConnectionStatus(id,status){
+  try{
+    await api("/api/admin/connect-requests/"+encodeURIComponent(id),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});
+    document.getElementById("message").textContent="Connection request updated.";
+    await loadConnections(); await openConnectionAdmin(id);
+  }catch(e){document.getElementById("message").textContent=e.message}
+}
 async function loadUpdates(){
   if(!role()){document.getElementById("message").textContent="Sign in as Admin or Super Admin to review supplier updates.";return}
   try{
