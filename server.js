@@ -1035,6 +1035,8 @@ app.patch("/api/admin/supplier-updates/:id", requireAdmin, async (req,res)=>{
     const [[u]]=await conn.execute("SELECT * FROM supplier_update_requests WHERE id=? FOR UPDATE",[req.params.id]);
     if(!u){await conn.rollback();return res.status(404).json({error:"Update not found."});}
     const changes=JSON.parse(u.payload_json||"{}");
+    const [[currentSupplier]]=await conn.execute("SELECT legal_name,trade_name,business_email FROM supplier_profiles WHERE id=?",[u.supplier_id]);
+    if(!currentSupplier){await conn.rollback();return res.status(404).json({error:"Supplier not found."});}
     if(status==="approved"){
       if(changes.business_email){
         const [[dup]]=await conn.execute("SELECT id FROM supplier_profiles WHERE business_email=? AND id<>? LIMIT 1",[changes.business_email,u.supplier_id]);
@@ -1050,8 +1052,21 @@ app.patch("/api/admin/supplier-updates/:id", requireAdmin, async (req,res)=>{
         await conn.execute("UPDATE supplier_applications a JOIN supplier_profiles s ON s.application_id=a.id SET "+appSet+" WHERE s.id=?",[...values,u.supplier_id]);
       }
     }
-    await conn.execute("UPDATE supplier_update_requests SET status=?,admin_notes=?,reviewed_at=NOW(),reviewed_by=? WHERE id=?",[status,notes||null,"admin",req.params.id]);
+    await conn.execute("UPDATE supplier_update_requests SET status=?,admin_notes=?,reviewed_at=NOW(),reviewed_by=? WHERE id=?",[status,notes||null,req.admin.admin_id,req.params.id]);
     await conn.commit();
+
+    const notifyEmail=(status==="approved" && changes.business_email)?String(changes.business_email).trim().toLowerCase():String(currentSupplier.business_email||"").trim().toLowerCase();
+    if(notifyEmail && /^\S+@\S+\.\S+$/.test(notifyEmail)){
+      const supplierName=changes.trade_name||changes.legal_name||currentSupplier.trade_name||currentSupplier.legal_name||"Supplier";
+      const subject=status==="approved"?"SupplyDesk: Profile update approved":status==="query"?"SupplyDesk: More information required for your profile update":"SupplyDesk: Profile update not approved";
+      const text=status==="approved"
+        ? ["Hello "+supplierName+",","", "Your SupplyDesk profile update has been approved and is now live.","",changes.business_email?"Your registered business email is now: "+changes.business_email:"","Reviewed by: "+req.admin.admin_id,"", "Thank you,","SupplyDesk"].filter(Boolean).join("\n")
+        : status==="query"
+        ? ["Hello "+supplierName+",","", "SupplyDesk has reviewed your profile update and needs more information before it can be approved.","",notes?"Admin note: "+notes:"Please sign in to your Supplier Dashboard to review the request and submit the required changes.","","SupplyDesk"].filter(Boolean).join("\n")
+        : ["Hello "+supplierName+",","", "Your SupplyDesk profile update was not approved.","",notes?"Admin note: "+notes:"Please contact SupplyDesk if you need clarification.","","SupplyDesk"].filter(Boolean).join("\n");
+      try{await mailer.sendMail({from:process.env.SMTP_FROM,to:notifyEmail,subject,text});}
+      catch(mailError){console.error("Supplier update notification email failed:",mailError);}
+    }
     res.json({ok:true,status});
   } catch(error) { await conn.rollback(); console.error(error); res.status(500).json({error:"Could not update supplier profile."}); }
   finally { conn.release(); }
