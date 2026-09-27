@@ -12,7 +12,7 @@ const nodemailer = require("nodemailer");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-const BUILD_VERSION = process.env.SUPPLYDESK_BUILD || "dashboard-load-fix-2026-09-27-04";
+const BUILD_VERSION = process.env.SUPPLYDESK_BUILD || "dashboard-schema-fix-2026-09-27-05";
 const ROOT = __dirname;
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(ROOT, "private-uploads");
 
@@ -1631,12 +1631,133 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Something went wrong." });
 });
 
+async function ensureDashboardSchema() {
+  // Keep the production dashboard self-healing when a deployment is pointed at
+  // an existing database that predates the dashboard/product migrations.
+  // All statements are idempotent and only create missing tables.
+  const statements = [
+    `CREATE TABLE IF NOT EXISTS supplier_dashboard_tokens (
+      id CHAR(36) PRIMARY KEY,
+      supplier_id CHAR(36) NOT NULL,
+      token_hash CHAR(64) NOT NULL UNIQUE,
+      expires_at DATETIME NOT NULL,
+      revoked_at DATETIME NULL,
+      last_used_at DATETIME NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_dashboard_token_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE,
+      INDEX idx_dashboard_token_supplier (supplier_id, created_at),
+      INDEX idx_dashboard_token_expiry (expires_at)
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS supplier_dashboard_otps (
+      id CHAR(36) PRIMARY KEY,
+      supplier_id CHAR(36) NOT NULL,
+      otp_hash CHAR(64) NOT NULL,
+      expires_at DATETIME NOT NULL,
+      attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+      used_at DATETIME NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_dashboard_otp_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE,
+      INDEX idx_dashboard_otp_supplier (supplier_id, created_at),
+      INDEX idx_dashboard_otp_expiry (expires_at)
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS supplier_products (
+      id CHAR(36) PRIMARY KEY,
+      supplier_id CHAR(36) NOT NULL,
+      product_name VARCHAR(255) NOT NULL,
+      category VARCHAR(180) NOT NULL,
+      subcategory VARCHAR(180) NOT NULL,
+      description TEXT NULL,
+      moq VARCHAR(120) NULL,
+      unit VARCHAR(80) NULL,
+      market_scope ENUM('Domestic','International','Both') NOT NULL DEFAULT 'Both',
+      status ENUM('pending','approved','rejected','archived') NOT NULL DEFAULT 'pending',
+      admin_notes TEXT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      reviewed_at DATETIME NULL,
+      reviewed_by VARCHAR(120) NULL,
+      CONSTRAINT fk_supplier_product_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE,
+      INDEX idx_supplier_product_supplier (supplier_id, status, updated_at),
+      INDEX idx_supplier_product_public (status, category, subcategory)
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS supplier_product_files (
+      id CHAR(36) PRIMARY KEY,
+      product_id CHAR(36) NOT NULL,
+      original_name VARCHAR(255) NOT NULL,
+      stored_name VARCHAR(255) NOT NULL,
+      relative_path VARCHAR(700) NOT NULL,
+      mime_type VARCHAR(120) NOT NULL,
+      file_size BIGINT UNSIGNED NOT NULL,
+      status ENUM('pending','approved','rejected','archived') NOT NULL DEFAULT 'pending',
+      admin_notes TEXT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      reviewed_at DATETIME NULL,
+      reviewed_by VARCHAR(120) NULL,
+      CONSTRAINT fk_supplier_product_file_product FOREIGN KEY (product_id) REFERENCES supplier_products(id) ON DELETE CASCADE,
+      INDEX idx_supplier_product_file_product (product_id, status, created_at)
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS supplier_profile_views (
+      id CHAR(36) PRIMARY KEY,
+      supplier_id CHAR(36) NOT NULL,
+      visitor_hash CHAR(64) NOT NULL,
+      viewed_on DATE NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_supplier_view_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE,
+      UNIQUE KEY uq_supplier_view_day (supplier_id, visitor_hash, viewed_on),
+      INDEX idx_supplier_view_supplier (supplier_id, created_at)
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS supplier_update_tokens (
+      id CHAR(36) PRIMARY KEY,
+      supplier_id CHAR(36) NOT NULL,
+      token_hash CHAR(64) NOT NULL UNIQUE,
+      expires_at DATETIME NOT NULL,
+      used_at DATETIME NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_update_token_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE,
+      INDEX idx_update_token_supplier (supplier_id, created_at),
+      INDEX idx_update_token_expiry (expires_at)
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS supplier_update_requests (
+      id CHAR(36) PRIMARY KEY,
+      supplier_id CHAR(36) NOT NULL,
+      status ENUM('pending','approved','query','rejected') NOT NULL DEFAULT 'pending',
+      payload_json TEXT NOT NULL,
+      admin_notes TEXT NULL,
+      submitted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      reviewed_at DATETIME NULL,
+      reviewed_by VARCHAR(120) NULL,
+      CONSTRAINT fk_update_request_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE,
+      INDEX idx_update_request_status (status, submitted_at),
+      INDEX idx_update_request_supplier (supplier_id, submitted_at)
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS supplier_update_files (
+      id CHAR(36) PRIMARY KEY,
+      update_id CHAR(36) NOT NULL,
+      file_type ENUM('business_registration','tax_registration','licence_certificate','address_proof','business_photo') NOT NULL,
+      original_name VARCHAR(255) NOT NULL,
+      stored_name VARCHAR(255) NOT NULL,
+      relative_path VARCHAR(700) NOT NULL,
+      mime_type VARCHAR(120) NOT NULL,
+      file_size BIGINT UNSIGNED NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_update_files_request FOREIGN KEY (update_id) REFERENCES supplier_update_requests(id) ON DELETE CASCADE,
+      INDEX idx_update_files_request (update_id)
+    ) ENGINE=InnoDB`
+  ];
+
+  for (const sql of statements) {
+    await pool.query(sql);
+  }
+}
+
 async function start() {
-  // Production database tables are managed through database/hostinger.sql.
-  // Avoid running CREATE TABLE during app startup because the runtime DB user
-  // may not have DDL privileges.
+  // The dashboard schema is idempotent. This repairs an older production DB
+  // that is missing dashboard/product tables without requiring a manual
+  // phpMyAdmin migration step.
   try {
     await pool.query("SELECT 1");
+    await ensureDashboardSchema();
+    console.log("SupplyDesk dashboard schema check completed.");
     app.listen(PORT, () => console.log(`SupplyDesk running on port ${PORT}`));
   } catch (error) {
     console.error("Database connection failed:", error);
