@@ -12,7 +12,7 @@ const nodemailer = require("nodemailer");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-const BUILD_VERSION = process.env.SUPPLYDESK_BUILD || "dashboard-multi-session-otp-2026-09-27-03";
+const BUILD_VERSION = process.env.SUPPLYDESK_BUILD || "dashboard-load-fix-2026-09-27-04";
 const ROOT = __dirname;
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(ROOT, "private-uploads");
 
@@ -1042,10 +1042,21 @@ app.get("/api/supplier-dashboard", requireSupplierDashboard, async (req,res) => 
       "SELECT id,customer_name,customer_email,customer_phone,product_name,source_action,message,status,created_at,updated_at FROM connect_requests WHERE supplier_id=? ORDER BY created_at DESC LIMIT 50",
       [supplierId]
     );
-    const [[pendingUpdate]]=await pool.execute(
-      "SELECT id,status,submitted_at,admin_notes FROM supplier_update_requests WHERE supplier_id=? AND status IN ('pending','query') ORDER BY submitted_at DESC LIMIT 1",
-      [supplierId]
-    );
+    // Profile update requests are optional for the dashboard. Older
+    // SupplyDesk databases may not have the supplier_update_requests table
+    // yet, so a missing table must not prevent the entire dashboard from
+    // loading.
+    let pendingUpdate = null;
+    try {
+      const [[pending]]=await pool.execute(
+        "SELECT id,status,submitted_at,admin_notes FROM supplier_update_requests WHERE supplier_id=? AND status IN ('pending','query') ORDER BY submitted_at DESC LIMIT 1",
+        [supplierId]
+      );
+      pendingUpdate = pending || null;
+    } catch (e) {
+      if (e?.code !== "ER_NO_SUCH_TABLE") throw e;
+      console.warn("supplier_update_requests table not present; continuing without pending update.");
+    }
     res.json({
       supplier:{
         id:req.supplier.id,legal_name:req.supplier.legal_name,trade_name:req.supplier.trade_name,business_type:req.supplier.business_type,
