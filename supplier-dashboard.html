@@ -499,7 +499,7 @@ function renderConnections(items){
         <b>${esc(c.customer_name)}</b><span class="badge">${esc(connectionStatusLabel(c.status||"new"))}</span>
       </div>
       <small><a href="mailto:${esc(c.customer_email)}">${esc(c.customer_email)}</a>${c.customer_phone?' · '+esc(c.customer_phone):''}</small>
-      <small>${c.product_name?'Requirement: '+esc(c.product_name):'General supplier enquiry'} · ${new Date(c.created_at).toLocaleString()}</small>
+      <small>${c.customer_company?'Company: '+esc(c.customer_company)+' · ':''}${c.customer_country?'Country: '+esc(c.customer_country)+' · ':''}${c.product_name?'Requirement: '+esc(c.product_name):'General supplier enquiry'}${c.quantity?' · Qty: '+esc(c.quantity):''} · ${new Date(c.created_at).toLocaleString()}</small>
       ${c.message?'<small>'+esc(c.message)+'</small>':''}
       <div class="product-actions">
         <button class="btn" onclick="updateConnectionStatus('${esc(c.id)}','contacted')">Contacted</button>
