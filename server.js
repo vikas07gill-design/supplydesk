@@ -1445,28 +1445,43 @@ app.get("/api/admin/product-files/:id", requireAdmin, async (req,res)=>{
   }catch(error){res.status(500).json({error:"Could not open image."});}
 });
 
+async function getPublicSupplierByIdOrSlug(identifier){
+  const key=clean(identifier,120);
+  if(!key)return null;
+  const [[byId]]=await pool.execute(
+    `SELECT id,legal_name,trade_name,business_type,country,city,address,website,category,subcategory,verified,published,profile_details_json
+     FROM supplier_profiles WHERE id=? AND verified=1 AND published=1 LIMIT 1`,
+    [key]
+  );
+  if(byId)return byId;
+  const [[bySlug]]=await pool.execute(
+    `SELECT id,legal_name,trade_name,business_type,country,city,address,website,category,subcategory,verified,published,profile_details_json
+     FROM supplier_profiles
+     WHERE verified=1 AND published=1
+       AND LOWER(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(NULLIF(trade_name,''),legal_name),' ','-'),'&','and'),'/','-'),'_','-'))=LOWER(?)
+     LIMIT 1`,
+    [key]
+  );
+  return bySlug||null;
+}
+
 app.post("/api/suppliers/:id/view", async (req,res) => {
-  const supplierId=clean(req.params.id,80);
   try{
-    const [[supplier]]=await pool.execute("SELECT id FROM supplier_profiles WHERE id=? AND verified=1 AND published=1",[supplierId]);
-    if(!supplier) return res.status(404).json({error:"Supplier not found."});
+    const supplier=await getPublicSupplierByIdOrSlug(req.params.id);
+    if(!supplier)return res.status(404).json({error:"Supplier not found."});
     const visitorHash=crypto.createHash("sha256").update(String(process.env.ADMIN_TOKEN||"")+"|"+String(req.ip||"")+"|"+String(req.get("user-agent")||"")).digest("hex");
-    await pool.execute(
-      "INSERT IGNORE INTO supplier_profile_views (id,supplier_id,visitor_hash,viewed_on) VALUES (?,?,?,CURRENT_DATE())",
-      [crypto.randomUUID(),supplierId,visitorHash]
-    );
-    res.json({ok:true});
-  }catch(error){
-    console.error("Supplier view tracking failed:",error);
-    res.status(500).json({error:"Could not record view."});
-  }
+    await pool.execute("INSERT IGNORE INTO supplier_profile_views (id,supplier_id,visitor_hash,viewed_on) VALUES (?,?,?,CURRENT_DATE())",[crypto.randomUUID(),supplier.id,visitorHash]);
+    res.json({ok:true,supplierId:supplier.id});
+  }catch(error){console.error("Supplier view tracking failed:",error);res.status(500).json({error:"Could not record view."});}
 });
 
 app.get("/api/suppliers/:id/products", async (req,res) => {
   try{
+    const supplier=await getPublicSupplierByIdOrSlug(req.params.id);
+    if(!supplier)return res.status(404).json({error:"Supplier not found."});
     const [rows]=await pool.execute(
       "SELECT id,product_name,category,subcategory,description,moq,unit,market_scope FROM supplier_products WHERE supplier_id=? AND status='approved' ORDER BY updated_at DESC LIMIT 100",
-      [clean(req.params.id,80)]
+      [supplier.id]
     );
     res.json({products:rows});
   }catch(error){console.error(error);res.status(500).json({error:"Could not load supplier products."});}
@@ -1522,36 +1537,17 @@ app.get("/api/products/:id", async (req,res) => {
   }catch(error){console.error(error);res.status(500).json({error:"Could not load product."});}
 });
 
-app.get("/api/suppliers/:id", async (req, res) => {
-  try {
-    const [[row]] = await pool.execute(
-      `SELECT id, legal_name, trade_name, business_type, country, city, address, website,
-              category, subcategory, verified, published
-       FROM supplier_profiles
-       WHERE id = ? AND verified = 1 AND published = 1`,
-      [req.params.id]
-    );
-    if (!row) return res.status(404).json({ error: "Supplier not found." });
-    const supplier = {
-      id: row.id,
-      legal_name: row.legal_name,
-      trade_name: row.trade_name,
-      business_type: row.business_type,
-      country: row.country,
-      city: row.city,
-      address: row.address,
-      website: row.website,
-      category: row.category,
-      subcategory: row.subcategory,
-      verified: row.verified,
-      published: row.published
-    };
-    // Direct supplier phone, email and contact-person data are intentionally private.
-    res.json({ supplier });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Could not load supplier." });
-  }
+app.get("/api/suppliers/:id", async (req,res)=>{
+  try{
+    const row=await getPublicSupplierByIdOrSlug(req.params.id);
+    if(!row)return res.status(404).json({error:"Supplier not found."});
+    let profileDetails={};try{profileDetails=JSON.parse(row.profile_details_json||"{}")}catch{}
+    res.json({supplier:{
+      id:row.id,legal_name:row.legal_name,trade_name:row.trade_name,business_type:row.business_type,
+      country:row.country,city:row.city,address:row.address,website:row.website,category:row.category,
+      subcategory:row.subcategory,verified:row.verified,published:row.published,profileDetails
+    }});
+  }catch(error){console.error("Public supplier lookup failed:",error);res.status(500).json({error:"Could not load supplier."});}
 });
 
 app.get("/api/admin/applications", requireAdmin, async (req, res) => {
