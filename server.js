@@ -1882,6 +1882,13 @@ app.get(["/supplier-dashboard","/supplier-dashboard-login"], (req, res) => {
   res.sendFile(path.join(ROOT, "supplier-dashboard.html"));
 });
 
+app.get(["/buyer-dashboard","/buyer-dashboard-login"],(req,res)=>{
+  res.setHeader("Cache-Control","no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma","no-cache");
+  res.setHeader("Expires","0");
+  res.sendFile(path.join(ROOT,"buyer-dashboard.html"));
+});
+
 app.use(express.static(ROOT, {
   index: "index.html",
   extensions: ["html"]
