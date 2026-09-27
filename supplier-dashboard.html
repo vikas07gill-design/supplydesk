@@ -229,19 +229,41 @@ async function showBuildVersion(){
 }
 async function loadDashboard(){
   try{
-    const d=await api("/api/supplier-dashboard");dashboardData=d;showDashboard();
+    const d=await api("/api/supplier-dashboard");
+    dashboardData=d;
+    showDashboard();
     history.replaceState({},document.title,"supplier-dashboard.html");
     const s=d.supplier;
-    fillBusinessDetails(d.supplier.profileDetails); document.getElementById("welcome").textContent="Welcome, "+(s.trade_name||s.legal_name);
+    fillBusinessDetails(d.supplier.profileDetails);
+    document.getElementById("welcome").textContent="Welcome, "+(s.trade_name||s.legal_name);
     document.getElementById("views").textContent=d.metrics.profile_views_30d;
     document.getElementById("unique").textContent=d.metrics.unique_visitors_30d;
     document.getElementById("connectionsCount").textContent=d.metrics.connections_30d;
     document.getElementById("approvedProducts").textContent=d.metrics.approved_products;
-    fillProfile(s);renderProducts(d.products||[]);renderConnections(d.connections||[]);renderProfileSummary(s);
+    fillProfile(s);
+    renderProducts(d.products||[]);
+    renderConnections(d.connections||[]);
+    renderProfileSummary(s);
     if(d.pendingUpdate){
       document.getElementById("dashboardStatus").innerHTML='<div class="notice">A profile update is currently <strong>'+esc(d.pendingUpdate.status)+'</strong>. Your public profile stays unchanged until SupplyDesk reviews it.</div>';
+    } else {
+      document.getElementById("dashboardStatus").innerHTML="";
     }
-  }catch(e){localStorage.removeItem(dashboardKey);showLogin("Your dashboard link is expired or invalid. Please request a new link.");}
+  }catch(e){
+    const message=e?.message||"Could not load the supplier dashboard.";
+    // Only clear the token when the API explicitly says it is unauthorized.
+    // Server errors must not turn into the misleading "expired link" message.
+    if(/unauthorized|invalid|expired/i.test(message)){
+      localStorage.removeItem(dashboardKey);
+    }
+    const s=document.getElementById("loginStatus");
+    if(s){
+      s.textContent="Dashboard could not open: "+message;
+      s.className="notice error";
+      s.classList.remove("hidden");
+    }
+    showLogin();
+  }
 }
 function fillProfile(s){
   const map={pLegal:"legal_name",pTrade:"trade_name",pType:"business_type",pCountry:"country",pCity:"city",pEmail:"business_email",pPhone:"business_phone",pContact:"contact_person",pDesignation:"designation",pWebsite:"website",pAddress:"address"};
