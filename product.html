@@ -41,7 +41,7 @@ nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!i
         <div class="full"><label for="connectMessage">Message</label><textarea id="connectMessage" maxlength="2000" placeholder="Tell the supplier what you need..."></textarea></div>
       </div>
       <div class="connect-status" id="connectStatus"></div>
-      <div class="connect-actions"><button class="btn" type="button" onclick="closeConnect()">Cancel</button><button class="btn primary" id="connectSubmit" type="submit">Send Enquiry →</button></div>
+      <div class="connect-actions"><a class="btn" id="buyerDashboardLink" href="/buyer-dashboard.html" style="display:none">Buyer Dashboard →</a><button class="btn" type="button" onclick="closeConnect()">Cancel</button><button class="btn primary" id="connectSubmit" type="submit">Send Enquiry →</button></div>
     </form>
   </div>
 </div>
@@ -147,6 +147,7 @@ document.getElementById("connectForm").addEventListener("submit",async e=>{
     if(!r.ok)throw new Error(d.error||"Could not send enquiry.");
     status.className="connect-status success";
     status.textContent=d.message||"Enquiry sent successfully.";
+    document.getElementById("buyerDashboardLink").style.display="inline-flex";
     if(dashboardUrl){}
     document.getElementById("connectForm").reset();
     btn.textContent="Sent ✓";
