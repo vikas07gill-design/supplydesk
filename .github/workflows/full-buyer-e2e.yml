@@ -33,6 +33,9 @@ jobs:
           node-version: 20
       - name: Install dependencies
         run: npm install
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
       - name: Initialize isolated test database
         env:
           MYSQL_PWD: root

@@ -9,7 +9,7 @@ test.describe("SupplyDesk full buyer enquiry flow", () => {
     expect(response.status()).toBe(200);
     const body = await response.json();
     expect(body.supplier).toBeTruthy();
-    expect(body.supplier.tradeName).toBe("India Growth");
+    expect(body.supplier.trade_name).toBe("India Growth");
   });
 
   test("OTP verification -> enquiry -> buyer dashboard", async ({ page }) => {
