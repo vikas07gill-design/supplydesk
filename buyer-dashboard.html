@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Buyer Dashboard | SupplyDesk</title>
+<style>
+:root{--navy:#06182b;--blue:#287bf4;--teal:#16b9d1;--bg:#f4f9fc;--ink:#102a3a;--muted:#6f8792;--line:#dce9ee;--white:#fff}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#edf7fb,#f8fbfd);color:var(--ink);font-family:Inter,system-ui,-apple-system,sans-serif}
+.wrap{max-width:1180px;margin:auto;padding:0 22px}nav{height:76px;background:rgba(6,24,43,.96);color:#fff;display:flex;align-items:center;box-shadow:0 8px 28px rgba(3,24,40,.14)}
+.nav{display:flex;align-items:center;justify-content:space-between}.brand{font-size:24px;font-weight:950;letter-spacing:-.05em}.brand b{color:#45d9ea}.nav-actions{display:flex;gap:8px}.btn{border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:11px;padding:11px 15px;font-weight:850;cursor:pointer}.btn.primary{background:linear-gradient(135deg,var(--teal),var(--blue));border:0;color:#fff}
+main{padding:34px 0 60px}.hero{display:flex;justify-content:space-between;gap:20px;align-items:end;margin-bottom:22px}.eyebrow{font-size:11px;color:#078f9c;font-weight:900;letter-spacing:.13em;text-transform:uppercase}.hero h1{font-size:42px;letter-spacing:-.06em;margin:8px 0}.hero p{color:var(--muted);margin:0}.email{font-size:13px;font-weight:800;color:#54707d}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px}.card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 12px 35px rgba(13,63,84,.05)}.metric strong{display:block;font-size:30px}.metric span{color:var(--muted);font-size:12px}
+.section-title{font-size:22px;letter-spacing:-.04em;margin:28px 0 12px}.table-wrap{overflow:auto}.table{width:100%;border-collapse:collapse;min-width:720px}.table th,.table td{text-align:left;padding:14px;border-bottom:1px solid #edf2f4;font-size:13px}.table th{color:#68818b;font-size:11px;text-transform:uppercase;letter-spacing:.08em}.pill{display:inline-flex;border-radius:999px;padding:6px 9px;background:#eef7f6;color:#14766e;font-size:10px;font-weight:900}.pill.closed{background:#f0f2f4;color:#687781}.pill.contacted{background:#edf4ff;color:#356ac2}
+.empty{text-align:center;padding:40px;color:var(--muted)}.profile{display:grid;grid-template-columns:1fr 1fr;gap:12px}.profile label{font-size:11px;font-weight:850;color:#607983}.profile input{width:100%;margin-top:6px;padding:11px;border:1px solid var(--line);border-radius:10px}.status{margin-top:12px;font-size:13px}.error{color:#b42318}.success{color:#087f6f}
+@media(max-width:700px){.hero{display:block}.hero h1{font-size:34px}.grid,.profile{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<nav><div class="wrap nav"><div class="brand">Supply<b>Desk</b></div><div class="nav-actions"><a class="btn" href="index.html">Browse SupplyDesk</a><button class="btn" onclick="logout()">Logout</button></div></div></nav>
+<main class="wrap">
+<section class="hero"><div><div class="eyebrow">Buyer Dashboard</div><h1>Your sourcing activity</h1><p>Track your enquiries and keep your buyer details ready for future sourcing.</p></div><div class="email" id="email"></div></section>
+<div class="grid">
+<div class="card metric"><strong id="total">0</strong><span>Total enquiries</span></div>
+<div class="card metric"><strong id="active">0</strong><span>Active enquiries</span></div>
+<div class="card metric"><strong id="closed">0</strong><span>Closed enquiries</span></div>
+</div>
+<div class="card">
+<h2 class="section-title">My enquiries</h2>
+<div class="table-wrap"><table class="table"><thead><tr><th>Product / Requirement</th><th>Supplier</th><th>Location</th><th>Quantity</th><th>Status</th><th>Date</th></tr></thead><tbody id="rows"></tbody></table></div>
+<div class="empty" id="empty">No enquiries yet. Browse products and send your first enquiry.</div>
+</div>
+<div class="card" style="margin-top:18px">
+<h2 class="section-title">Buyer profile</h2>
+<div class="profile">
+<div><label>Name<input id="name" maxlength="180"></label></div><div><label>Company<input id="company" maxlength="180"></label></div>
+<div><label>Country<input id="country" maxlength="120"></label></div><div><label>Phone<input id="phone" maxlength="80"></label></div>
+</div>
+<div style="margin-top:14px"><button class="btn primary" onclick="saveProfile()">Save profile</button></div><div class="status" id="status"></div>
+</div>
+</main>
+<script>
+const token=localStorage.getItem("supplydesk_buyer_dashboard_token")||"";
+if(!token)location.href="index.html";
+async function load(){
+ try{
+  const r=await fetch("/api/buyer-dashboard",{headers:{"x-buyer-dashboard-token":token}});
+  if(!r.ok)throw new Error();
+  const d=await r.json(),b=d.buyer||{},e=d.enquiries||[];
+  document.getElementById("email").textContent=b.email||"";
+  ["name","company","country","phone"].forEach(k=>document.getElementById(k).value=b[k]||"");
+  document.getElementById("total").textContent=e.length;
+  document.getElementById("active").textContent=e.filter(x=>x.status!=="closed").length;
+  document.getElementById("closed").textContent=e.filter(x=>x.status==="closed").length;
+  const rows=document.getElementById("rows"),empty=document.getElementById("empty");
+  rows.innerHTML=e.map(x=>'<tr><td><strong>'+esc(x.productName)+'</strong></td><td>'+esc(x.supplierName)+'</td><td>'+esc((x.supplierCity||"")+" "+(x.supplierCountry||""))+'</td><td>'+esc(x.quantity||"—")+'</td><td><span class="pill '+esc(x.status)+'">'+esc(x.status.replaceAll("_"," "))+'</span></td><td>'+new Date(x.createdAt).toLocaleDateString()+'</td></tr>').join("");
+  empty.style.display=e.length?"none":"block";
+ }catch(e){localStorage.removeItem("supplydesk_buyer_dashboard_token");location.href="index.html";}
+}
+function esc(v){return String(v||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+async function saveProfile(){
+ const status=document.getElementById("status");
+ const body={name:document.getElementById("name").value.trim(),company:document.getElementById("company").value.trim(),country:document.getElementById("country").value.trim(),phone:document.getElementById("phone").value.trim()};
+ const r=await fetch("/api/buyer-dashboard/profile",{method:"PATCH",headers:{"Content-Type":"application/json","x-buyer-dashboard-token":token},body:JSON.stringify(body)});
+ const d=await r.json().catch(()=>({}));status.className="status "+(r.ok?"success":"error");status.textContent=r.ok?"Profile saved.":(d.error||"Could not save profile.");
+}
+async function logout(){try{await fetch("/api/buyer-dashboard/logout",{method:"POST",headers:{"x-buyer-dashboard-token":token}})}catch(e){}localStorage.removeItem("supplydesk_buyer_dashboard_token");location.href="index.html"}
+load();
+</script>
+</body></html>
