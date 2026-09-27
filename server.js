@@ -852,17 +852,24 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
   const sourceAction = ["phone","email","contact"].includes(req.body?.sourceAction) ? req.body.sourceAction : "contact";
   const message = clean(req.body?.message, 2000) || null;
   const verificationToken=clean(req.body?.verificationToken,256);
+  const dashboardToken=clean(req.body?.dashboardToken,256);
 
   if (!supplierId || !customerName || !customerEmail) return res.status(400).json({ error: "Name and email are required." });
   if (!/^\S+@\S+\.\S+$/.test(customerEmail)) return res.status(400).json({ error: "Please enter a valid email address." });
-  if(!verificationToken) return res.status(400).json({error:"Please verify your email with the OTP before sending the enquiry."});
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) return res.status(503).json({ error: "Connection email service is not configured yet." });
 
   const requestId = crypto.randomUUID();
   const enquiryId = crypto.randomUUID();
   try {
-    const [[verifiedOtp]]=await pool.execute("SELECT id FROM buyer_email_otps WHERE email=? AND verification_token_hash=? AND verification_expires_at>NOW() AND verified_at IS NOT NULL ORDER BY verified_at DESC LIMIT 1",[customerEmail,hashToken(verificationToken)]);
-    if(!verifiedOtp) return res.status(400).json({error:"Email verification expired. Please verify your email again."});
+    let dashboardBuyer=null;
+    if(dashboardToken){
+      dashboardBuyer=await getBuyerByDashboardToken(dashboardToken);
+      if(dashboardBuyer && dashboardBuyer.email!==customerEmail)dashboardBuyer=null;
+    }
+    if(!dashboardBuyer){
+      const [[verifiedOtp]]=await pool.execute("SELECT id FROM buyer_email_otps WHERE email=? AND verification_token_hash=? AND verification_expires_at>NOW() AND verified_at IS NOT NULL ORDER BY verified_at DESC LIMIT 1",[customerEmail,hashToken(verificationToken)]);
+      if(!verifiedOtp) return res.status(400).json({error:"Email verification expired. Please verify your email again."});
+    }
 
     const [[supplier]] = await pool.execute(
       "SELECT id, legal_name, trade_name, business_email, category, subcategory FROM supplier_profiles WHERE id=? AND verified=1 AND published=1",
@@ -881,9 +888,9 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
     }
 
     const [[existingBuyer]] = await pool.execute("SELECT id FROM buyers WHERE email=? LIMIT 1", [customerEmail]);
-    const buyerId = existingBuyer?.id || crypto.randomUUID();
+    const buyerId = dashboardBuyer?.id || existingBuyer?.id || crypto.randomUUID();
 
-    if (existingBuyer) {
+    if (existingBuyer || dashboardBuyer) {
       await pool.execute(
         "UPDATE buyers SET name=COALESCE(NULLIF(?,''),name), company=COALESCE(NULLIF(?,''),company), country=COALESCE(NULLIF(?,''),country), phone=COALESCE(NULLIF(?,''),phone), last_seen=NOW() WHERE id=?",
         [customerName, customerCompany || "", customerCountry || "", customerPhone || "", buyerId]
