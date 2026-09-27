@@ -88,7 +88,17 @@ Example:
 
 The Node.js app writes each application into its own UUID folder.
 
-## 5. Test after deployment
+## 5. Database architecture
+
+The live application uses **MySQL only**. `supabase/schema.sql` is not used by the current Node.js backend.
+
+The current application automatically checks/creates the dashboard, product, buyer and enquiry-support tables at startup. It also repairs the missing `profile_details_json` column and enforces the `connect_requests.enquiry_id -> buyer_enquiries.id` relationship when the production database is older.
+
+For a new database, import `database/hostinger.sql`. For an existing database, deploy the latest `main` and allow the Node.js startup schema check to complete before testing.
+
+See `DATABASE_ARCHITECTURE.md` for the relationship map.
+
+## 6. Test after deployment
 
 Open:
 
@@ -112,13 +122,13 @@ Enter the ADMIN_TOKEN and review the application.
 
 Approve it. The supplier will then be available through the public supplier API and search.
 
-## 6. Important security rule
+## 7. Important security rule
 
 Do not make the upload directory public.
 
 Legal registration documents, tax documents and address proof must remain admin-only. Only approved supplier profile information should appear in public search.
 
-## 7. Future modules
+## 8. Future modules
 
 After this foundation is working, build in this order:
 
