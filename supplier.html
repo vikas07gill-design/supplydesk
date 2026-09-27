@@ -45,16 +45,11 @@ nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!i
 </div></main>
 <script>
 const params=new URLSearchParams(location.search);
-const id=params.get("id")||"abc-plastics";
+const id=params.get("id")||"";
 const requestedProduct=params.get("product")||"";
 let currentSupplier=null;
 let lastAction="contact";
-const profiles={
-"abc-plastics":{name:"ABC Plastics Manufacturing",city:"Yiwu, China",type:"Manufacturer",about:"Manufacturer of household plastic products and kitchen storage items. This demo profile shows the structure of an individual supplier listing.",products:["Plastic Kitchen Containers","Storage Boxes","Household Articles","Custom OEM Products"]},
-"india-growth":{name:"India Growth Industries",city:"Ahmedabad, India",type:"Manufacturer",about:"Indian manufacturer of plastic household and industrial articles serving domestic buyers and business customers.",products:["Household Plastic Articles","Industrial Components","Storage Products","Custom Manufacturing"]},
-"asia-components":{name:"Asia Components",city:"Shenzhen, China",type:"Electronics Supplier",about:"Supplier of electronics components and OEM products for domestic and international buyers.",products:["Electronic Components","Connectors","OEM Assemblies","Accessories"]},
-"dubai-trading":{name:"Dubai General Trading",city:"Dubai, UAE",type:"Trading & Distribution",about:"General trading and distribution company serving buyers across the UAE and regional markets.",products:["Building Materials","General Merchandise","Distribution Products","Trading Goods"]}
-};
+const profiles={};
 
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function renderProfile(p,verified=false){
@@ -126,9 +121,7 @@ form.addEventListener("submit",async e=>{
   }
 });
 
-renderProfile(profiles[id]||profiles["abc-plastics"]);
-
-if(id && !profiles[id]){
+if(id){
   fetch("/api/suppliers/"+encodeURIComponent(id))
     .then(r=>{if(!r.ok)throw new Error("not found");return r.json()})
     .then(data=>{
@@ -150,21 +143,19 @@ if(id && !profiles[id]){
   const supplierId=new URLSearchParams(location.search).get("id")||"";
   if(!supplierId)return;
   fetch("/api/suppliers/"+encodeURIComponent(supplierId)+"/view",{method:"POST"}).catch(()=>{});
-  const demoIds=new Set(["abc-plastics","india-growth","asia-components","dubai-trading"]);
-  if(demoIds.has(supplierId))return;
   try{
     const r=await fetch("/api/suppliers/"+encodeURIComponent(supplierId)+"/products");
     if(!r.ok)return;
     const d=await r.json(),items=d.products||[];
     if(!items.length)return;
     const section=document.createElement("section");
-    section.className="card";
-    section.style.marginTop="18px";
+    section.className="box";
+    section.style.marginTop="16px";
     section.innerHTML='<h2>Products listed on SupplyDesk</h2><div id="liveSupplierProducts" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:12px"></div>';
     const target=document.querySelector("main");
     if(target)target.appendChild(section);
     const grid=section.querySelector("#liveSupplierProducts");
-    grid.innerHTML=items.map(p=>'<a href="product.html?id='+encodeURIComponent(p.id)+'" style="border:1px solid #dbe7eb;border-radius:12px;padding:13px;background:#fff"><b>'+String(p.product_name).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))+'</b><small style="display:block;color:#657983;margin-top:5px">'+String(p.category).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))+' · '+String(p.subcategory).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))+'</small></a>').join("");
+    grid.innerHTML=items.map(p=>'<a href="product.html?id='+encodeURIComponent(p.id)+'" class="product"><b>'+String(p.product_name).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))+'</b><small>'+String(p.category).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))+' · '+String(p.subcategory).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'" :"&#39;","\"":"&quot;"}[c]))+'</small></a>').join("");
   }catch(e){}
 })();
 </script></body></html>
