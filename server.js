@@ -12,7 +12,7 @@ const nodemailer = require("nodemailer");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-const BUILD_VERSION = process.env.SUPPLYDESK_BUILD || "dashboard-otp-verify-fix-2026-09-27-02";
+const BUILD_VERSION = process.env.SUPPLYDESK_BUILD || "dashboard-multi-session-otp-2026-09-27-03";
 const ROOT = __dirname;
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(ROOT, "private-uploads");
 
@@ -256,16 +256,14 @@ async function sendSupplierDashboardOtp(supplier, requestId = "") {
     html
   });
 
-  // Invalidate older codes only after SMTP has accepted the new message.
-  // This prevents a failed send from destroying the previously valid OTP.
-  await pool.execute(
-    "UPDATE supplier_dashboard_otps SET used_at=NOW() WHERE supplier_id=? AND used_at IS NULL",
-    [supplier.id]
-  );
+  // Every OTP row is an independent login attempt. Do not invalidate
+  // another active OTP for the same supplier because multiple people/devices
+  // may legitimately log in at the same time.
+  const loginAttemptId = crypto.randomUUID();
 
   await pool.execute(
     "INSERT INTO supplier_dashboard_otps (id,supplier_id,otp_hash,expires_at,attempts) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 10 MINUTE),0)",
-    [crypto.randomUUID(), supplier.id, otpHash]
+    [loginAttemptId, supplier.id, otpHash]
   );
 
   return {
@@ -1003,14 +1001,20 @@ app.post("/api/supplier-dashboard/verify-otp", supplierDashboardLimiter, async (
       [crypto.randomUUID(),match.id,dashboardTokenHash(rawToken)]
     );
 
-    // Revoke any other active OTPs after successful verification.
-    await pool.execute(
-      "UPDATE supplier_dashboard_otps SET used_at=NOW() WHERE supplier_id=? AND used_at IS NULL",
-      [match.id]
-    );
-
-    console.log("Supplier dashboard OTP verified:",{supplierId:match.id,email,otpCreatedAt:match.created_at});
-    res.json({ok:true,token:rawToken,message:"OTP verified. Dashboard access granted."});
+    // Only this login attempt is consumed. Other active OTPs for the
+    // same supplier remain valid for other users/devices.
+    console.log("Supplier dashboard OTP verified:",{
+      supplierId:match.id,
+      email,
+      loginAttemptId:match.otp_id,
+      otpCreatedAt:match.created_at
+    });
+    res.json({
+      ok:true,
+      token:rawToken,
+      loginAttemptId:match.otp_id,
+      message:"OTP verified. Dashboard access granted."
+    });
   }catch(error){
     console.error("Supplier dashboard OTP verification failed:",error);
     res.status(500).json({error:"Could not verify the OTP. Please try again."});
