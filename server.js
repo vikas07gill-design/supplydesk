@@ -278,7 +278,41 @@ async function sendSupplierDashboardOtp(supplier, requestId = "") {
 }
 
 async function ensureConnectRequestsTable() {
-  await pool.execute("CREATE TABLE IF NOT EXISTS connect_requests (id CHAR(36) PRIMARY KEY, supplier_id CHAR(36) NOT NULL, customer_name VARCHAR(180) NOT NULL, customer_email VARCHAR(255) NOT NULL, customer_phone VARCHAR(80) NULL, product_name VARCHAR(255) NULL, source_action ENUM('phone','email','contact') NOT NULL DEFAULT 'contact', message TEXT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT fk_connect_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE, INDEX idx_connect_supplier (supplier_id, created_at), INDEX idx_connect_customer (customer_email, created_at)) ENGINE=InnoDB");
+  await pool.execute("CREATE TABLE IF NOT EXISTS connect_requests (id CHAR(36) PRIMARY KEY, supplier_id CHAR(36) NOT NULL, customer_name VARCHAR(180) NOT NULL, customer_email VARCHAR(255) NOT NULL, customer_phone VARCHAR(80) NULL, product_name VARCHAR(255) NULL, source_action ENUM('phone','email','contact') NOT NULL DEFAULT 'contact', message TEXT NULL, status ENUM('new','contacted','in_discussion','closed') NOT NULL DEFAULT 'new', updated_at DATETIME NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT fk_connect_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE, INDEX idx_connect_supplier (supplier_id, created_at), INDEX idx_connect_customer (customer_email, created_at)) ENGINE=InnoDB");
+  try { await pool.query("ALTER TABLE connect_requests ADD COLUMN status ENUM('new','contacted','in_discussion','closed') NOT NULL DEFAULT 'new'"); } catch (e) { if (!["ER_DUP_FIELDNAME","ER_DUP_COLUMN"].includes(e?.code)) throw e; }
+  try { await pool.query("ALTER TABLE connect_requests ADD COLUMN updated_at DATETIME NULL"); } catch (e) { if (!["ER_DUP_FIELDNAME","ER_DUP_COLUMN"].includes(e?.code)) throw e; }
+}
+
+async function ensureBuyerSchema() {
+  await pool.execute(`CREATE TABLE IF NOT EXISTS buyers (
+    id CHAR(36) PRIMARY KEY,
+    email VARCHAR(255) NOT NULL,
+    name VARCHAR(180) NULL,
+    company VARCHAR(180) NULL,
+    country VARCHAR(120) NULL,
+    phone VARCHAR(80) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen DATETIME NULL,
+    UNIQUE KEY uq_buyer_email (email),
+    INDEX idx_buyer_last_seen (last_seen)
+  ) ENGINE=InnoDB`);
+  await pool.execute(`CREATE TABLE IF NOT EXISTS buyer_enquiries (
+    id CHAR(36) PRIMARY KEY,
+    buyer_id CHAR(36) NOT NULL,
+    product_id CHAR(36) NULL,
+    supplier_id CHAR(36) NOT NULL,
+    message TEXT NULL,
+    quantity VARCHAR(120) NULL,
+    status ENUM('new','contacted','in_discussion','closed') NOT NULL DEFAULT 'new',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NULL,
+    CONSTRAINT fk_buyer_enquiry_buyer FOREIGN KEY (buyer_id) REFERENCES buyers(id) ON DELETE CASCADE,
+    CONSTRAINT fk_buyer_enquiry_product FOREIGN KEY (product_id) REFERENCES supplier_products(id) ON DELETE SET NULL,
+    CONSTRAINT fk_buyer_enquiry_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE,
+    INDEX idx_buyer_enquiry_buyer (buyer_id, created_at),
+    INDEX idx_buyer_enquiry_supplier (supplier_id, created_at),
+    INDEX idx_buyer_enquiry_product (product_id, created_at)
+  ) ENGINE=InnoDB`);
 }
 
 function hashToken(token) {
@@ -671,17 +705,23 @@ app.get("/api/suppliers", async (req, res) => {
 
 app.post("/api/connect-requests", connectLimiter, async (req, res) => {
   const supplierId = clean(req.body?.supplierId, 80);
+  const productId = clean(req.body?.productId, 80) || null;
   const customerName = clean(req.body?.customerName, 180);
   const customerEmail = clean(req.body?.customerEmail, 255).toLowerCase();
+  const customerCompany = clean(req.body?.customerCompany, 180) || null;
+  const customerCountry = clean(req.body?.customerCountry, 120) || null;
   const customerPhone = clean(req.body?.customerPhone, 80) || null;
   const productName = clean(req.body?.productName, 255) || null;
+  const quantity = clean(req.body?.quantity, 120) || null;
   const sourceAction = ["phone","email","contact"].includes(req.body?.sourceAction) ? req.body.sourceAction : "contact";
   const message = clean(req.body?.message, 2000) || null;
+
   if (!supplierId || !customerName || !customerEmail) return res.status(400).json({ error: "Name and email are required." });
   if (!/^\S+@\S+\.\S+$/.test(customerEmail)) return res.status(400).json({ error: "Please enter a valid email address." });
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) return res.status(503).json({ error: "Connection email service is not configured yet." });
 
   const requestId = crypto.randomUUID();
+  const enquiryId = crypto.randomUUID();
   try {
     const [[supplier]] = await pool.execute(
       "SELECT id, legal_name, trade_name, business_email, category, subcategory FROM supplier_profiles WHERE id=? AND verified=1 AND published=1",
@@ -689,27 +729,60 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
     );
     if (!supplier || !supplier.business_email) return res.status(404).json({ error: "Supplier contact is not available." });
 
+    let selectedProductName = productName;
+    if (productId) {
+      const [[product]] = await pool.execute(
+        "SELECT id,product_name FROM supplier_products WHERE id=? AND supplier_id=? AND status='approved'",
+        [productId, supplierId]
+      );
+      if (!product) return res.status(400).json({ error: "This product is not currently available for connection." });
+      selectedProductName = product.product_name;
+    }
+
+    const [[existingBuyer]] = await pool.execute("SELECT id FROM buyers WHERE email=? LIMIT 1", [customerEmail]);
+    const buyerId = existingBuyer?.id || crypto.randomUUID();
+
+    if (existingBuyer) {
+      await pool.execute(
+        "UPDATE buyers SET name=COALESCE(NULLIF(?,''),name), company=COALESCE(NULLIF(?,''),company), country=COALESCE(NULLIF(?,''),country), phone=COALESCE(NULLIF(?,''),phone), last_seen=NOW() WHERE id=?",
+        [customerName, customerCompany || "", customerCountry || "", customerPhone || "", buyerId]
+      );
+    } else {
+      await pool.execute(
+        "INSERT INTO buyers (id,email,name,company,country,phone,last_seen) VALUES (?,?,?,?,?,?,NOW())",
+        [buyerId,customerEmail,customerName,customerCompany,customerCountry,customerPhone]
+      );
+    }
+
+    await pool.execute(
+      "INSERT INTO buyer_enquiries (id,buyer_id,product_id,supplier_id,message,quantity,status) VALUES (?,?,?,?,?,?,?)",
+      [enquiryId,buyerId,productId,supplierId,message,quantity,"new"]
+    );
+
+    await pool.execute(
+      "INSERT INTO connect_requests (id,supplier_id,customer_name,customer_email,customer_phone,product_name,source_action,message,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,NOW())",
+      [requestId,supplierId,customerName,customerEmail,customerPhone,selectedProductName,sourceAction,message,"new"]
+    );
+
     const supplierName = supplier.trade_name || supplier.legal_name;
-    const subject = "SupplyDesk: New connection request" + (productName ? " for " + productName : "");
+    const subject = "SupplyDesk: New connection request" + (selectedProductName ? " for " + selectedProductName : "");
     const supplierText = [
       "A customer wants to connect with " + supplierName + " through SupplyDesk.",
       "",
       "Customer: " + customerName,
       "Email: " + customerEmail,
+      customerCompany ? "Company: " + customerCompany : "",
+      customerCountry ? "Country: " + customerCountry : "",
       customerPhone ? "Mobile: " + customerPhone : "",
-      productName ? "Product / requirement: " + productName : "Category: " + supplier.category + " / " + supplier.subcategory,
+      selectedProductName ? "Product / requirement: " + selectedProductName : "Category: " + supplier.category + " / " + supplier.subcategory,
+      quantity ? "Quantity / requirement: " + quantity : "",
       message ? "Message: " + message : "",
       "",
       "Please contact the customer directly to continue the discussion.",
       "",
       "This connection was initiated on SupplyDesk.",
-      "Request ID: " + requestId
+      "Enquiry ID: " + enquiryId
     ].filter(Boolean).join("\n");
-
-    await pool.execute(
-      "INSERT INTO connect_requests (id,supplier_id,customer_name,customer_email,customer_phone,product_name,source_action,message,status) VALUES (?,?,?,?,?,?,?,?,?)",
-      [requestId,supplierId,customerName,customerEmail,customerPhone,productName,sourceAction,message,"new"]
-    );
 
     try {
       const info = await mailer.sendMail({
@@ -719,18 +792,12 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
         subject,
         text: supplierText
       });
-      console.log("Connection email sent:", {requestId,supplierId,to:supplier.business_email,messageId:info.messageId});
+      console.log("Connection email sent:", {requestId,enquiryId,supplierId,to:supplier.business_email,messageId:info.messageId});
     } catch (mailError) {
-      console.error("Connection email delivery failed:", {
-        requestId,supplierId,to:supplier.business_email,
-        code:mailError?.code,responseCode:mailError?.responseCode,command:mailError?.command,
-        response:mailError?.response,message:mailError?.message
-      });
+      console.error("Connection email delivery failed:", {requestId,enquiryId,supplierId,to:supplier.business_email,code:mailError?.code,responseCode:mailError?.responseCode,command:mailError?.command,response:mailError?.response,message:mailError?.message});
       return res.status(502).json({error:"Connection request was saved, but the supplier email could not be delivered. Please try again.",requestId});
     }
 
-    // Customer confirmation is best-effort. A supplier request remains successful
-    // even if the customer's mailbox rejects the confirmation email.
     try {
       await mailer.sendMail({
         from: process.env.SMTP_FROM,
@@ -739,27 +806,26 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
         text: [
           "Your connection request has been sent to " + supplierName + " through SupplyDesk.",
           "",
-          productName ? "Requirement: " + productName : "",
+          selectedProductName ? "Requirement: " + selectedProductName : "",
+          quantity ? "Quantity: " + quantity : "",
           "The supplier has been notified and may contact you directly.",
           "",
-          "Request ID: " + requestId,
+          "Enquiry ID: " + enquiryId,
           "",
           "SupplyDesk is an information and connection platform. Any commercial discussion or transaction is arranged directly between you and the supplier."
         ].filter(Boolean).join("\n")
       });
     } catch (customerMailError) {
-      console.error("Customer confirmation email failed:", {
-        requestId,to:customerEmail,code:customerMailError?.code,
-        responseCode:customerMailError?.responseCode,message:customerMailError?.message
-      });
+      console.error("Customer confirmation email failed:", {enquiryId,to:customerEmail,code:customerMailError?.code,responseCode:customerMailError?.responseCode,message:customerMailError?.message});
     }
 
     return res.status(201).json({
       ok:true,
+      enquiryId,
       message:"Connection request sent to the supplier. A confirmation has also been sent to your email."
     });
   } catch (error) {
-    console.error("Connection request failed:", {requestId,supplierId,code:error?.code,message:error?.message});
+    console.error("Connection request failed:", {requestId,enquiryId,supplierId,code:error?.code,message:error?.message});
     res.status(500).json({error:"Could not save the connection request. Please try again.",requestId});
   }
 });
@@ -1798,6 +1864,7 @@ async function ensureDashboardSchema() {
     await pool.query(sql);
   }
   await ensureConnectRequestsTable();
+  await ensureBuyerSchema();
 }
 
 async function start() {
