@@ -5,7 +5,8 @@
   "description": "SupplyDesk information and direct-connection platform",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test:e2e": "playwright test"
   },
   "engines": {
     "node": ">=20"
@@ -18,5 +19,8 @@
     "mysql2": "^3.14.4",
     "dotenv": "^17.2.2",
     "nodemailer": "^7.0.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
   }
 }
