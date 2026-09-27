@@ -1534,6 +1534,28 @@ app.get("/api/super-admin/applications/:id", requireSuperAdmin, async (req,res)=
 });
 
 
+app.patch("/api/admin/applications/:id/verification", requireAdmin, async (req,res)=>{
+  const allowed=["registration_checked","documents_checked","photos_checked","address_checked"];
+  const updates=[];
+  const params=[];
+  for(const key of allowed){
+    if(Object.prototype.hasOwnProperty.call(req.body||{},key)){
+      updates.push(key+"=?");
+      params.push(req.body[key]?1:0);
+    }
+  }
+  const notes=Object.prototype.hasOwnProperty.call(req.body||{},"verification_notes")?clean(req.body.verification_notes,4000):null;
+  if(notes!==null){updates.push("verification_notes=?");params.push(notes||null);}
+  if(!updates.length)return res.status(400).json({error:"No verification changes submitted."});
+  try{
+    const [[app]]=await pool.execute("SELECT id FROM supplier_applications WHERE id=?",[clean(req.params.id,80)]);
+    if(!app)return res.status(404).json({error:"Application not found."});
+    params.push(clean(req.params.id,80));
+    await pool.execute("UPDATE supplier_verification SET "+updates.join(",")+",verified_at=NOW(),verified_by=? WHERE application_id=?",[...params.slice(0,-1), "admin", params[params.length-1]]);
+    res.json({ok:true,message:"Verification checklist updated."});
+  }catch(error){console.error("Verification checklist update failed:",error);res.status(500).json({error:"Could not update verification checklist."});}
+});
+
 app.patch("/api/admin/applications/:id", requireAdmin, async (req, res) => {
   const status = clean(req.body?.status, 40);
   const notes = clean(req.body?.adminNotes, 4000);
