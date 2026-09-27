@@ -801,6 +801,12 @@ app.post("/api/buyer-email/request-otp", connectLimiter, async (req,res)=>{
   try{
     await pool.execute("UPDATE buyer_email_otps SET expires_at=NOW() WHERE email=? AND verified_at IS NULL AND expires_at>NOW()",[email]);
     await pool.execute("INSERT INTO buyer_email_otps (id,email,otp_hash,expires_at) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 10 MINUTE))",[crypto.randomUUID(),email,hashToken(otp)]);
+    const e2eMode=String(process.env.E2E_TEST_MODE||"").toLowerCase()==="true";
+    const e2eKey=clean(req.get("x-e2e-key"),256);
+    const configuredE2eKey=clean(process.env.E2E_TEST_KEY,256);
+    if(e2eMode && configuredE2eKey && safeEqual(e2eKey,configuredE2eKey)){
+      return res.json({ok:true,message:"Test verification code created.",expiresInMinutes:10,testOtp:otp});
+    }
     await mailer.sendMail({from:process.env.SMTP_FROM,to:email,subject:"SupplyDesk: Verify your email",text:["Your SupplyDesk email verification code is:","",otp,"","This code is valid for 10 minutes.","","If you did not request this code, you can ignore this email.","","SupplyDesk"].join("\n")});
     res.json({ok:true,message:"Verification code sent to your email.",expiresInMinutes:10});
   }catch(error){
