@@ -822,8 +822,17 @@ app.post("/api/buyer-email/verify-otp", connectLimiter, async (req,res)=>{
       return res.status(400).json({error:"Incorrect verification code."});
     }
     const rawToken=crypto.randomBytes(32).toString("hex");
+    const dashboardToken=crypto.randomBytes(32).toString("hex");
+    const [[existingBuyer]]=await pool.execute("SELECT id FROM buyers WHERE email=? LIMIT 1",[email]);
+    const buyerId=existingBuyer?.id||crypto.randomUUID();
+    if(existingBuyer){
+      await pool.execute("UPDATE buyers SET last_seen=NOW() WHERE id=?",[buyerId]);
+    }else{
+      await pool.execute("INSERT INTO buyers (id,email,last_seen) VALUES (?,?,NOW())",[buyerId,email]);
+    }
     await pool.execute("UPDATE buyer_email_otps SET verified_at=NOW(),verification_token_hash=?,verification_expires_at=DATE_ADD(NOW(),INTERVAL 30 MINUTE) WHERE id=?",[hashToken(rawToken),row.id]);
-    res.json({ok:true,verificationToken:rawToken,message:"Email verified successfully."});
+    await pool.execute("INSERT INTO buyer_dashboard_tokens (id,buyer_id,token_hash,expires_at) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 30 DAY))",[crypto.randomUUID(),buyerId,tokenHash(dashboardToken)]);
+    res.json({ok:true,verificationToken:rawToken,dashboardToken,buyerId,dashboardUrl:"/buyer-dashboard.html",message:"Email verified. Your Buyer Dashboard is ready."});
   }catch(error){
     console.error("Buyer email verification failed:",error);
     res.status(500).json({error:"Could not verify the email. Please try again."});
