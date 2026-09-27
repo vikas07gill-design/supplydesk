@@ -862,7 +862,11 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
 
   if (!supplierId || !customerName || !customerEmail) return res.status(400).json({ error: "Name and email are required." });
   if (!/^\S+@\S+\.\S+$/.test(customerEmail)) return res.status(400).json({ error: "Please enter a valid email address." });
-  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) return res.status(503).json({ error: "Connection email service is not configured yet." });
+  const e2eMode=String(process.env.E2E_TEST_MODE||"").toLowerCase()==="true";
+  const e2eKey=clean(req.get("x-e2e-key"),256);
+  const configuredE2eKey=clean(process.env.E2E_TEST_KEY,256);
+  const authorizedE2e=e2eMode && configuredE2eKey && safeEqual(e2eKey,configuredE2eKey);
+  if (!authorizedE2e && (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM)) return res.status(503).json({ error: "Connection email service is not configured yet." });
 
   const requestId = crypto.randomUUID();
   const enquiryId = crypto.randomUUID();
@@ -938,7 +942,7 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
       "Enquiry ID: " + enquiryId
     ].filter(Boolean).join("\n");
 
-    try {
+    if (!authorizedE2e) try {
       const info = await mailer.sendMail({
         from: process.env.SMTP_FROM,
         to: supplier.business_email,
@@ -952,7 +956,7 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
       return res.status(502).json({error:"Connection request was saved, but the supplier email could not be delivered. Please try again.",requestId});
     }
 
-    try {
+    if (!authorizedE2e) try {
       await mailer.sendMail({
         from: process.env.SMTP_FROM,
         to: customerEmail,
