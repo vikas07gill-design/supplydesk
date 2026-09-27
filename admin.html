@@ -142,7 +142,7 @@ function renderProducts(items){
 async function openProductReview(id){
 
   try{
-    const data=await api("/api/admin/products?status=pending");
+    const data=await api("/api/admin/products?status=all");
     const p=(data.products||[]).find(x=>x.id===id);
     if(!p)throw new Error("Product not found.");
     const imgData=await api("/api/admin/products/"+encodeURIComponent(id)+"/images");
