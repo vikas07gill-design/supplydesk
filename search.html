@@ -99,7 +99,7 @@ function render(){
     const image=x.imageUrl
       ?'<div class="product-card-image"><img loading="lazy" src="'+esc(x.imageUrl)+'" alt="'+esc(x.name)+'"></div>'
       :'<div class="product-card-image placeholder"></div>';
-    return '<article class="result"><'+
+    return '<article class="result">'+
       image+
       '<div class="product-card-body"><div class="type">PRODUCT</div>'+
       '<h3>'+esc(x.name)+'</h3>'+
