@@ -12,7 +12,7 @@ const nodemailer = require("nodemailer");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-const BUILD_VERSION = process.env.SUPPLYDESK_BUILD || "dashboard-otp-mekr-fix-2026-09-27-01";
+const BUILD_VERSION = process.env.SUPPLYDESK_BUILD || "dashboard-otp-verify-fix-2026-09-27-02";
 const ROOT = __dirname;
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(ROOT, "private-uploads");
 
@@ -966,19 +966,55 @@ app.post("/api/supplier-dashboard/verify-otp", supplierDashboardLimiter, async (
   const email=clean(req.body?.email,255).toLowerCase(), otp=clean(req.body?.otp,6);
   if(!/^\S+@\S+\.\S+$/.test(email)||!/^\d{6}$/.test(otp)) return res.status(400).json({error:"Enter the 6-digit OTP sent to your business email."});
   try{
-    const [[row]]=await pool.execute(`SELECT o.id AS otp_id,o.otp_hash,o.expires_at,o.attempts,o.used_at,s.id,s.business_email
-      FROM supplier_dashboard_otps o JOIN supplier_profiles s ON s.id=o.supplier_id
-      WHERE s.business_email=? AND s.verified=1 AND s.published=1 AND o.used_at IS NULL AND o.expires_at>NOW()
-      ORDER BY o.created_at DESC LIMIT 1`,[email]);
-    if(!row)return res.status(401).json({error:"OTP expired or not found. Please request a new OTP."});
-    if(Number(row.attempts)>=5)return res.status(429).json({error:"Too many incorrect attempts. Please request a new OTP."});
+    // Email delivery can take several seconds. If a newer OTP was requested
+    // before an older email arrived, the mailbox may contain a still-valid
+    // earlier code. Check the latest few active codes instead of only the
+    // newest database row.
+    const [rows]=await pool.execute(`SELECT o.id AS otp_id,o.otp_hash,o.expires_at,o.attempts,o.used_at,
+             s.id,s.business_email,o.created_at
+      FROM supplier_dashboard_otps o
+      JOIN supplier_profiles s ON s.id=o.supplier_id
+      WHERE LOWER(TRIM(s.business_email))=LOWER(TRIM(?))
+        AND s.verified=1 AND s.published=1
+        AND o.used_at IS NULL AND o.expires_at>NOW()
+      ORDER BY o.created_at DESC LIMIT 5`,[email]);
+
+    if(!rows.length)return res.status(401).json({error:"OTP expired or not found. Please request a new OTP."});
+
     const hash=crypto.createHash("sha256").update(otp).digest("hex");
-    if(hash!==row.otp_hash){await pool.execute("UPDATE supplier_dashboard_otps SET attempts=attempts+1 WHERE id=?",[row.otp_id]);return res.status(401).json({error:"Incorrect OTP. Please try again."});}
-    await pool.execute("UPDATE supplier_dashboard_otps SET used_at=NOW() WHERE id=?",[row.otp_id]);
+    let match=null;
+    for(const row of rows){
+      if(Number(row.attempts)<5 && hash===row.otp_hash){match=row;break;}
+    }
+
+    if(!match){
+      // Count an attempt against the newest active code so repeated wrong
+      // guesses remain rate-limited without invalidating all active codes.
+      const newest=rows[0];
+      if(Number(newest.attempts)>=5)return res.status(429).json({error:"Too many incorrect attempts. Please request a new OTP."});
+      await pool.execute("UPDATE supplier_dashboard_otps SET attempts=attempts+1 WHERE id=?",[newest.otp_id]);
+      return res.status(401).json({error:"Incorrect OTP. Please use the latest OTP received in your email."});
+    }
+
+    await pool.execute("UPDATE supplier_dashboard_otps SET used_at=NOW() WHERE id=?",[match.otp_id]);
     const rawToken=crypto.randomBytes(32).toString("hex");
-    await pool.execute("INSERT INTO supplier_dashboard_tokens (id,supplier_id,token_hash,expires_at) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 24 HOUR))",[crypto.randomUUID(),row.id,dashboardTokenHash(rawToken)]);
+    await pool.execute(
+      "INSERT INTO supplier_dashboard_tokens (id,supplier_id,token_hash,expires_at) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 24 HOUR))",
+      [crypto.randomUUID(),match.id,dashboardTokenHash(rawToken)]
+    );
+
+    // Revoke any other active OTPs after successful verification.
+    await pool.execute(
+      "UPDATE supplier_dashboard_otps SET used_at=NOW() WHERE supplier_id=? AND used_at IS NULL",
+      [match.id]
+    );
+
+    console.log("Supplier dashboard OTP verified:",{supplierId:match.id,email,otpCreatedAt:match.created_at});
     res.json({ok:true,token:rawToken,message:"OTP verified. Dashboard access granted."});
-  }catch(error){console.error("Supplier dashboard OTP verification failed:",error);res.status(500).json({error:"Could not verify the OTP. Please try again."});}
+  }catch(error){
+    console.error("Supplier dashboard OTP verification failed:",error);
+    res.status(500).json({error:"Could not verify the OTP. Please try again."});
+  }
 });
 
 app.get("/api/supplier-dashboard", requireSupplierDashboard, async (req,res) => {
