@@ -32,18 +32,10 @@ nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!i
 <div class="filters"><select id="category" onchange="render()"><option value="">Any category</option><option>Raw Materials</option><option>Plastics & Packaging</option><option>Machinery</option><option>Electronics & Components</option><option>Automotive</option><option>Textiles & Apparel</option><option>Food & Agriculture</option><option>Chemicals</option><option>Consumer Products</option><option>Construction Materials</option><option>Logistics & Freight</option><option>Warehousing & Fulfilment</option><option>Customs & Trade</option><option>Inspection & Verification</option><option>Insurance</option><option>Trade Finance</option><option>Sourcing Services</option><option>Professional Services</option></select><select id="subcategory" onchange="render()"><option value="">Any sub-category</option></select><select id="country" onchange="render()"><option value="">Any country</option><option>India</option><option>China</option><option>UAE</option><option>USA</option></select><select id="city" onchange="render()"><option value="">Any city</option><option>Delhi</option><option>Mumbai</option><option>Ahmedabad</option><option>Yiwu</option><option>Dubai</option><option>Shenzhen</option></select><select id="market" onchange="render()"><option value="">Any market</option><option>Domestic</option><option>International</option></select></div>
 <div class="summary" id="summary"></div><section id="results"></section><div class="footer">SupplyDesk is an information and connection platform. Listings and business details are shown for discovery.</div></main>
 <script>
-const demoData=[
-{id:'abc-plastics',name:'ABC Plastics Manufacturing',type:'supplier',city:'Yiwu',country:'China',market:'International',desc:'Manufacturer of household plastic products and kitchen storage items.',category:'Plastics & Packaging',subcategories:['Plastic Containers','Kitchenware'],tags:['Plastic containers','Kitchenware','Manufacturer']},
-{id:'india-growth',name:'India Growth Industries',type:'supplier',city:'Ahmedabad',country:'India',market:'Domestic',desc:'Indian manufacturer of plastic household and industrial articles.',category:'Plastics & Packaging',subcategories:['Plastic Containers','Household Products'],tags:['Household','Plastics','Manufacturing']},
-{id:'asia-components',name:'Asia Components',type:'supplier',city:'Shenzhen',country:'China',market:'International',desc:'Electronics components supplier serving domestic and export markets.',category:'Electronics & Components',subcategories:['Electronic Components','OEM'],tags:['Electronics','Components','OEM']},
-{id:'dubai-trading',name:'Dubai General Trading',type:'supplier',city:'Dubai',country:'UAE',market:'Domestic',desc:'General trading and distribution company serving the UAE market.',category:'Construction Materials',subcategories:['Building Materials','Distribution'],tags:['Trading','Distribution','Building materials']},
-{id:'plastic-container',name:'Plastic Storage Container',type:'product',city:'Ahmedabad',country:'India',market:'Domestic',desc:'Example product listing with category, market and supplier connection.',category:'Plastics & Packaging',subcategories:['Plastic Containers','Household Products'],tags:['Storage','Plastic','Household']},
-{id:'freight-forwarding',name:'Freight Forwarding Provider',type:'service',city:'Dubai',country:'UAE',market:'International',desc:'Example logistics service provider for international cargo movements.',category:'Logistics & Freight',subcategories:['Freight Forwarding','International Logistics'],tags:['Freight','Logistics','International']}
-];
-let data=[...demoData];
+let data=[];
 const params=new URLSearchParams(location.search);
 document.getElementById('q').value=params.get('q')||'';
-let active=params.get('type')||'all';
+params.get('type')||'all';
 
 document.querySelectorAll('.tab').forEach(b=>{
   b.classList.toggle('active',b.dataset.type===active);
@@ -137,7 +129,7 @@ async function loadLiveData(){
     const [supplierResponse,productResponse]=await Promise.all([fetch('/api/suppliers'),fetch('/api/products')]);
     const suppliers=supplierResponse.ok?(await supplierResponse.json()).suppliers||[]:[];
     const products=productResponse.ok?(await productResponse.json()).products||[]:[];
-    data=[...suppliers.map(x=>({...x,market:x.market||'All markets'})),...products.map(x=>({...x,market:x.market||'All markets'})),...demoData];
+    data=[...suppliers.map(x=>({...x,market:x.market||'All markets'})),...products.map(x=>({...x,market:x.market||'All markets'}))];
   }catch(e){}
   render();
 }
