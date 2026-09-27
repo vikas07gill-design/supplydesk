@@ -143,6 +143,8 @@ form.addEventListener("submit",async e=>{
       supplierId:currentSupplier?.id||id,
       customerName:document.getElementById("customerName").value.trim(),
       customerEmail:document.getElementById("customerEmail").value.trim(),
+      verificationToken:emailVerificationToken,
+      dashboardToken:buyerDashboardToken,
       customerPhone:document.getElementById("customerPhone").value.trim(),
       productName:document.getElementById("productName").value.trim(),
       sourceAction:lastAction,
