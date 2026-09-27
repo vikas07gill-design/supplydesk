@@ -34,7 +34,7 @@ nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!i
 <p class="modal-note">Enter your details. SupplyDesk will instantly email the supplier that you want to connect for this requirement.</p>
 <form id="connectForm">
 <label>Your name<input id="customerName" required maxlength="180"></label>
-<label>Your email<input id="customerEmail" type="email" required maxlength="255"></label>
+<label>Your email<div style="display:flex;gap:8px;align-items:stretch;margin-top:6px"><input id="customerEmail" type="email" required maxlength="255" autocomplete="email" placeholder="your@email.com" style="margin-top:0;flex:1"><button class="btn" id="sendOtpBtn" type="button" style="white-space:nowrap">Send OTP</button></div><div id="otpArea" style="display:none;margin-top:8px"><div style="display:flex;gap:8px"><input id="customerOtp" inputmode="numeric" maxlength="6" placeholder="Enter 6-digit OTP" style="margin-top:0;flex:1"><button class="btn" id="verifyOtpBtn" type="button">Verify</button></div></div><div id="emailVerified" style="display:none;margin-top:7px;color:#087f6f;font-size:12px;font-weight:900">✓ Email verified</div></label>
 <label>Your mobile <span>(optional)</span><input id="customerPhone" maxlength="80"></label>
 <label>Product / requirement<input id="productName" maxlength="255" placeholder="What do you need?"></label>
 <label>Message <span>(optional)</span><textarea id="customerMessage" maxlength="2000" rows="3" placeholder="Quantity, specification or any other requirement"></textarea></label>
@@ -49,6 +49,8 @@ const id=params.get("id")||"";
 const requestedProduct=params.get("product")||"";
 let currentSupplier=null;
 let lastAction="contact";
+let emailVerificationToken="";
+let buyerDashboardToken=localStorage.getItem("supplydesk_buyer_dashboard_token")||"";
 const profiles={};
 
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
@@ -71,6 +73,49 @@ function renderProfile(p,verified=false){
 const modal=document.getElementById("connectModal");
 const form=document.getElementById("connectForm");
 const statusEl=document.getElementById("connectStatus");
+const sendOtpBtn=document.getElementById("sendOtpBtn");
+const verifyOtpBtn=document.getElementById("verifyOtpBtn");
+const otpArea=document.getElementById("otpArea");
+const emailVerifiedEl=document.getElementById("emailVerified");
+const customerEmailEl=document.getElementById("customerEmail");
+const customerOtpEl=document.getElementById("customerOtp");
+
+sendOtpBtn.onclick=async()=>{
+  const email=customerEmailEl.value.trim().toLowerCase();
+  if(!/^\S+@\S+\.\S+$/.test(email)){statusEl.textContent="Enter a valid email address first.";statusEl.className="connect-status error";return;}
+  sendOtpBtn.disabled=true;sendOtpBtn.textContent="Sending...";
+  try{
+    const r=await fetch("/api/buyer-email/request-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
+    const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"Could not send OTP.");
+    otpArea.style.display="block";customerOtpEl.focus();statusEl.textContent="OTP sent to "+email+". Enter it below.";statusEl.className="connect-status";sendOtpBtn.textContent="OTP Sent";
+  }catch(error){statusEl.textContent=error.message||"Could not send OTP.";statusEl.className="connect-status error";sendOtpBtn.disabled=false;sendOtpBtn.textContent="Send OTP";}
+};
+
+verifyOtpBtn.onclick=async()=>{
+  const email=customerEmailEl.value.trim().toLowerCase(),otp=customerOtpEl.value.trim();
+  if(!/^\d{6}$/.test(otp)){statusEl.textContent="Enter the 6-digit OTP.";statusEl.className="connect-status error";return;}
+  verifyOtpBtn.disabled=true;verifyOtpBtn.textContent="Verifying...";
+  try{
+    const r=await fetch("/api/buyer-email/verify-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,otp})});
+    const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"OTP verification failed.");
+    emailVerificationToken=d.verificationToken||"";buyerDashboardToken=d.dashboardToken||"";
+    if(buyerDashboardToken)localStorage.setItem("supplydesk_buyer_dashboard_token",buyerDashboardToken);
+    customerEmailEl.readOnly=true;customerOtpEl.disabled=true;emailVerifiedEl.style.display="block";verifyOtpBtn.textContent="Verified ✓";sendOtpBtn.textContent="Verified ✓";sendOtpBtn.disabled=true;
+    statusEl.textContent="Email verified. You can now send the enquiry.";statusEl.className="connect-status";
+  }catch(error){statusEl.textContent=error.message||"OTP verification failed.";statusEl.className="connect-status error";verifyOtpBtn.disabled=false;verifyOtpBtn.textContent="Verify";}
+};
+
+async function restoreBuyerSession(){
+  if(!buyerDashboardToken)return;
+  try{
+    const r=await fetch("/api/buyer-dashboard",{headers:{"x-buyer-dashboard-token":buyerDashboardToken}});
+    if(!r.ok){localStorage.removeItem("supplydesk_buyer_dashboard_token");buyerDashboardToken="";return;}
+    const d=await r.json();
+    if(d.buyer?.email){customerEmailEl.value=d.buyer.email;customerEmailEl.readOnly=true;emailVerifiedEl.style.display="block";sendOtpBtn.textContent="Verified ✓";sendOtpBtn.disabled=true;}
+  }catch(e){}
+}
+restoreBuyerSession();
+
 function openConnect(action){
   lastAction=action;
   statusEl.textContent="";
@@ -98,6 +143,8 @@ form.addEventListener("submit",async e=>{
       supplierId:currentSupplier?.id||id,
       customerName:document.getElementById("customerName").value.trim(),
       customerEmail:document.getElementById("customerEmail").value.trim(),
+      verificationToken:emailVerificationToken,
+      dashboardToken:buyerDashboardToken,
       customerPhone:document.getElementById("customerPhone").value.trim(),
       productName:document.getElementById("productName").value.trim(),
       sourceAction:lastAction,
