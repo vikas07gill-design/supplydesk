@@ -281,6 +281,8 @@ async function ensureConnectRequestsTable() {
   await pool.execute("CREATE TABLE IF NOT EXISTS connect_requests (id CHAR(36) PRIMARY KEY, supplier_id CHAR(36) NOT NULL, customer_name VARCHAR(180) NOT NULL, customer_email VARCHAR(255) NOT NULL, customer_phone VARCHAR(80) NULL, product_name VARCHAR(255) NULL, source_action ENUM('phone','email','contact') NOT NULL DEFAULT 'contact', message TEXT NULL, status ENUM('new','contacted','in_discussion','closed') NOT NULL DEFAULT 'new', updated_at DATETIME NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT fk_connect_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE, INDEX idx_connect_supplier (supplier_id, created_at), INDEX idx_connect_customer (customer_email, created_at)) ENGINE=InnoDB");
   try { await pool.query("ALTER TABLE connect_requests ADD COLUMN status ENUM('new','contacted','in_discussion','closed') NOT NULL DEFAULT 'new'"); } catch (e) { if (!["ER_DUP_FIELDNAME","ER_DUP_COLUMN"].includes(e?.code)) throw e; }
   try { await pool.query("ALTER TABLE connect_requests ADD COLUMN updated_at DATETIME NULL"); } catch (e) { if (!["ER_DUP_FIELDNAME","ER_DUP_COLUMN"].includes(e?.code)) throw e; }
+  try { await pool.query("ALTER TABLE connect_requests ADD COLUMN enquiry_id CHAR(36) NULL"); } catch (e) { if (!["ER_DUP_FIELDNAME","ER_DUP_COLUMN"].includes(e?.code)) throw e; }
+  try { await pool.query("ALTER TABLE connect_requests ADD INDEX idx_connect_enquiry (enquiry_id)"); } catch (e) { if (!["ER_DUP_KEYNAME","ER_DUP_INDEX","ER_DUP_KEY"].includes(e?.code)) throw e; }
 }
 
 async function ensureBuyerSchema() {
@@ -760,8 +762,8 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
     );
 
     await pool.execute(
-      "INSERT INTO connect_requests (id,supplier_id,customer_name,customer_email,customer_phone,product_name,source_action,message,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,NOW())",
-      [requestId,supplierId,customerName,customerEmail,customerPhone,selectedProductName,sourceAction,message,"new"]
+      "INSERT INTO connect_requests (id,supplier_id,customer_name,customer_email,customer_phone,product_name,source_action,message,status,updated_at,enquiry_id) VALUES (?,?,?,?,?,?,?,?,?,NOW(),?)",
+      [requestId,supplierId,customerName,customerEmail,customerPhone,selectedProductName,sourceAction,message,"new",enquiryId]
     );
 
     const supplierName = supplier.trade_name || supplier.legal_name;
@@ -835,9 +837,12 @@ app.get("/api/admin/connect-requests", requireAdmin, async (req,res)=>{
   const status=clean(req.query.status,40);
   const allowed=["new","contacted","in_discussion","closed"];
   const params=[];
-  let sql=`SELECT c.id,c.supplier_id,c.customer_name,c.customer_email,c.customer_phone,c.product_name,c.source_action,c.message,c.status,c.created_at,c.updated_at,
+  let sql=`SELECT c.id,c.supplier_id,c.customer_name,c.customer_email,c.customer_phone,c.product_name,c.source_action,c.message,c.status,c.created_at,c.updated_at,c.enquiry_id,
+                   b.company AS customer_company,b.country AS customer_country,e.quantity,
                    s.legal_name,s.trade_name,s.country,s.city
             FROM connect_requests c
+            LEFT JOIN buyers b ON b.email=c.customer_email
+            LEFT JOIN buyer_enquiries e ON e.id=c.enquiry_id
             JOIN supplier_profiles s ON s.id=c.supplier_id`;
   if(allowed.includes(status)){sql+=" WHERE c.status=?";params.push(status);}
   sql+=" ORDER BY c.created_at DESC LIMIT 300";
@@ -856,6 +861,7 @@ app.patch("/api/admin/connect-requests/:id", requireAdmin, async (req,res)=>{
   try{
     const [result]=await pool.execute("UPDATE connect_requests SET status=?,updated_at=NOW() WHERE id=?",[status,clean(req.params.id,80)]);
     if(!result.affectedRows)return res.status(404).json({error:"Connection request not found."});
+    try { await pool.execute("UPDATE buyer_enquiries SET status=?,updated_at=NOW() WHERE id=(SELECT enquiry_id FROM connect_requests WHERE id=?)",[status,clean(req.params.id,80)]); } catch (e) { console.warn("Buyer enquiry status sync skipped:",e?.message); }
     res.json({ok:true,status});
   }catch(error){
     console.error("Admin connection request update failed:",error);
@@ -1105,7 +1111,7 @@ app.get("/api/supplier-dashboard", requireSupplierDashboard, async (req,res) => 
       [supplierId]
     );
     const [connections]=await pool.execute(
-      "SELECT id,customer_name,customer_email,customer_phone,product_name,source_action,message,status,created_at,updated_at FROM connect_requests WHERE supplier_id=? ORDER BY created_at DESC LIMIT 50",
+      "SELECT c.id,c.customer_name,c.customer_email,c.customer_phone,c.product_name,c.source_action,c.message,c.status,c.created_at,c.updated_at,c.enquiry_id,b.company AS customer_company,b.country AS customer_country,e.quantity FROM connect_requests c LEFT JOIN buyers b ON b.email=c.customer_email LEFT JOIN buyer_enquiries e ON e.id=c.enquiry_id WHERE c.supplier_id=? ORDER BY c.created_at DESC LIMIT 50",
       [supplierId]
     );
     // Profile update requests are optional for the dashboard. Older
