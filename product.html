@@ -80,6 +80,23 @@ function closeConnect(){
 }
 document.getElementById("connectBox").addEventListener("click",e=>{if(e.target.id==="connectBox")closeConnect()});
 let emailVerificationToken="";
+let buyerDashboardToken=localStorage.getItem("supplydesk_buyer_dashboard_token")||"";
+async function restoreBuyerSession(){
+  if(!buyerDashboardToken)return;
+  try{
+    const r=await fetch("/api/buyer-dashboard",{headers:{"x-buyer-dashboard-token":buyerDashboardToken}});
+    if(!r.ok){localStorage.removeItem("supplydesk_buyer_dashboard_token");buyerDashboardToken="";return;}
+    const d=await r.json();
+    if(d.buyer?.email){
+      document.getElementById("connectEmail").value=d.buyer.email;
+      document.getElementById("connectEmail").readOnly=true;
+      document.getElementById("emailVerified").classList.add("show");
+      document.getElementById("sendOtpBtn").textContent="Verified ✓";
+      document.getElementById("sendOtpBtn").disabled=true;
+    }
+  }catch(e){}
+}
+restoreBuyerSession();
 async function sendEmailOtp(){
   const email=document.getElementById("connectEmail").value.trim().toLowerCase();
   const status=document.getElementById("connectStatus"),btn=document.getElementById("sendOtpBtn");
@@ -93,6 +110,8 @@ async function sendEmailOtp(){
     const v=await fetch("/api/buyer-email/verify-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,otp:otp.trim()})});
     const vd=await v.json().catch(()=>({})); if(!v.ok)throw new Error(vd.error||"OTP verification failed.");
     emailVerificationToken=vd.verificationToken;
+    buyerDashboardToken=vd.dashboardToken||"";
+    if(buyerDashboardToken)localStorage.setItem("supplydesk_buyer_dashboard_token",buyerDashboardToken);
     document.getElementById("emailVerified").classList.add("show");
     document.getElementById("connectEmail").readOnly=true;
     btn.textContent="Verified ✓";
@@ -119,7 +138,8 @@ document.getElementById("connectForm").addEventListener("submit",async e=>{
     quantity:document.getElementById("connectQuantity").value.trim(),
     message:document.getElementById("connectMessage").value.trim(),
     sourceAction:"contact",
-    verificationToken:emailVerificationToken
+    verificationToken:emailVerificationToken,
+    dashboardToken:buyerDashboardToken
   };
   try{
     const r=await fetch("/api/connect-requests",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
@@ -127,6 +147,7 @@ document.getElementById("connectForm").addEventListener("submit",async e=>{
     if(!r.ok)throw new Error(d.error||"Could not send enquiry.");
     status.className="connect-status success";
     status.textContent=d.message||"Enquiry sent successfully.";
+    if(dashboardUrl){}
     document.getElementById("connectForm").reset();
     btn.textContent="Sent ✓";
   }catch(err){
