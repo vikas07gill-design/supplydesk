@@ -46,13 +46,15 @@ nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!i
   </div>
 </div>
 <script>
-const liveId=new URLSearchParams(location.search).get("id")||"";\nlet liveProduct=null;
+const liveId=new URLSearchParams(location.search).get("id")||"";
+let liveProduct=null;
 async function loadLiveProduct(){
   if(!liveId){ document.getElementById("name").textContent="Product not found"; document.getElementById("meta").textContent="Open a product from SupplyDesk search."; document.getElementById("desc").textContent="This page requires a published SupplyDesk product."; return; }
   try{
     const r=await fetch("/api/products/"+encodeURIComponent(liveId));
     if(!r.ok){ document.getElementById("name").textContent="Product not found"; document.getElementById("meta").textContent="This product is not currently published."; document.getElementById("desc").textContent="The requested product could not be found or is still under review."; return; }
-    const d=await r.json(),p=d.product;\n    liveProduct=p;
+    const d=await r.json(),p=d.product;
+    liveProduct=p;
     document.title=p.name+" | SupplyDesk";
     document.getElementById("name").textContent=p.name;
     document.getElementById("meta").textContent="📍 "+p.city+", "+p.country+" · "+p.market_scope;
