@@ -1487,7 +1487,7 @@ app.get("/api/admin/supplier-update-files/:id", requireSuperAdmin, async (req,re
   } catch(error) { console.error(error); res.status(500).json({error:"Could not open file."}); }
 });
 
-app.get("/api/admin/files/:id", requireSuperAdmin, async (req, res) => {
+app.get("/api/admin/files/:id", requireAdmin, async (req, res) => {
   try {
     const [[file]] = await pool.execute(
       "SELECT stored_name, relative_path, original_name, mime_type FROM supplier_files WHERE id = ?",
