@@ -1795,6 +1795,7 @@ async function ensureDashboardSchema() {
   for (const sql of statements) {
     await pool.query(sql);
   }
+  await ensureConnectRequestsTable();
 }
 
 async function start() {
