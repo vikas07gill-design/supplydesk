@@ -33,7 +33,7 @@ nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!i
     <form id="connectForm">
       <div class="connect-grid">
         <div><label for="connectName">Name *</label><input id="connectName" required maxlength="180" autocomplete="name"></div>
-        <div class="full"><label for="connectEmail">Email *</label><div class="otp-row"><div><input id="connectEmail" type="email" required maxlength="255" autocomplete="email" placeholder="your@email.com"></div><button class="btn otp-btn" id="sendOtpBtn" type="button" onclick="sendEmailOtp()">Send OTP</button></div><div class="verified-mark" id="emailVerified">✓ Email verified</div></div>
+        <div class="full"><label for="connectEmail">Email *</label><div class="otp-row"><div><input id="connectEmail" type="email" required maxlength="255" autocomplete="email" placeholder="your@email.com"></div><button class="btn otp-btn" id="sendOtpBtn" type="button" onclick="sendEmailOtp()">Send OTP</button></div><div id="otpVerifyRow" class="otp-row" style="display:none;margin-top:8px"><div><input id="connectOtp" inputmode="numeric" maxlength="6" placeholder="Enter 6-digit OTP"></div><button class="btn otp-btn" id="verifyOtpBtn" type="button" onclick="verifyEmailOtp()">Verify</button></div><div class="verified-mark" id="emailVerified">✓ Email verified</div></div>
         <div><label for="connectCompany">Company</label><input id="connectCompany" maxlength="180" autocomplete="organization"></div>
         <div><label for="connectCountry">Country</label><input id="connectCountry" maxlength="120" autocomplete="country-name"></div>
         <div><label for="connectPhone">Phone</label><input id="connectPhone" maxlength="80" autocomplete="tel"></div>
@@ -91,6 +91,7 @@ async function restoreBuyerSession(){
       document.getElementById("connectEmail").value=d.buyer.email;
       document.getElementById("connectEmail").readOnly=true;
       document.getElementById("emailVerified").classList.add("show");
+      document.getElementById("otpVerifyRow").style.display="none";
       document.getElementById("sendOtpBtn").textContent="Verified ✓";
       document.getElementById("sendOtpBtn").disabled=true;
     }
@@ -101,26 +102,45 @@ async function sendEmailOtp(){
   const email=document.getElementById("connectEmail").value.trim().toLowerCase();
   const status=document.getElementById("connectStatus"),btn=document.getElementById("sendOtpBtn");
   if(!/^\S+@\S+\.\S+$/.test(email)){status.className="connect-status error";status.textContent="Enter a valid email address first.";return;}
-  if(!emailVerificationToken){status.className="connect-status error";status.textContent="Please verify your email first.";return;}\n  btn.disabled=true;btn.textContent="Sending...";
+  btn.disabled=true;btn.textContent="Sending...";
   try{
     const r=await fetch("/api/buyer-email/request-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
-    const d=await r.json().catch(()=>({})); if(!r.ok)throw new Error(d.error||"Could not send OTP.");
-    const otp=prompt("Enter the 6-digit OTP sent to "+email);
-    if(otp===null){btn.disabled=false;btn.textContent="Send OTP";return;}
-    const v=await fetch("/api/buyer-email/verify-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,otp:otp.trim()})});
-    const vd=await v.json().catch(()=>({})); if(!v.ok)throw new Error(vd.error||"OTP verification failed.");
-    emailVerificationToken=vd.verificationToken;
-    buyerDashboardToken=vd.dashboardToken||"";
-    if(buyerDashboardToken)localStorage.setItem("supplydesk_buyer_dashboard_token",buyerDashboardToken);
-    document.getElementById("emailVerified").classList.add("show");
-    document.getElementById("connectEmail").readOnly=true;
-    btn.textContent="Verified ✓";
-    status.className="connect-status success";status.textContent="Email verified. You can now send your enquiry.";
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.error||"Could not send OTP.");
+    document.getElementById("otpVerifyRow").style.display="flex";
+    document.getElementById("connectOtp").focus();
+    btn.textContent="OTP Sent";
+    status.className="connect-status";
+    status.textContent="OTP sent to "+email+". Enter it below and click Verify.";
   }catch(err){
-    status.className="connect-status error";status.textContent=err.message||"Email verification failed.";
+    status.className="connect-status error";status.textContent=err.message||"Could not send OTP.";
     btn.disabled=false;btn.textContent="Send OTP";
   }
 }
+async function verifyEmailOtp(){
+  const email=document.getElementById("connectEmail").value.trim().toLowerCase();
+  const otp=document.getElementById("connectOtp").value.trim();
+  const status=document.getElementById("connectStatus"),btn=document.getElementById("verifyOtpBtn");
+  if(!/^\d{6}$/.test(otp)){status.className="connect-status error";status.textContent="Enter the 6-digit OTP.";return;}
+  btn.disabled=true;btn.textContent="Verifying...";
+  try{
+    const r=await fetch("/api/buyer-email/verify-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,otp})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.error||"OTP verification failed.");
+    emailVerificationToken=d.verificationToken||"";
+    buyerDashboardToken=d.dashboardToken||"";
+    if(buyerDashboardToken)localStorage.setItem("supplydesk_buyer_dashboard_token",buyerDashboardToken);
+    document.getElementById("emailVerified").classList.add("show");
+    document.getElementById("connectEmail").readOnly=true;
+    document.getElementById("connectOtp").disabled=true;
+    btn.textContent="Verified ✓";document.getElementById("sendOtpBtn").textContent="Verified ✓";document.getElementById("sendOtpBtn").disabled=true;
+    status.className="connect-status success";status.textContent="Email verified. You can now send your enquiry.";
+  }catch(err){
+    status.className="connect-status error";status.textContent=err.message||"Email verification failed.";
+    btn.disabled=false;btn.textContent="Verify";
+  }
+}
+
 document.getElementById("connectForm").addEventListener("submit",async e=>{
   e.preventDefault();
   const btn=document.getElementById("connectSubmit"),status=document.getElementById("connectStatus");
