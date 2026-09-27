@@ -195,10 +195,10 @@ async function openApp(id){
     const d=role()==="super_admin"?await api("/api/super-admin/applications/"+id):await api("/api/admin/applications/"+id);
     const a=d.application, confidential=role()==="super_admin", files=d.files||[], verification=d.verification||{};
     const verificationHtml="<div class='profile-review'>"+
-      "<div><span>Business registration</span><strong>"+(verification.registration_checked?"✓ Checked":"Pending")+" <button onclick='setVerification(""+a.id+"","registration_checked","+(!verification.registration_checked)+")'>"+(verification.registration_checked?"Mark Pending":"Mark Checked")+"</button></strong></div>"+
-      "<div><span>Documents</span><strong>"+(verification.documents_checked?"✓ Checked":"Pending")+" <button onclick='setVerification(""+a.id+"","documents_checked","+(!verification.documents_checked)+")'>"+(verification.documents_checked?"Mark Pending":"Mark Checked")+"</button></strong></div>"+
-      "<div><span>Business photos</span><strong>"+(verification.photos_checked?"✓ Checked":"Pending")+" <button onclick='setVerification(""+a.id+"","photos_checked","+(!verification.photos_checked)+")'>"+(verification.photos_checked?"Mark Pending":"Mark Checked")+"</button></strong></div>"+
-      "<div><span>Address</span><strong>"+(verification.address_checked?"✓ Checked":"Pending")+" <button onclick='setVerification(""+a.id+"","address_checked","+(!verification.address_checked)+")'>"+(verification.address_checked?"Mark Pending":"Mark Checked")+"</button></strong></div>"+
+      "<div><span>Business registration</span><strong>"+(verification.registration_checked?"✓ Checked":"Pending")+"</strong></div>"+
+      "<div><span>Documents</span><strong>"+(verification.documents_checked?"✓ Checked":"Pending")+"</strong></div>"+
+      "<div><span>Business photos</span><strong>"+(verification.photos_checked?"✓ Checked":"Pending")+"</strong></div>"+
+      "<div><span>Address</span><strong>"+(verification.address_checked?"✓ Checked":"Pending")+"</strong></div>"+
       "<div><span>Verification notes</span><strong>"+esc(verification.verification_notes||"Not reviewed yet")+"</strong></div>"+
       "</div>";
     const fileHtml=files.length?files.map(f=>"<div>"+esc(f.file_type)+" · "+esc(f.original_name)+" · "+Math.round(f.file_size/1024)+" KB <button class='view-file' data-id='"+f.id+"' onclick='viewFile(this.dataset.id)'>View</button></div>").join(""):"<span class='muted'>No files uploaded.</span>";
