@@ -12,7 +12,7 @@ const nodemailer = require("nodemailer");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-const BUILD_VERSION = process.env.SUPPLYDESK_BUILD || "dashboard-schema-fix-2026-09-27-05";
+const BUILD_VERSION = process.env.SUPPLYDESK_BUILD || "launch-readiness-2026-09-27-01";
 const ROOT = __dirname;
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(ROOT, "private-uploads");
 
