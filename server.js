@@ -797,7 +797,7 @@ app.post("/api/buyer-email/request-otp", connectLimiter, async (req,res)=>{
   const email=clean(req.body?.email,255).toLowerCase();
   if(!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({error:"Please enter a valid email address."});
   if(!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) return res.status(503).json({error:"Email verification service is not configured yet."});
-  const otp=String(Math.floor(100000+Math.random()*900000));
+  const otp=String(crypto.randomInt(100000,1000000));
   try{
     await pool.execute("UPDATE buyer_email_otps SET expires_at=NOW() WHERE email=? AND verified_at IS NULL AND expires_at>NOW()",[email]);
     await pool.execute("INSERT INTO buyer_email_otps (id,email,otp_hash,expires_at) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 10 MINUTE))",[crypto.randomUUID(),email,hashToken(otp)]);
@@ -2020,6 +2020,17 @@ async function ensureDashboardSchema() {
   }
   await ensureConnectRequestsTable();
   await ensureBuyerSchema();
+
+  // Bring older production databases up to the current launch schema.
+  try { await pool.query("ALTER TABLE supplier_profiles ADD COLUMN profile_details_json TEXT NULL"); }
+  catch (e) { if(!["ER_DUP_FIELDNAME","ER_DUP_COLUMN"].includes(e?.code)) throw e; }
+
+  try {
+    await pool.query("UPDATE connect_requests c LEFT JOIN buyer_enquiries e ON e.id=c.enquiry_id SET c.enquiry_id=NULL WHERE c.enquiry_id IS NOT NULL AND e.id IS NULL");
+    await pool.query("ALTER TABLE connect_requests ADD CONSTRAINT fk_connect_enquiry FOREIGN KEY (enquiry_id) REFERENCES buyer_enquiries(id) ON DELETE SET NULL");
+  } catch (e) {
+    if(!["ER_DUP_CONSTRAINT","ER_FK_DUP_NAME","ER_CANT_CREATE_TABLE","ER_DUP_KEYNAME","ER_DUP_INDEX"].includes(e?.code)) throw e;
+  }
 }
 
 async function start() {
