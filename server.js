@@ -12,7 +12,7 @@ const nodemailer = require("nodemailer");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-const BUILD_VERSION = process.env.SUPPLYDESK_BUILD || "dashboard-schema-fix-2026-09-27-05";
+const BUILD_VERSION = process.env.SUPPLYDESK_BUILD || "launch-readiness-2026-09-27-01";
 const ROOT = __dirname;
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(ROOT, "private-uploads");
 
@@ -797,7 +797,7 @@ app.post("/api/buyer-email/request-otp", connectLimiter, async (req,res)=>{
   const email=clean(req.body?.email,255).toLowerCase();
   if(!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({error:"Please enter a valid email address."});
   if(!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) return res.status(503).json({error:"Email verification service is not configured yet."});
-  const otp=String(Math.floor(100000+Math.random()*900000));
+  const otp=String(crypto.randomInt(100000,1000000));
   try{
     await pool.execute("UPDATE buyer_email_otps SET expires_at=NOW() WHERE email=? AND verified_at IS NULL AND expires_at>NOW()",[email]);
     await pool.execute("INSERT INTO buyer_email_otps (id,email,otp_hash,expires_at) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 10 MINUTE))",[crypto.randomUUID(),email,hashToken(otp)]);
@@ -1445,28 +1445,43 @@ app.get("/api/admin/product-files/:id", requireAdmin, async (req,res)=>{
   }catch(error){res.status(500).json({error:"Could not open image."});}
 });
 
+async function getPublicSupplierByIdOrSlug(identifier){
+  const key=clean(identifier,120);
+  if(!key)return null;
+  const [[byId]]=await pool.execute(
+    `SELECT id,legal_name,trade_name,business_type,country,city,address,website,category,subcategory,verified,published,profile_details_json
+     FROM supplier_profiles WHERE id=? AND verified=1 AND published=1 LIMIT 1`,
+    [key]
+  );
+  if(byId)return byId;
+  const [[bySlug]]=await pool.execute(
+    `SELECT id,legal_name,trade_name,business_type,country,city,address,website,category,subcategory,verified,published,profile_details_json
+     FROM supplier_profiles
+     WHERE verified=1 AND published=1
+       AND LOWER(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(NULLIF(trade_name,''),legal_name),' ','-'),'&','and'),'/','-'),'_','-'))=LOWER(?)
+     LIMIT 1`,
+    [key]
+  );
+  return bySlug||null;
+}
+
 app.post("/api/suppliers/:id/view", async (req,res) => {
-  const supplierId=clean(req.params.id,80);
   try{
-    const [[supplier]]=await pool.execute("SELECT id FROM supplier_profiles WHERE id=? AND verified=1 AND published=1",[supplierId]);
-    if(!supplier) return res.status(404).json({error:"Supplier not found."});
+    const supplier=await getPublicSupplierByIdOrSlug(req.params.id);
+    if(!supplier)return res.status(404).json({error:"Supplier not found."});
     const visitorHash=crypto.createHash("sha256").update(String(process.env.ADMIN_TOKEN||"")+"|"+String(req.ip||"")+"|"+String(req.get("user-agent")||"")).digest("hex");
-    await pool.execute(
-      "INSERT IGNORE INTO supplier_profile_views (id,supplier_id,visitor_hash,viewed_on) VALUES (?,?,?,CURRENT_DATE())",
-      [crypto.randomUUID(),supplierId,visitorHash]
-    );
-    res.json({ok:true});
-  }catch(error){
-    console.error("Supplier view tracking failed:",error);
-    res.status(500).json({error:"Could not record view."});
-  }
+    await pool.execute("INSERT IGNORE INTO supplier_profile_views (id,supplier_id,visitor_hash,viewed_on) VALUES (?,?,?,CURRENT_DATE())",[crypto.randomUUID(),supplier.id,visitorHash]);
+    res.json({ok:true,supplierId:supplier.id});
+  }catch(error){console.error("Supplier view tracking failed:",error);res.status(500).json({error:"Could not record view."});}
 });
 
 app.get("/api/suppliers/:id/products", async (req,res) => {
   try{
+    const supplier=await getPublicSupplierByIdOrSlug(req.params.id);
+    if(!supplier)return res.status(404).json({error:"Supplier not found."});
     const [rows]=await pool.execute(
       "SELECT id,product_name,category,subcategory,description,moq,unit,market_scope FROM supplier_products WHERE supplier_id=? AND status='approved' ORDER BY updated_at DESC LIMIT 100",
-      [clean(req.params.id,80)]
+      [supplier.id]
     );
     res.json({products:rows});
   }catch(error){console.error(error);res.status(500).json({error:"Could not load supplier products."});}
@@ -1522,36 +1537,17 @@ app.get("/api/products/:id", async (req,res) => {
   }catch(error){console.error(error);res.status(500).json({error:"Could not load product."});}
 });
 
-app.get("/api/suppliers/:id", async (req, res) => {
-  try {
-    const [[row]] = await pool.execute(
-      `SELECT id, legal_name, trade_name, business_type, country, city, address, website,
-              category, subcategory, verified, published
-       FROM supplier_profiles
-       WHERE id = ? AND verified = 1 AND published = 1`,
-      [req.params.id]
-    );
-    if (!row) return res.status(404).json({ error: "Supplier not found." });
-    const supplier = {
-      id: row.id,
-      legal_name: row.legal_name,
-      trade_name: row.trade_name,
-      business_type: row.business_type,
-      country: row.country,
-      city: row.city,
-      address: row.address,
-      website: row.website,
-      category: row.category,
-      subcategory: row.subcategory,
-      verified: row.verified,
-      published: row.published
-    };
-    // Direct supplier phone, email and contact-person data are intentionally private.
-    res.json({ supplier });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Could not load supplier." });
-  }
+app.get("/api/suppliers/:id", async (req,res)=>{
+  try{
+    const row=await getPublicSupplierByIdOrSlug(req.params.id);
+    if(!row)return res.status(404).json({error:"Supplier not found."});
+    let profileDetails={};try{profileDetails=JSON.parse(row.profile_details_json||"{}")}catch{}
+    res.json({supplier:{
+      id:row.id,legal_name:row.legal_name,trade_name:row.trade_name,business_type:row.business_type,
+      country:row.country,city:row.city,address:row.address,website:row.website,category:row.category,
+      subcategory:row.subcategory,verified:row.verified,published:row.published,profileDetails
+    }});
+  }catch(error){console.error("Public supplier lookup failed:",error);res.status(500).json({error:"Could not load supplier."});}
 });
 
 app.get("/api/admin/applications", requireAdmin, async (req, res) => {
@@ -2024,6 +2020,17 @@ async function ensureDashboardSchema() {
   }
   await ensureConnectRequestsTable();
   await ensureBuyerSchema();
+
+  // Bring older production databases up to the current launch schema.
+  try { await pool.query("ALTER TABLE supplier_profiles ADD COLUMN profile_details_json TEXT NULL"); }
+  catch (e) { if(!["ER_DUP_FIELDNAME","ER_DUP_COLUMN"].includes(e?.code)) throw e; }
+
+  try {
+    await pool.query("UPDATE connect_requests c LEFT JOIN buyer_enquiries e ON e.id=c.enquiry_id SET c.enquiry_id=NULL WHERE c.enquiry_id IS NOT NULL AND e.id IS NULL");
+    await pool.query("ALTER TABLE connect_requests ADD CONSTRAINT fk_connect_enquiry FOREIGN KEY (enquiry_id) REFERENCES buyer_enquiries(id) ON DELETE SET NULL");
+  } catch (e) {
+    if(!["ER_DUP_CONSTRAINT","ER_FK_DUP_NAME","ER_CANT_CREATE_TABLE","ER_DUP_KEYNAME","ER_DUP_INDEX"].includes(e?.code)) throw e;
+  }
 }
 
 async function start() {
