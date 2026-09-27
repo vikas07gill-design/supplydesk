@@ -315,6 +315,19 @@ async function ensureBuyerSchema() {
     INDEX idx_buyer_enquiry_supplier (supplier_id, created_at),
     INDEX idx_buyer_enquiry_product (product_id, created_at)
   ) ENGINE=InnoDB`);
+  await pool.execute(`CREATE TABLE IF NOT EXISTS buyer_email_otps (
+    id CHAR(36) PRIMARY KEY,
+    email VARCHAR(255) NOT NULL,
+    otp_hash CHAR(64) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    verified_at DATETIME NULL,
+    verification_token_hash CHAR(64) NULL,
+    verification_expires_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_buyer_email_otp (email, created_at),
+    INDEX idx_buyer_email_otp_token (verification_token_hash)
+  ) ENGINE=InnoDB`);
 }
 
 function hashToken(token) {
@@ -705,6 +718,43 @@ app.get("/api/suppliers", async (req, res) => {
 });
 
 
+app.post("/api/buyer-email/request-otp", connectLimiter, async (req,res)=>{
+  const email=clean(req.body?.email,255).toLowerCase();
+  if(!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({error:"Please enter a valid email address."});
+  if(!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) return res.status(503).json({error:"Email verification service is not configured yet."});
+  const otp=String(Math.floor(100000+Math.random()*900000));
+  try{
+    await pool.execute("UPDATE buyer_email_otps SET expires_at=NOW() WHERE email=? AND verified_at IS NULL AND expires_at>NOW()",[email]);
+    await pool.execute("INSERT INTO buyer_email_otps (id,email,otp_hash,expires_at) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 10 MINUTE))",[crypto.randomUUID(),email,hashToken(otp)]);
+    await mailer.sendMail({from:process.env.SMTP_FROM,to:email,subject:"SupplyDesk: Verify your email",text:["Your SupplyDesk email verification code is:","",otp,"","This code is valid for 10 minutes.","","If you did not request this code, you can ignore this email.","","SupplyDesk"].join("\n")});
+    res.json({ok:true,message:"Verification code sent to your email.",expiresInMinutes:10});
+  }catch(error){
+    console.error("Buyer email OTP failed:",{email,code:error?.code,message:error?.message});
+    res.status(502).json({error:"Could not send the verification code. Please try again."});
+  }
+});
+
+app.post("/api/buyer-email/verify-otp", connectLimiter, async (req,res)=>{
+  const email=clean(req.body?.email,255).toLowerCase();
+  const otp=clean(req.body?.otp,10);
+  if(!/^\S+@\S+\.\S+$/.test(email) || !/^\d{6}$/.test(otp)) return res.status(400).json({error:"Enter the 6-digit verification code sent to your email."});
+  try{
+    const [[row]]=await pool.execute("SELECT id,otp_hash,expires_at,attempts FROM buyer_email_otps WHERE email=? AND verified_at IS NULL AND expires_at>NOW() ORDER BY created_at DESC LIMIT 1",[email]);
+    if(!row) return res.status(400).json({error:"Code expired. Please request a new code."});
+    if(Number(row.attempts)>=5) return res.status(429).json({error:"Too many incorrect attempts. Please request a new code."});
+    if(!safeEqual(hashToken(otp),row.otp_hash)){
+      await pool.execute("UPDATE buyer_email_otps SET attempts=attempts+1 WHERE id=?",[row.id]);
+      return res.status(400).json({error:"Incorrect verification code."});
+    }
+    const rawToken=crypto.randomBytes(32).toString("hex");
+    await pool.execute("UPDATE buyer_email_otps SET verified_at=NOW(),verification_token_hash=?,verification_expires_at=DATE_ADD(NOW(),INTERVAL 30 MINUTE) WHERE id=?",[hashToken(rawToken),row.id]);
+    res.json({ok:true,verificationToken:rawToken,message:"Email verified successfully."});
+  }catch(error){
+    console.error("Buyer email verification failed:",error);
+    res.status(500).json({error:"Could not verify the email. Please try again."});
+  }
+});
+
 app.post("/api/connect-requests", connectLimiter, async (req, res) => {
   const supplierId = clean(req.body?.supplierId, 80);
   const productId = clean(req.body?.productId, 80) || null;
@@ -717,14 +767,19 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
   const quantity = clean(req.body?.quantity, 120) || null;
   const sourceAction = ["phone","email","contact"].includes(req.body?.sourceAction) ? req.body.sourceAction : "contact";
   const message = clean(req.body?.message, 2000) || null;
+  const verificationToken=clean(req.body?.verificationToken,256);
 
   if (!supplierId || !customerName || !customerEmail) return res.status(400).json({ error: "Name and email are required." });
   if (!/^\S+@\S+\.\S+$/.test(customerEmail)) return res.status(400).json({ error: "Please enter a valid email address." });
+  if(!verificationToken) return res.status(400).json({error:"Please verify your email with the OTP before sending the enquiry."});
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) return res.status(503).json({ error: "Connection email service is not configured yet." });
 
   const requestId = crypto.randomUUID();
   const enquiryId = crypto.randomUUID();
   try {
+    const [[verifiedOtp]]=await pool.execute("SELECT id FROM buyer_email_otps WHERE email=? AND verification_token_hash=? AND verification_expires_at>NOW() AND verified_at IS NOT NULL ORDER BY verified_at DESC LIMIT 1",[customerEmail,hashToken(verificationToken)]);
+    if(!verifiedOtp) return res.status(400).json({error:"Email verification expired. Please verify your email again."});
+
     const [[supplier]] = await pool.execute(
       "SELECT id, legal_name, trade_name, business_email, category, subcategory FROM supplier_profiles WHERE id=? AND verified=1 AND published=1",
       [supplierId]
