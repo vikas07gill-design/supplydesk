@@ -170,7 +170,6 @@ document.getElementById("connectForm").addEventListener("submit",async e=>{
     status.className="connect-status success";
     status.textContent=d.message||"Enquiry sent successfully.";
     document.getElementById("buyerDashboardLink").style.display="inline-flex";
-    if(dashboardUrl){}
     document.getElementById("connectForm").reset();
     btn.textContent="Sent ✓";
   }catch(err){
