@@ -1260,7 +1260,8 @@ app.get("/api/products", async (req,res) => {
   const country=clean(req.query.country,100);
   const params=[];
   let sql=`SELECT p.id,p.product_name,p.category,p.subcategory,p.description,p.moq,p.unit,p.market_scope,
-                   s.id AS supplier_id,s.legal_name,s.trade_name,s.business_type,s.country,s.city
+                   s.id AS supplier_id,s.legal_name,s.trade_name,s.business_type,s.country,s.city,
+                   (SELECT f.id FROM supplier_product_files f WHERE f.product_id=p.id AND f.status='approved' ORDER BY f.created_at LIMIT 1) AS image_id
             FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id
             WHERE p.status='approved' AND s.verified=1 AND s.published=1`;
   if(category){sql+=" AND p.category=?";params.push(category);}
@@ -1276,7 +1277,8 @@ app.get("/api/products", async (req,res) => {
       id:p.id,name:p.product_name,type:"product",city:p.city,country:p.country,
       market:p.market_scope,desc:p.description||`${p.category} · ${p.subcategory}`,category:p.category,
       subcategories:[p.subcategory],tags:[p.category,p.subcategory,p.business_type],supplierId:p.supplier_id,
-      supplierName:p.trade_name||p.legal_name,verified:true
+      supplierName:p.trade_name||p.legal_name,verified:true,moq:p.moq||"",unit:p.unit||"",
+      imageUrl:p.image_id?"/api/products/"+encodeURIComponent(p.id)+"/images/"+encodeURIComponent(p.image_id):""
     }))});
   }catch(error){console.error(error);res.status(500).json({error:"Could not load products."});}
 });
