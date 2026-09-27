@@ -35,7 +35,7 @@ nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!i
 let data=[];
 const params=new URLSearchParams(location.search);
 document.getElementById('q').value=params.get('q')||'';
-params.get('type')||'all';
+let active=params.get('type')||'all';
 
 document.querySelectorAll('.tab').forEach(b=>{
   b.classList.toggle('active',b.dataset.type===active);
