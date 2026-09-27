@@ -10,6 +10,7 @@ export default defineConfig({
   reporter: [["html", { outputFolder: "playwright-report", open: "never" }], ["list"]],
   use: {
     baseURL: process.env.PLAYWRIGHT_TEST_BASE_URL || "https://supplydesk.in",
+    extraHTTPHeaders: process.env.E2E_TEST_KEY ? { "x-e2e-key": process.env.E2E_TEST_KEY } : {},
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
