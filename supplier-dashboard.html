@@ -470,7 +470,7 @@ function renderProducts(items){
   if(!items.length){el.innerHTML='<div class="empty">No products yet. Add your first product listing.</div>';return}
   el.innerHTML=items.map(p=>{
     const imgs=(p.images||[]).filter(x=>x.status!=="archived").map(x=>'<img data-product-image="'+esc(x.id)+'" data-product-id="'+esc(p.id)+'" alt="'+esc(p.product_name)+'">').join("");
-    return '<div class="product"><div class="product-head"><div><div class="product-title">'+esc(p.product_name)+'</div><div class="product-meta">'+esc(p.category)+' → '+esc(p.subcategory)+' · '+esc(p.market_scope)+'</div></div><span class="badge '+esc(p.status)+'">'+esc(p.status)+'</span></div><div class="product-meta">'+esc(p.description||"No description added.")+(p.moq?' · MOQ: '+esc(p.moq):"")+(p.unit?' · Unit: '+esc(p.unit):"")+'</div>'+(imgs?'<div class="product-images">'+imgs+'</div>':"")+(p.admin_notes?'<div class="notice">'+esc(p.admin_notes)+'</div>':"")+'<div class="product-actions"><button class="btn" onclick="editProduct(\''+p.id+'\')">Edit</button><button class="btn danger" onclick="archiveProduct(\''+p.id+'\')">Remove</button></div></div>';
+    return '<div class="product"><div class="product-head"><div><div class="product-title">'+esc(p.product_name)+'</div><div class="product-meta">'+esc(p.category)+' → '+esc(p.subcategory)+' · '+esc(p.market_scope)+'</div></div><span class="badge '+esc(p.status)+'">'+esc(p.status)+'</span></div><div class="product-meta">'+esc(p.description||"No description added.")+(p.moq?' · MOQ: '+esc(p.moq):"")+(p.unit?' · Unit: '+esc(p.unit):"")+'</div>'+(imgs?'<div class="product-images">'+imgs+'</div>':"")+(p.admin_notes?'<div class="notice">'+esc(p.admin_notes)+'</div>':"")+'<div class="product-actions"><button class="btn" onclick="editProduct(\''+p.id+'\')">Edit</button><button class="btn" onclick="copyProduct(\''+p.id+'\')">Copy</button><button class="btn danger" onclick="archiveProduct(\''+p.id+'\')">Remove</button></div></div>';
   }).join("");
   hydrateDashboardImages();
 }
@@ -536,9 +536,11 @@ function fillCategorySelect(){
   function fill(){sub.innerHTML=(catalog[cat.value]||[]).map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join("")}
   cat.onchange=fill;fill();
 }
-function openProduct(product){
+let productFormMode="add";
+function openProduct(product,mode){
+  productFormMode=mode|| (product?"edit":"add");
   fillCategorySelect();document.getElementById("productModal").classList.remove("hidden");
-  document.getElementById("productTitle").textContent=product?"Edit Product":"Add Product";
+  document.getElementById("productTitle").textContent=productFormMode==="copy"?"Copy Product":product?"Edit Product":"Add Product";
   document.getElementById("productId").value=product?.id||"";
   document.getElementById("productName").value=product?.product_name||"";
   document.getElementById("productCategory").value=product?.category||dashboardData.supplier.category;
@@ -560,7 +562,12 @@ async function hydrateModalImages(productId){
 }
 function closeProduct(){document.getElementById("productModal").classList.add("hidden")}
 function findProduct(id){return (dashboardData.products||[]).find(x=>x.id===id)}
-function editProduct(id){const p=findProduct(id);if(p)openProduct(p)}
+function editProduct(id){const p=findProduct(id);if(p)openProduct(p,"edit")}
+function copyProduct(id){
+  const p=findProduct(id);
+  if(!p)return;
+  openProduct({...p,id:"",product_name:p.product_name},"copy");
+}
 async function archiveProduct(id){if(!confirm("Remove this product from your public listings?"))return;try{await api("/api/supplier-dashboard/products/"+id,{method:"DELETE"});await loadDashboard()}catch(e){alert(e.message)}}
 
 async function requestOtp(){
@@ -651,7 +658,7 @@ document.getElementById("profileForm").onsubmit=async e=>{
   }
 };
 
-async function logout(){try{await api("/api/supplier-dashboard/logout",{method:"POST"})}catch{}localStorage.removeItem(dashboardKey);showLogin("You have signed out.");}
+async function logout(){try{await api("/api/supplier-dashboard/logout",{method:"POST"})catch{}dashboardStorage.removeItem(dashboardKey);showLogin("You have signed out.");}
 document.getElementById("productImages").addEventListener("change",e=>{
   document.getElementById("imagePreview").innerHTML=Array.from(e.target.files).slice(0,6).map(f=>'<div><img src="'+URL.createObjectURL(f)+'" alt=""><div class="image-note">'+esc(f.name)+'</div></div>').join("");
 });
