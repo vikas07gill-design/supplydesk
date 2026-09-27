@@ -15,7 +15,7 @@ test.describe("SupplyDesk full buyer enquiry flow", () => {
     const productsResponse = await page.request.get("/api/products");
     expect(productsResponse.status()).toBe(200);
     const productsBody = await productsResponse.json();
-    const seededProduct = productsBody.products.find(product => product.product_name === "E2E Test Product" || product.productName === "E2E Test Product");
+    const seededProduct = productsBody.products.find(product => product.name === "E2E Test Product");
     expect(seededProduct, "Seeded E2E product must be visible through the public products API").toBeTruthy();
     const productId = seededProduct.id;
     expect(productId).toBeTruthy();
