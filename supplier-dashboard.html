@@ -345,7 +345,6 @@ async function api(url,options={}){
   }finally{clearTimeout(timer);}
 }
 function showLogin(message=""){
-  dashboardStorage.removeItem(dashboardKey);
   document.getElementById("loginView").classList.remove("hidden");document.getElementById("dashboardView").classList.add("hidden");document.getElementById("navActions").classList.add("hidden");
   if(message){const s=document.getElementById("loginStatus");s.textContent=message;s.classList.remove("hidden");}
 }
