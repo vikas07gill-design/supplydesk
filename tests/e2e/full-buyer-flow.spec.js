@@ -1,11 +1,26 @@
 import { test, expect } from "@playwright/test";
 
 const EMAIL = "buyer-e2e@example.com";
-const PRODUCT_ID = "e2e-product-0000000000000000000000000001";
 
 test.describe("SupplyDesk full buyer enquiry flow", () => {
+  test("seeded supplier legacy slug resolves", async ({ request }) => {
+    const response = await request.get("/api/suppliers/india-growth");
+    expect(response.status()).toBe(200);
+    const body = await response.json();
+    expect(body.supplier).toBeTruthy();
+    expect(body.supplier.trade_name).toBe("India Growth");
+  });
+
   test("OTP verification -> enquiry -> buyer dashboard", async ({ page }) => {
-    await page.goto("/product.html?id=" + PRODUCT_ID, { waitUntil: "domcontentloaded" });
+    const productsResponse = await page.request.get("/api/products");
+    expect(productsResponse.status()).toBe(200);
+    const productsBody = await productsResponse.json();
+    const seededProduct = productsBody.products.find(product => product.name === "E2E Test Product");
+    expect(seededProduct, "Seeded E2E product must be visible through the public products API").toBeTruthy();
+    const productId = seededProduct.id;
+    expect(productId).toBeTruthy();
+
+    await page.goto("/product.html?id=" + encodeURIComponent(productId), { waitUntil: "domcontentloaded" });
     await expect(page.locator("#name")).toHaveText("E2E Test Product");
 
     await page.locator("#connectBtn").click();
@@ -50,6 +65,6 @@ test.describe("SupplyDesk full buyer enquiry flow", () => {
     expect(dashboardResponse.ok()).toBe(true);
     const dashboard = await dashboardResponse.json();
     expect(dashboard.buyer.email).toBe(EMAIL);
-    expect(dashboard.enquiries.some(e => e.id === enquiryBody.enquiryId && e.productId === PRODUCT_ID)).toBe(true);
+    expect(dashboard.enquiries.some(e => e.id === enquiryBody.enquiryId && e.productId === productId)).toBe(true);
   });
 });
