@@ -658,7 +658,7 @@ document.getElementById("profileForm").onsubmit=async e=>{
   }
 };
 
-async function logout(){try{await api("/api/supplier-dashboard/logout",{method:"POST"})catch{}dashboardStorage.removeItem(dashboardKey);showLogin("You have signed out.");}
+async function logout(){try{await api("/api/supplier-dashboard/logout",{method:"POST"})}catch{}dashboardStorage.removeItem(dashboardKey);showLogin("You have signed out.");}
 document.getElementById("productImages").addEventListener("change",e=>{
   document.getElementById("imagePreview").innerHTML=Array.from(e.target.files).slice(0,6).map(f=>'<div><img src="'+URL.createObjectURL(f)+'" alt=""><div class="image-note">'+esc(f.name)+'</div></div>').join("");
 });
