@@ -315,6 +315,18 @@ async function ensureBuyerSchema() {
     INDEX idx_buyer_enquiry_supplier (supplier_id, created_at),
     INDEX idx_buyer_enquiry_product (product_id, created_at)
   ) ENGINE=InnoDB`);
+  await pool.execute(`CREATE TABLE IF NOT EXISTS buyer_dashboard_tokens (
+    id CHAR(36) PRIMARY KEY,
+    buyer_id CHAR(36) NOT NULL,
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    expires_at DATETIME NOT NULL,
+    revoked_at DATETIME NULL,
+    last_used_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_buyer_dashboard_token_buyer FOREIGN KEY (buyer_id) REFERENCES buyers(id) ON DELETE CASCADE,
+    INDEX idx_buyer_dashboard_token_buyer (buyer_id, created_at),
+    INDEX idx_buyer_dashboard_token_expiry (expires_at)
+  ) ENGINE=InnoDB`);
   await pool.execute(`CREATE TABLE IF NOT EXISTS buyer_email_otps (
     id CHAR(36) PRIMARY KEY,
     email VARCHAR(255) NOT NULL,
@@ -718,6 +730,69 @@ app.get("/api/suppliers", async (req, res) => {
 });
 
 
+async function getBuyerByDashboardToken(rawToken){
+  const token=clean(rawToken,256);
+  if(!token)return null;
+  const [[buyer]]=await pool.execute(
+    `SELECT b.id,b.email,b.name,b.company,b.country,b.phone,t.id AS token_id
+     FROM buyer_dashboard_tokens t JOIN buyers b ON b.id=t.buyer_id
+     WHERE t.token_hash=? AND t.revoked_at IS NULL AND t.expires_at>NOW()`,
+    [tokenHash(token)]
+  );
+  if(!buyer)return null;
+  await pool.execute("UPDATE buyer_dashboard_tokens SET last_used_at=NOW() WHERE id=?",[buyer.token_id]);
+  await pool.execute("UPDATE buyers SET last_seen=NOW() WHERE id=?",[buyer.id]);
+  return buyer;
+}
+
+async function requireBuyerDashboard(req,res,next){
+  try{
+    const buyer=await getBuyerByDashboardToken(req.get("x-buyer-dashboard-token"));
+    if(!buyer)return res.status(401).json({error:"Buyer dashboard access has expired. Please verify your email again."});
+    req.buyer=buyer; next();
+  }catch(error){
+    console.error("Buyer dashboard auth failed:",error);
+    res.status(500).json({error:"Could not authenticate buyer dashboard."});
+  }
+}
+
+app.get("/api/buyer-dashboard", requireBuyerDashboard, async (req,res)=>{
+  try{
+    const [enquiries]=await pool.execute(
+      `SELECT e.id,e.product_id,e.supplier_id,e.message,e.quantity,e.status,e.created_at,e.updated_at,
+              p.product_name,s.trade_name,s.legal_name,s.country,s.city
+       FROM buyer_enquiries e
+       JOIN supplier_profiles s ON s.id=e.supplier_id
+       LEFT JOIN supplier_products p ON p.id=e.product_id
+       WHERE e.buyer_id=? ORDER BY e.created_at DESC LIMIT 100`,
+      [req.buyer.id]
+    );
+    res.json({
+      buyer:{id:req.buyer.id,email:req.buyer.email,name:req.buyer.name||"",company:req.buyer.company||"",country:req.buyer.country||"",phone:req.buyer.phone||""},
+      enquiries:enquiries.map(e=>({id:e.id,productId:e.product_id,productName:e.product_name||"General enquiry",supplierId:e.supplier_id,supplierName:e.trade_name||e.legal_name,supplierCountry:e.country,supplierCity:e.city,quantity:e.quantity||"",message:e.message||"",status:e.status,createdAt:e.created_at,updatedAt:e.updated_at}))
+    });
+  }catch(error){
+    console.error("Buyer dashboard load failed:",error);
+    res.status(500).json({error:"Could not load buyer dashboard."});
+  }
+});
+
+app.patch("/api/buyer-dashboard/profile", requireBuyerDashboard, async(req,res)=>{
+  const name=clean(req.body?.name,180), company=clean(req.body?.company,180), country=clean(req.body?.country,120), phone=clean(req.body?.phone,80);
+  try{
+    await pool.execute("UPDATE buyers SET name=?,company=?,country=?,phone=?,last_seen=NOW() WHERE id=?",[name||null,company||null,country||null,phone||null,req.buyer.id]);
+    res.json({ok:true});
+  }catch(error){
+    console.error("Buyer profile update failed:",error);
+    res.status(500).json({error:"Could not update buyer profile."});
+  }
+});
+
+app.post("/api/buyer-dashboard/logout", requireBuyerDashboard, async(req,res)=>{
+  await pool.execute("UPDATE buyer_dashboard_tokens SET revoked_at=NOW() WHERE token_hash=?",[tokenHash(req.get("x-buyer-dashboard-token"))]);
+  res.json({ok:true});
+});
+
 app.post("/api/buyer-email/request-otp", connectLimiter, async (req,res)=>{
   const email=clean(req.body?.email,255).toLowerCase();
   if(!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({error:"Please enter a valid email address."});
@@ -747,8 +822,17 @@ app.post("/api/buyer-email/verify-otp", connectLimiter, async (req,res)=>{
       return res.status(400).json({error:"Incorrect verification code."});
     }
     const rawToken=crypto.randomBytes(32).toString("hex");
+    const dashboardToken=crypto.randomBytes(32).toString("hex");
+    const [[existingBuyer]]=await pool.execute("SELECT id FROM buyers WHERE email=? LIMIT 1",[email]);
+    const buyerId=existingBuyer?.id||crypto.randomUUID();
+    if(existingBuyer){
+      await pool.execute("UPDATE buyers SET last_seen=NOW() WHERE id=?",[buyerId]);
+    }else{
+      await pool.execute("INSERT INTO buyers (id,email,last_seen) VALUES (?,?,NOW())",[buyerId,email]);
+    }
     await pool.execute("UPDATE buyer_email_otps SET verified_at=NOW(),verification_token_hash=?,verification_expires_at=DATE_ADD(NOW(),INTERVAL 30 MINUTE) WHERE id=?",[hashToken(rawToken),row.id]);
-    res.json({ok:true,verificationToken:rawToken,message:"Email verified successfully."});
+    await pool.execute("INSERT INTO buyer_dashboard_tokens (id,buyer_id,token_hash,expires_at) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 30 DAY))",[crypto.randomUUID(),buyerId,tokenHash(dashboardToken)]);
+    res.json({ok:true,verificationToken:rawToken,dashboardToken,buyerId,dashboardUrl:"/buyer-dashboard.html",message:"Email verified. Your Buyer Dashboard is ready."});
   }catch(error){
     console.error("Buyer email verification failed:",error);
     res.status(500).json({error:"Could not verify the email. Please try again."});
@@ -768,17 +852,24 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
   const sourceAction = ["phone","email","contact"].includes(req.body?.sourceAction) ? req.body.sourceAction : "contact";
   const message = clean(req.body?.message, 2000) || null;
   const verificationToken=clean(req.body?.verificationToken,256);
+  const dashboardToken=clean(req.body?.dashboardToken,256);
 
   if (!supplierId || !customerName || !customerEmail) return res.status(400).json({ error: "Name and email are required." });
   if (!/^\S+@\S+\.\S+$/.test(customerEmail)) return res.status(400).json({ error: "Please enter a valid email address." });
-  if(!verificationToken) return res.status(400).json({error:"Please verify your email with the OTP before sending the enquiry."});
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) return res.status(503).json({ error: "Connection email service is not configured yet." });
 
   const requestId = crypto.randomUUID();
   const enquiryId = crypto.randomUUID();
   try {
-    const [[verifiedOtp]]=await pool.execute("SELECT id FROM buyer_email_otps WHERE email=? AND verification_token_hash=? AND verification_expires_at>NOW() AND verified_at IS NOT NULL ORDER BY verified_at DESC LIMIT 1",[customerEmail,hashToken(verificationToken)]);
-    if(!verifiedOtp) return res.status(400).json({error:"Email verification expired. Please verify your email again."});
+    let dashboardBuyer=null;
+    if(dashboardToken){
+      dashboardBuyer=await getBuyerByDashboardToken(dashboardToken);
+      if(dashboardBuyer && dashboardBuyer.email!==customerEmail)dashboardBuyer=null;
+    }
+    if(!dashboardBuyer){
+      const [[verifiedOtp]]=await pool.execute("SELECT id FROM buyer_email_otps WHERE email=? AND verification_token_hash=? AND verification_expires_at>NOW() AND verified_at IS NOT NULL ORDER BY verified_at DESC LIMIT 1",[customerEmail,hashToken(verificationToken)]);
+      if(!verifiedOtp) return res.status(400).json({error:"Email verification expired. Please verify your email again."});
+    }
 
     const [[supplier]] = await pool.execute(
       "SELECT id, legal_name, trade_name, business_email, category, subcategory FROM supplier_profiles WHERE id=? AND verified=1 AND published=1",
@@ -797,9 +888,9 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
     }
 
     const [[existingBuyer]] = await pool.execute("SELECT id FROM buyers WHERE email=? LIMIT 1", [customerEmail]);
-    const buyerId = existingBuyer?.id || crypto.randomUUID();
+    const buyerId = dashboardBuyer?.id || existingBuyer?.id || crypto.randomUUID();
 
-    if (existingBuyer) {
+    if (existingBuyer || dashboardBuyer) {
       await pool.execute(
         "UPDATE buyers SET name=COALESCE(NULLIF(?,''),name), company=COALESCE(NULLIF(?,''),company), country=COALESCE(NULLIF(?,''),country), phone=COALESCE(NULLIF(?,''),phone), last_seen=NOW() WHERE id=?",
         [customerName, customerCompany || "", customerCountry || "", customerPhone || "", buyerId]
@@ -1789,6 +1880,13 @@ app.get(["/supplier-dashboard","/supplier-dashboard-login"], (req, res) => {
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
   res.sendFile(path.join(ROOT, "supplier-dashboard.html"));
+});
+
+app.get(["/buyer-dashboard","/buyer-dashboard-login"],(req,res)=>{
+  res.setHeader("Cache-Control","no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma","no-cache");
+  res.setHeader("Expires","0");
+  res.sendFile(path.join(ROOT,"buyer-dashboard.html"));
 });
 
 app.use(express.static(ROOT, {
