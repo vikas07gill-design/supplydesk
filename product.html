@@ -24,10 +24,10 @@ nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!i
 </style></head><body><nav><div class="wrap nav"><a class="brand-logo" href="index.html"><span class="brand-mark"><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" stroke-width="2.5" opacity=".95"/><path d="M11 29c6-9 12-13 26-14M12 19c7 7 14 11 25 11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".7"/><circle cx="13" cy="29" r="2.7" fill="currentColor"/><circle cx="36" cy="15" r="2.7" fill="currentColor"/><circle cx="37" cy="30" r="2.7" fill="currentColor"/><path d="M17 34c2.8-2.8 5.5-4.2 8.2-4.2 3.1 0 5.1 1.1 7.2 3.1" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></span><span class="brand-word"><span>Supply</span><b>Desk</b><small>GLOBAL SUPPLY NETWORK</small></span></a><a class="btn" href="search.html">← Back to Search</a></div></nav><main class="wrap"><div class="back">Product listing</div><section class="hero"><div class="visual" id="visual"><div class="shape"></div><div id="gallery" class="gallery"></div></div><div><div class="eyebrow">Product</div><h1 id="name">Plastic Storage Container</h1><div class="meta" id="meta">📍 Ahmedabad, India · Domestic</div><p class="desc" id="desc">Example product listing. The live version will connect the product to its supplier and full product information.</p><div class="tags"><span class="tag">Plastic</span><span class="tag">Storage</span><span class="tag">Household</span></div><div class="actions"><a class="btn primary" id="supplier" href="supplier.html?id=india-growth&product=Plastic%20Storage%20Container">View Supplier →</a><a class="btn" href="search.html">More Products</a></div></div></section><section class="info"><h2>About this listing</h2><p>SupplyDesk is currently an information and connection platform. Product specifications, availability, pricing and supplier details will be connected to the database in the next stage.</p></section></main><script>
 const liveId=new URLSearchParams(location.search).get("id")||"";
 async function loadLiveProduct(){
-  if(!liveId || liveId==="plastic-container") return;
+  if(!liveId){ document.getElementById("name").textContent="Product not found"; document.getElementById("meta").textContent="Open a product from SupplyDesk search."; document.getElementById("desc").textContent="This page requires a published SupplyDesk product."; return; }
   try{
     const r=await fetch("/api/products/"+encodeURIComponent(liveId));
-    if(!r.ok)return;
+    if(!r.ok){ document.getElementById("name").textContent="Product not found"; document.getElementById("meta").textContent="This product is not currently published."; document.getElementById("desc").textContent="The requested product could not be found or is still under review."; return; }
     const d=await r.json(),p=d.product;
     document.title=p.name+" | SupplyDesk";
     document.getElementById("name").textContent=p.name;
@@ -38,7 +38,7 @@ async function loadLiveProduct(){
     document.querySelector(".tags").innerHTML=[p.category,p.subcategory,p.market_scope].map(x=>'<span class="tag">'+String(x).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))+'</span>').join("");
     const supplier=document.getElementById("supplier");
     supplier.href="supplier.html?id="+encodeURIComponent(p.supplierId)+"&product="+encodeURIComponent(p.name);
-  }catch(e){}
+  }catch(e){ document.getElementById("name").textContent="Product unavailable"; document.getElementById("desc").textContent="We could not load this product right now. Please try again."; }
 }
 loadLiveProduct();
 </script></body></html>
