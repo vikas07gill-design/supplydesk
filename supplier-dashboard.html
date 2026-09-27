@@ -21,6 +21,33 @@ header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0
 .connections{max-height:530px;overflow:auto}.connection{padding:12px 0;border-bottom:1px solid #edf2f4}.connection:last-child{border-bottom:0}.connection b{font-size:13px}.connection small{display:block;color:var(--muted);margin-top:4px;line-height:1.5}
 .profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.full{grid-column:1/-1}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}.empty{padding:25px 8px;text-align:center;color:var(--muted);font-size:12px}
 @media(max-width:900px){.metrics{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr}}@media(max-width:600px){.nav{height:auto;padding:12px 0}.hero h1{font-size:31px}.metrics{grid-template-columns:1fr 1fr}.profile-grid{grid-template-columns:1fr}.full{grid-column:auto}.brand .word{font-size:20px}.nav .btn{padding:8px 10px;font-size:11px}}
+
+/* Supplier dashboard UX refresh */
+.dashboard-shell{padding-bottom:56px}
+.dashboard-tabs{position:sticky;top:70px;z-index:15;background:rgba(244,250,251,.96);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);margin-bottom:18px}
+.tabs-inner{display:flex;gap:7px;overflow:auto;padding:10px 0;scrollbar-width:none}
+.tabs-inner::-webkit-scrollbar{display:none}
+.tab-btn{border:1px solid transparent;background:transparent;color:var(--muted);padding:10px 14px;border-radius:11px;font:inherit;font-size:12px;font-weight:900;white-space:nowrap;cursor:pointer}
+.tab-btn:hover{background:#fff;color:var(--ink);border-color:var(--line)}
+.tab-btn.active{background:var(--brand);color:#fff;box-shadow:0 7px 18px rgba(8,127,140,.16)}
+.tab-panel{display:none;animation:tabIn .18s ease-out}
+.tab-panel.active{display:block}
+@keyframes tabIn{from{opacity:.35;transform:translateY(3px)}to{opacity:1;transform:none}}
+.overview-grid{display:grid;grid-template-columns:1.35fr .65fr;gap:14px}
+.quick-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.quick-action{border:1px solid var(--line);background:#fff;border-radius:14px;padding:14px;text-align:left;cursor:pointer;transition:.16s ease}
+.quick-action:hover{transform:translateY(-2px);box-shadow:0 10px 25px rgba(16,55,65,.07);border-color:#c9dfe4}
+.quick-action strong{display:block;font-size:13px;margin-bottom:4px}.quick-action span{display:block;font-size:11px;color:var(--muted);line-height:1.45}
+.summary-list{display:grid;gap:0;margin-top:8px}.summary-row{display:flex;justify-content:space-between;gap:18px;padding:10px 0;border-bottom:1px solid #edf2f4;font-size:12px}.summary-row:last-child{border-bottom:0}.summary-row span{color:var(--muted)}.summary-row strong{text-align:right}
+.section-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}
+.section-title{font-size:20px;margin:0 0 4px;letter-spacing:-.03em}.section-subtitle{margin:0;color:var(--muted);font-size:12px;line-height:1.5}
+.edit-form{display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}.edit-form.open{display:block}
+.readonly{background:#f4f8f9!important;color:#526d75!important}
+.field-help{font-size:10px;color:var(--muted);margin-top:5px}
+.status-chip{display:inline-flex;align-items:center;gap:5px;padding:5px 9px;border-radius:999px;background:var(--soft);color:#28636b;font-size:10px;font-weight:900}
+.kicker{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.08em}
+@media(max-width:900px){.overview-grid{grid-template-columns:1fr}.quick-grid{grid-template-columns:1fr 1fr}.dashboard-tabs{top:64px}}
+@media(max-width:600px){.quick-grid{grid-template-columns:1fr}.tabs-inner{padding:8px 0}.tab-btn{padding:9px 11px}.section-toolbar{align-items:flex-start;flex-direction:column}.section-toolbar .btn{width:100%}}
 </style>
 </head>
 <body>
@@ -67,74 +94,186 @@ header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0
 })();
 </script>
 
+
 <main id="dashboardView" class="dashboard hidden">
-<section class="hero"><div class="wrap"><div class="eyebrow">Supplier dashboard</div><h1 id="welcome">Your SupplyDesk workspace</h1><p>Manage your products, submit profile changes for review and see how customers are reaching your business.</p></div></section>
-<div class="wrap">
-<div class="metrics">
-<div class="metric"><small>Profile views · 30 days</small><strong id="views">0</strong></div>
-<div class="metric"><small>Unique visitors · 30 days</small><strong id="unique">0</strong></div>
-<div class="metric"><small>Connection requests · 30 days</small><strong id="connectionsCount">0</strong></div>
-<div class="metric"><small>Approved products</small><strong id="approvedProducts">0</strong></div>
-</div>
-<div id="dashboardStatus"></div>
-<div class="card"><div class="card-head"><div><h2>Business Profile</h2><div class="muted">Add the information customers need to understand your capability. Changes require SupplyDesk approval.</div></div></div>
-<div class="profile-grid">
-<div class="field full"><label>Company Profile / About</label><textarea id="detailAbout" maxlength="2000" placeholder="Company background, experience, capabilities and what you supply."></textarea></div>
-<div class="field full"><label>Capabilities</label><textarea id="detailCapabilities" maxlength="1500" placeholder="Manufacturing, trading, sourcing, processing or service capabilities."></textarea></div>
-<div class="field"><label>Industries Served</label><input id="detailIndustries" placeholder="Automotive, packaging, electronics..."></div>
-<div class="field"><label>Markets Served</label><input id="detailMarkets" placeholder="India, UAE, Europe, domestic..."></div>
-<div class="field"><label>Monthly Capacity</label><input id="detailCapacity" placeholder="e.g. 500 MT / month"></div>
-<div class="field"><label>Typical Lead Time</label><input id="detailLeadTime" placeholder="e.g. 15-30 days"></div>
-<div class="field"><label>Payment Terms</label><input id="detailPayment" placeholder="Advance, LC, 30 days..."></div>
-<div class="field"><label>Incoterms</label><input id="detailIncoterms" placeholder="EXW, FOB, CIF, DDP..."></div>
-<div class="field"><label>Shipping Modes</label><input id="detailShipping" placeholder="Sea, Air, Road, Courier"></div>
-<div class="field"><label>Certifications</label><input id="detailCertifications" placeholder="ISO, CE, BIS, etc."></div>
-<div class="field"><label>OEM Available</label><select id="detailOem"><option value="">Select</option><option>Yes</option><option>No</option></select></div>
-<div class="field"><label>Custom Manufacturing</label><select id="detailCustom"><option value="">Select</option><option>Yes</option><option>No</option></select></div>
-</div><div class="actions"><button class="btn primary" onclick="submitBusinessProfile()">Submit Business Profile for Review</button></div><div id="profileDetailStatus" class="notice hidden"></div></div>
+  <section class="hero" style="padding-bottom:14px">
+    <div class="wrap">
+      <div class="eyebrow">Supplier workspace</div>
+      <h1 id="welcome">Welcome to your SupplyDesk workspace</h1>
+      <p>Manage your business information, products and customer connections from one simple workspace.</p>
+    </div>
+  </section>
 
-<div class="grid">
-<section>
-<div class="card">
-<div class="card-head"><div><h2>My Products</h2><div class="muted">Add products or services you supply. New listings are reviewed by SupplyDesk before they become public.</div></div><button class="btn primary" onclick="openProduct()">+ Add Product</button></div>
-<div id="products"></div>
-</div>
+  <div class="dashboard-tabs">
+    <div class="wrap tabs-inner" role="tablist" aria-label="Supplier dashboard sections">
+      <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
+      <button class="tab-btn" data-tab="business" onclick="switchTab('business')">Business Profile</button>
+      <button class="tab-btn" data-tab="products" onclick="switchTab('products')">My Products</button>
+      <button class="tab-btn" data-tab="requests" onclick="switchTab('requests')">Customer Requests</button>
+      <button class="tab-btn" data-tab="company" onclick="switchTab('company')">Company Details</button>
+      <button class="tab-btn" data-tab="documents" onclick="switchTab('documents')">Documents</button>
+    </div>
+  </div>
 
-<div class="card">
-<div class="card-head"><div><h2>Profile</h2><div class="muted">You can request changes here. Public details change only after SupplyDesk approval.</div></div></div>
-<form id="profileForm">
-<div class="profile-grid">
-<div class="field"><label>Legal business name</label><input id="pLegal" name="legal_name"></div>
-<div class="field"><label>Trade / brand name</label><input id="pTrade" name="trade_name"></div>
-<div class="field"><label>Business type</label><input id="pType" name="business_type"></div>
-<div class="field"><label>Country</label><input id="pCountry" name="country"></div>
-<div class="field"><label>City</label><input id="pCity" name="city"></div>
-<div class="field"><label>Business email</label><input id="pEmail" type="email" name="business_email"></div>
-<div class="field"><label>Business phone</label><input id="pPhone" name="business_phone"></div>
-<div class="field"><label>Contact person</label><input id="pContact" name="contact_person"></div>
-<div class="field"><label>Designation</label><input id="pDesignation" name="designation"></div>
-<div class="field"><label>Website</label><input id="pWebsite" name="website"></div>
-<div class="field full"><label>Address</label><textarea id="pAddress" name="address"></textarea></div>
-</div>
-<div class="actions"><button class="btn primary" type="submit" id="profileBtn">Submit Profile Update for Review</button><a class="btn" href="supplier-update.html">Update Documents / Certificates</a></div>
-</form>
-</div>
-</section>
+  <div class="wrap dashboard-shell">
+    <div class="metrics">
+      <div class="metric"><small>Profile views · 30 days</small><strong id="views">0</strong></div>
+      <div class="metric"><small>Unique visitors · 30 days</small><strong id="unique">0</strong></div>
+      <div class="metric"><small>Connection requests · 30 days</small><strong id="connectionsCount">0</strong></div>
+      <div class="metric"><small>Approved products</small><strong id="approvedProducts">0</strong></div>
+    </div>
 
-<aside>
-<div class="card">
-<div class="card-head"><div><h2>Customer Requests</h2><div class="muted">Recent people who asked to connect with your business.</div></div></div>
-<div id="connections" class="connections"></div>
-</div>
-<div class="card">
-<h2>Public profile</h2><div id="profileSummary" class="muted" style="margin-top:10px"></div>
-<div class="actions"><a class="btn primary" id="viewProfile" href="#">View Public Profile</a><a class="btn" href="services.html">SupplyDesk Services</a></div>
-</div>
-</aside>
-</div>
-</div>
+    <div id="dashboardStatus"></div>
+
+    <section id="tab-overview" class="tab-panel active">
+      <div class="overview-grid">
+        <div class="card">
+          <div class="section-toolbar">
+            <div>
+              <div class="kicker">At a glance</div>
+              <h2 class="section-title">Your business</h2>
+              <p class="section-subtitle">Your registered supplier information and public profile status.</p>
+            </div>
+            <span class="status-chip">✓ SupplyDesk Verified</span>
+          </div>
+          <div id="overviewBusiness"></div>
+          <div class="actions">
+            <button class="btn primary" onclick="switchTab('business')">Manage Business Profile</button>
+            <button class="btn" onclick="switchTab('products')">Manage Products</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-toolbar">
+            <div>
+              <div class="kicker">Quick actions</div>
+              <h2 class="section-title">What do you need?</h2>
+            </div>
+          </div>
+          <div class="quick-grid">
+            <button class="quick-action" onclick="openBusinessEditor()"><strong>✎ Edit business</strong><span>Update capabilities and supply information.</span></button>
+            <button class="quick-action" onclick="openProduct()"><strong>＋ Add product</strong><span>Create a new listing for SupplyDesk review.</span></button>
+            <button class="quick-action" onclick="switchTab('requests')"><strong>◉ Requests</strong><span>See customers who want to connect.</span></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-business" class="tab-panel">
+      <div class="card">
+        <div class="section-toolbar">
+          <div>
+            <div class="kicker">Public-facing information</div>
+            <h2 class="section-title">Business Profile</h2>
+            <p class="section-subtitle">These details help customers understand what you supply. Changes go through SupplyDesk review.</p>
+          </div>
+          <button class="btn primary" id="businessEditBtn" onclick="toggleBusinessEditor()">Edit Profile</button>
+        </div>
+        <div id="businessSummary"></div>
+
+        <div id="businessEditForm" class="edit-form">
+          <div class="profile-grid">
+            <div class="field full"><label>Company Profile / About</label><textarea id="detailAbout" maxlength="2000" placeholder="Company background, experience, capabilities and what you supply."></textarea></div>
+            <div class="field full"><label>Capabilities</label><textarea id="detailCapabilities" maxlength="1500" placeholder="Manufacturing, trading, sourcing, processing or service capabilities."></textarea></div>
+            <div class="field"><label>Industries Served</label><input id="detailIndustries" autocomplete="organization-title" placeholder="Automotive, packaging, electronics..."></div>
+            <div class="field"><label>Markets Served</label><input id="detailMarkets" placeholder="India, UAE, Europe, domestic..."></div>
+            <div class="field"><label>Monthly Capacity</label><input id="detailCapacity" placeholder="e.g. 500 MT / month"></div>
+            <div class="field"><label>Typical Lead Time</label><input id="detailLeadTime" placeholder="e.g. 15-30 days"></div>
+            <div class="field"><label>Payment Terms</label><input id="detailPayment" placeholder="Advance, LC, 30 days..."></div>
+            <div class="field"><label>Incoterms</label><input id="detailIncoterms" placeholder="EXW, FOB, CIF, DDP..."></div>
+            <div class="field"><label>Shipping Modes</label><input id="detailShipping" placeholder="Sea, Air, Road, Courier"></div>
+            <div class="field"><label>Certifications</label><input id="detailCertifications" placeholder="ISO, CE, BIS, etc."></div>
+            <div class="field"><label>OEM Available</label><select id="detailOem"><option value="">Select</option><option>Yes</option><option>No</option></select></div>
+            <div class="field"><label>Custom Manufacturing</label><select id="detailCustom"><option value="">Select</option><option>Yes</option><option>No</option></select></div>
+          </div>
+          <div class="actions">
+            <button class="btn primary" onclick="submitBusinessProfile(event)">Submit for Review</button>
+            <button class="btn" type="button" onclick="toggleBusinessEditor(false)">Cancel</button>
+          </div>
+          <div id="profileDetailStatus" class="notice hidden"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-products" class="tab-panel">
+      <div class="card">
+        <div class="section-toolbar">
+          <div>
+            <div class="kicker">Listings</div>
+            <h2 class="section-title">My Products</h2>
+            <p class="section-subtitle">New and changed listings are reviewed before they become public.</p>
+          </div>
+          <button class="btn primary" onclick="openProduct()">＋ Add Product</button>
+        </div>
+        <div id="products"></div>
+      </div>
+    </section>
+
+    <section id="tab-requests" class="tab-panel">
+      <div class="card">
+        <div class="section-toolbar">
+          <div>
+            <div class="kicker">Customer activity</div>
+            <h2 class="section-title">Customer Requests</h2>
+            <p class="section-subtitle">People who asked to connect with your business. Update the status as you follow up.</p>
+          </div>
+        </div>
+        <div id="connections" class="connections"></div>
+      </div>
+    </section>
+
+    <section id="tab-company" class="tab-panel">
+      <div class="card">
+        <div class="section-toolbar">
+          <div>
+            <div class="kicker">Registered information</div>
+            <h2 class="section-title">Company Details</h2>
+            <p class="section-subtitle">Your registration information is automatically populated from your approved supplier record.</p>
+          </div>
+          <button class="btn primary" id="companyEditBtn" onclick="toggleCompanyEditor()">Request Changes</button>
+        </div>
+        <div id="companySummary"></div>
+
+        <form id="profileForm" class="edit-form">
+          <div class="profile-grid">
+            <div class="field"><label>Legal business name</label><input id="pLegal" name="legal_name" autocomplete="organization"></div>
+            <div class="field"><label>Trade / brand name</label><input id="pTrade" name="trade_name" autocomplete="organization"></div>
+            <div class="field"><label>Business type</label><input id="pType" name="business_type" autocomplete="organization-title"></div>
+            <div class="field"><label>Country</label><input id="pCountry" name="country" autocomplete="country-name"></div>
+            <div class="field"><label>City</label><input id="pCity" name="city" autocomplete="address-level2"></div>
+            <div class="field"><label>Business email</label><input id="pEmail" type="email" name="business_email" autocomplete="email" readonly class="readonly"><div class="field-help">Registered login email. Contact SupplyDesk if this needs to change.</div></div>
+            <div class="field"><label>Business phone</label><input id="pPhone" name="business_phone" autocomplete="tel"></div>
+            <div class="field"><label>Contact person</label><input id="pContact" name="contact_person" autocomplete="name"></div>
+            <div class="field"><label>Designation</label><input id="pDesignation" name="designation" autocomplete="organization-title"></div>
+            <div class="field"><label>Website</label><input id="pWebsite" name="website" type="url" autocomplete="url" placeholder="https://example.com"></div>
+            <div class="field full"><label>Address</label><textarea id="pAddress" name="address" autocomplete="street-address"></textarea></div>
+          </div>
+          <div class="actions">
+            <button class="btn primary" type="submit" id="profileBtn">Submit Changes for Review</button>
+            <button class="btn" type="button" onclick="toggleCompanyEditor(false)">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section id="tab-documents" class="tab-panel">
+      <div class="card">
+        <div class="section-toolbar">
+          <div>
+            <div class="kicker">Verification</div>
+            <h2 class="section-title">Documents & Certificates</h2>
+            <p class="section-subtitle">Upload or update business documents, certificates and verification information for SupplyDesk review.</p>
+          </div>
+        </div>
+        <div class="notice">Your public <strong>SupplyDesk Verified</strong> badge means the information and documents submitted to SupplyDesk have been reviewed. It is not a guarantee of product quality or financial standing.</div>
+        <div class="actions">
+          <a class="btn primary" href="supplier-update.html">Manage Documents</a>
+          <button class="btn" onclick="switchTab('business')">Back to Business Profile</button>
+        </div>
+      </div>
+    </section>
+  </div>
 </main>
-
 <div id="productModal" class="hidden" style="position:fixed;inset:0;background:rgba(8,32,42,.42);z-index:50;padding:20px;overflow:auto">
 <div class="login" style="max-width:650px;margin:7vh auto">
 <div class="card-head"><div><div class="eyebrow">Product listing</div><h2 id="productTitle">Add Product</h2></div><button class="btn" onclick="closeProduct()">Close</button></div>
@@ -157,7 +296,7 @@ header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0
 </div>
 
 <script>
-const dashboardKey="supplydesk_supplier_dashboard_token";
+const dashboardKey="supplydesk_supplier_dashboard_token";\nconst dashboardStorage=sessionStorage;
 const catalog={
 "Raw Materials":["Metals","Minerals","Polymers","Industrial Raw Materials"],
 "Plastics & Packaging":["Plastic Containers","Plastic Bottles","Packaging Films","Plastic Components"],
@@ -187,7 +326,7 @@ const catalog={
 let dashboardData=null;
 
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-function token(){return localStorage.getItem(dashboardKey)||new URLSearchParams(location.search).get("token")||""}
+function token(){return dashboardStorage.getItem(dashboardKey)||new URLSearchParams(location.search).get("token")||""}
 async function api(url,options={}){
   const headers=Object.assign({"x-supplier-dashboard-token":token()},options.headers||{});
   const controller=new AbortController();
@@ -206,10 +345,11 @@ async function api(url,options={}){
   }finally{clearTimeout(timer);}
 }
 function showLogin(message=""){
+  dashboardStorage.removeItem(dashboardKey);
   document.getElementById("loginView").classList.remove("hidden");document.getElementById("dashboardView").classList.add("hidden");document.getElementById("navActions").classList.add("hidden");
   if(message){const s=document.getElementById("loginStatus");s.textContent=message;s.classList.remove("hidden");}
 }
-function showDashboard(){document.getElementById("loginView").classList.add("hidden");document.getElementById("dashboardView").classList.remove("hidden");document.getElementById("navActions").classList.remove("hidden");}
+function showDashboard(){document.getElementById("loginView").classList.add("hidden");document.getElementById("dashboardView").classList.remove("hidden");document.getElementById("navActions").classList.remove("hidden");switchTab("overview");}
 async function showBuildVersion(){
   const page=document.getElementById("diagPage"),api=document.getElementById("diagApi"),ver=document.getElementById("diagVersion");
   if(page)page.textContent="✅ Page: supplier-dashboard.html loaded";
@@ -254,7 +394,7 @@ async function loadDashboard(){
     // Only clear the token when the API explicitly says it is unauthorized.
     // Server errors must not turn into the misleading "expired link" message.
     if(/unauthorized|invalid|expired/i.test(message)){
-      localStorage.removeItem(dashboardKey);
+      dashboardStorage.removeItem(dashboardKey);
     }
     const s=document.getElementById("loginStatus");
     if(s){
@@ -267,17 +407,63 @@ async function loadDashboard(){
 }
 function fillProfile(s){
   const map={pLegal:"legal_name",pTrade:"trade_name",pType:"business_type",pCountry:"country",pCity:"city",pEmail:"business_email",pPhone:"business_phone",pContact:"contact_person",pDesignation:"designation",pWebsite:"website",pAddress:"address"};
-  Object.entries(map).forEach(([id,key])=>document.getElementById(id).value=s[key]||"");
+  Object.entries(map).forEach(([id,key])=>{const el=document.getElementById(id);if(el)el.value=s[key]||"";});
+  renderCompanySummary(s);
+  renderBusinessSummary(s,dashboardData?.supplier?.profileDetails||{});
 }
-function renderProfileSummary(s){document.getElementById("profileSummary").innerHTML='<strong>'+esc(s.trade_name||s.legal_name)+'</strong><br>'+esc(s.city)+', '+esc(s.country)+'<br>'+esc(s.category)+' → '+esc(s.subcategory)+'<br><span class="badge">✓ SupplyDesk Verified</span>';document.getElementById("viewProfile").href="supplier.html?id="+encodeURIComponent(s.id)}
+function renderProfileSummary(s){return renderCompanySummary(s);}
+function renderCompanySummary(s){
+  const el=document.getElementById("companySummary");if(!el)return;
+  el.innerHTML='<div class="summary-list">'+
+    '<div class="summary-row"><span>Legal business name</span><strong>'+esc(s.legal_name)+'</strong></div>'+
+    '<div class="summary-row"><span>Trade / brand</span><strong>'+esc(s.trade_name||"Not added")+'</strong></div>'+
+    '<div class="summary-row"><span>Business type</span><strong>'+esc(s.business_type||"Not added")+'</strong></div>'+
+    '<div class="summary-row"><span>Location</span><strong>'+esc([s.city,s.country].filter(Boolean).join(", "))+'</strong></div>'+
+    '<div class="summary-row"><span>Category</span><strong>'+esc([s.category,s.subcategory].filter(Boolean).join(" → "))+'</strong></div>'+
+    '<div class="summary-row"><span>Business email</span><strong>'+esc(s.business_email)+'</strong></div>'+
+    '<div class="summary-row"><span>Business phone</span><strong>'+esc(s.business_phone||"Not added")+'</strong></div>'+
+    '<div class="summary-row"><span>Contact person</span><strong>'+esc([s.contact_person,s.designation].filter(Boolean).join(" · "))+'</strong></div>'+
+    '<div class="summary-row"><span>Website</span><strong>'+esc(s.website||"Not added")+'</strong></div>'+
+    '<div class="summary-row"><span>Address</span><strong>'+esc(s.address||"Not added")+'</strong></div>'+
+    '</div>';
+}
+function renderBusinessSummary(s,d){
+  const el=document.getElementById("businessSummary");if(!el)return;
+  const has=Object.values(d||{}).some(v=>String(v||"").trim());
+  el.innerHTML='<div class="summary-list">'+
+    '<div class="summary-row"><span>About</span><strong>'+esc(d.about||"Not added")+'</strong></div>'+
+    '<div class="summary-row"><span>Capabilities</span><strong>'+esc(d.capabilities||"Not added")+'</strong></div>'+
+    '<div class="summary-row"><span>Industries served</span><strong>'+esc(d.industries||"Not added")+'</strong></div>'+
+    '<div class="summary-row"><span>Markets served</span><strong>'+esc(d.markets||"Not added")+'</strong></div>'+
+    '<div class="summary-row"><span>Monthly capacity</span><strong>'+esc(d.monthlyCapacity||"Not added")+'</strong></div>'+
+    '<div class="summary-row"><span>Typical lead time</span><strong>'+esc(d.leadTime||"Not added")+'</strong></div>'+
+    '<div class="summary-row"><span>Payment terms</span><strong>'+esc(d.paymentTerms||"Not added")+'</strong></div>'+
+    '<div class="summary-row"><span>Incoterms</span><strong>'+esc(d.incoterms||"Not added")+'</strong></div>'+
+    '<div class="summary-row"><span>Shipping modes</span><strong>'+esc(d.shippingModes||"Not added")+'</strong></div>'+
+    '<div class="summary-row"><span>Certifications</span><strong>'+esc(d.certifications||"Not added")+'</strong></div>'+
+    '<div class="summary-row"><span>OEM available</span><strong>'+esc(d.oem||"Not added")+'</strong></div>'+
+    '<div class="summary-row"><span>Custom manufacturing</span><strong>'+esc(d.customManufacturing||"Not added")+'</strong></div>'+
+    '</div>';
+  const ov=document.getElementById("overviewBusiness");
+  if(ov)ov.innerHTML='<div class="summary-list">'+
+    '<div class="summary-row"><span>Business</span><strong>'+esc(s.trade_name||s.legal_name)+'</strong></div>'+
+    '<div class="summary-row"><span>Location</span><strong>'+esc([s.city,s.country].filter(Boolean).join(", "))+'</strong></div>'+
+    '<div class="summary-row"><span>Category</span><strong>'+esc([s.category,s.subcategory].filter(Boolean).join(" → "))+'</strong></div>'+
+    '<div class="summary-row"><span>Products</span><strong>'+String(dashboardData?.metrics?.approved_products||0)+' approved</strong></div>'+
+    '<div class="summary-row"><span>Profile status</span><strong>✓ Verified</strong></div>'+
+    '</div>';
+}
+function renderProfileSummary(s){renderCompanySummary(s);}
 function fillBusinessDetails(d){
   d=d||{}; const map={detailAbout:"about",detailCapabilities:"capabilities",detailIndustries:"industries",detailMarkets:"markets",detailCapacity:"monthlyCapacity",detailLeadTime:"leadTime",detailPayment:"paymentTerms",detailIncoterms:"incoterms",detailShipping:"shippingModes",detailCertifications:"certifications",detailOem:"oem",detailCustom:"customManufacturing"};
   Object.entries(map).forEach(([id,k])=>{const el=document.getElementById(id);if(el)el.value=d[k]||""});
+  renderBusinessSummary(dashboardData?.supplier||{},d);
 }
-async function submitBusinessProfile(){
-  const s=document.getElementById("profileDetailStatus"),btn=event.currentTarget;
-  const profileDetails={about:document.getElementById("detailAbout").value,capabilities:document.getElementById("detailCapabilities").value,industries:document.getElementById("detailIndustries").value,markets:document.getElementById("detailMarkets").value,monthlyCapacity:document.getElementById("detailCapacity").value,leadTime:document.getElementById("detailLeadTime").value,paymentTerms:document.getElementById("detailPayment").value,incoterms:document.getElementById("detailIncoterms").value,shippingModes:document.getElementById("detailShipping").value,certifications:document.getElementById("detailCertifications").value,oem:document.getElementById("detailOem").value,customManufacturing:document.getElementById("detailCustom").value};
-  btn.disabled=true;try{const d=await api("/api/supplier-dashboard/profile-update",{method:"POST",body:JSON.stringify({profileDetails}),headers:{"Content-Type":"application/json"}});s.textContent=d.message;s.className="notice success";s.classList.remove("hidden")}catch(e){s.textContent=e.message;s.className="notice error";s.classList.remove("hidden")}finally{btn.disabled=false}
+async function submitBusinessProfile(ev){
+  ev=ev||window.event;
+  const s=document.getElementById("profileDetailStatus"),btn=ev?.currentTarget||document.querySelector("#businessEditForm .primary");
+  const profileDetails={about:document.getElementById("detailAbout").value.trim(),capabilities:document.getElementById("detailCapabilities").value.trim(),industries:document.getElementById("detailIndustries").value.trim(),markets:document.getElementById("detailMarkets").value.trim(),monthlyCapacity:document.getElementById("detailCapacity").value.trim(),leadTime:document.getElementById("detailLeadTime").value.trim(),paymentTerms:document.getElementById("detailPayment").value.trim(),incoterms:document.getElementById("detailIncoterms").value.trim(),shippingModes:document.getElementById("detailShipping").value.trim(),certifications:document.getElementById("detailCertifications").value.trim(),oem:document.getElementById("detailOem").value,customManufacturing:document.getElementById("detailCustom").value};
+  btn.disabled=true;try{const d=await api("/api/supplier-dashboard/profile-update",{method:"POST",body:JSON.stringify({profileDetails}),headers:{"Content-Type":"application/json"}});s.textContent=d.message;s.className="notice success";s.classList.remove("hidden");renderBusinessSummary(dashboardData.supplier,profileDetails);setTimeout(()=>toggleBusinessEditor(false),700)}catch(e){s.textContent=e.message;s.className="notice error";s.classList.remove("hidden")}finally{btn.disabled=false}
 }
 function renderProducts(items){
   const el=document.getElementById("products");
@@ -322,6 +508,28 @@ function renderConnections(items){
       </div>
     </div>`).join("");
 }
+function switchTab(tab){
+  document.querySelectorAll(".tab-btn").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab));
+  document.querySelectorAll(".tab-panel").forEach(p=>p.classList.toggle("active",p.id==="tab-"+tab));
+  if(history.replaceState)history.replaceState({},document.title,"supplier-dashboard.html#"+tab);
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+function toggleBusinessEditor(force){
+  const form=document.getElementById("businessEditForm"),btn=document.getElementById("businessEditBtn");
+  const open=typeof force==="boolean"?force:!form.classList.contains("open");
+  form.classList.toggle("open",open);
+  btn.textContent=open?"Close Editor":"Edit Profile";
+  if(open)document.getElementById("detailAbout")?.focus();
+}
+function openBusinessEditor(){switchTab("business");toggleBusinessEditor(true);}
+function toggleCompanyEditor(force){
+  const form=document.getElementById("profileForm"),btn=document.getElementById("companyEditBtn");
+  const open=typeof force==="boolean"?force:!form.classList.contains("open");
+  form.classList.toggle("open",open);
+  btn.textContent=open?"Close Editor":"Request Changes";
+  if(open)document.getElementById("pLegal")?.focus();
+}
+
 function fillCategorySelect(){
   const cat=document.getElementById("productCategory"),sub=document.getElementById("productSubcategory");
   cat.innerHTML=Object.keys(catalog).map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join("");
@@ -400,7 +608,7 @@ document.getElementById("verifyOtpBtn").onclick=async()=>{
     const data=await r.json().catch(()=>({}));
     if(!r.ok)throw new Error(data.error||("OTP verification failed (HTTP "+r.status+")."));
     if(!data.token)throw new Error("OTP verified but the server did not return a dashboard token.");
-    localStorage.setItem(dashboardKey,data.token);
+    dashboardStorage.setItem(dashboardKey,data.token);
     await loadDashboard();
   }catch(e){
     s.textContent=e.name==="AbortError"
@@ -434,11 +642,12 @@ document.getElementById("profileForm").onsubmit=async e=>{
   try{
     const d=await api("/api/supplier-dashboard/profile-update",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     document.getElementById("dashboardStatus").innerHTML="<div class=\"notice success\">"+esc(d.message)+"</div>";
+    toggleCompanyEditor(false);
   }catch(err){
     document.getElementById("dashboardStatus").innerHTML="<div class=\"notice error\">"+esc(err.message)+"</div>";
   }finally{
     btn.disabled=false;
-    btn.textContent="Submit Profile Update for Review";
+    btn.textContent="Submit Changes for Review";
   }
 };
 
@@ -448,6 +657,7 @@ document.getElementById("productImages").addEventListener("change",e=>{
 });
 fillCategorySelect();
 
+const initialTab=location.hash?location.hash.slice(1):"overview";
 if(token())loadDashboard();else showLogin();
 </script>
 </body>
