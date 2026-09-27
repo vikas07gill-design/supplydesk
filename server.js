@@ -1435,13 +1435,27 @@ app.patch("/api/admin/supplier-updates/:id", requireAdmin, async (req,res)=>{
 
 app.get("/api/admin/products", requireAdmin, async (req,res)=>{
   try{
-    const status=["pending","approved","rejected","archived"].includes(clean(req.query.status,30))?clean(req.query.status,30):"pending";
-    const [rows]=await pool.execute(
-      "SELECT p.id,p.product_name,p.category,p.subcategory,p.description,p.moq,p.unit,p.market_scope,p.status,p.admin_notes,p.created_at,p.updated_at,s.legal_name,s.trade_name,s.country,s.city FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id WHERE p.status=? ORDER BY p.created_at DESC LIMIT 200",
-      [status]
-    );
-    res.json({products:rows});
-  }catch(error){console.error(error);res.status(500).json({error:"Could not load products."});}
+    const requested=clean(req.query.status,30);
+    const status=["pending","approved","rejected","archived"].includes(requested)?requested:"all";
+    const q=clean(req.query.q,200).toLowerCase();
+    let sql=`SELECT p.id,p.supplier_id,p.product_name,p.category,p.subcategory,p.description,p.moq,p.unit,p.market_scope,p.status,p.admin_notes,p.created_at,p.updated_at,
+                     s.legal_name,s.trade_name,s.country,s.city,s.business_email,s.verified,s.published
+              FROM supplier_products p
+              LEFT JOIN supplier_profiles s ON s.id=p.supplier_id
+              WHERE 1=1`;
+    const params=[];
+    if(status!=="all"){sql+=" AND p.status=?";params.push(status);}
+    if(q){
+      sql+=" AND (LOWER(p.product_name) LIKE ? OR LOWER(COALESCE(s.trade_name,'')) LIKE ? OR LOWER(COALESCE(s.legal_name,'')) LIKE ? OR LOWER(p.category) LIKE ? OR LOWER(p.subcategory) LIKE ?)";
+      const like="%"+q+"%";params.push(like,like,like,like,like);
+    }
+    sql+=" ORDER BY p.created_at DESC LIMIT 300";
+    const [rows]=await pool.execute(sql,params);
+    res.json({products:rows,filter:{status,q,count:rows.length}});
+  }catch(error){
+    console.error("Admin product queue load failed:",error);
+    res.status(500).json({error:"Could not load products."});
+  }
 });
 
 app.get("/api/admin/products/:id/images", requireAdmin, async (req,res)=>{
