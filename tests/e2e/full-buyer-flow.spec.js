@@ -1,9 +1,17 @@
 import { test, expect } from "@playwright/test";
 
 const EMAIL = "buyer-e2e@example.com";
-const PRODUCT_ID = "e2e-product-0000000000000000000000000001";
+const PRODUCT_ID = "00000000-0000-4000-8000-000000000003";
 
 test.describe("SupplyDesk full buyer enquiry flow", () => {
+  test("seeded supplier legacy slug resolves", async ({ request }) => {
+    const response = await request.get("/api/suppliers/india-growth");
+    expect(response.status()).toBe(200);
+    const body = await response.json();
+    expect(body.supplier).toBeTruthy();
+    expect(body.supplier.tradeName).toBe("India Growth");
+  });
+
   test("OTP verification -> enquiry -> buyer dashboard", async ({ page }) => {
     await page.goto("/product.html?id=" + PRODUCT_ID, { waitUntil: "domcontentloaded" });
     await expect(page.locator("#name")).toHaveText("E2E Test Product");
