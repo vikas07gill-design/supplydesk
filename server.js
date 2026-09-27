@@ -730,6 +730,69 @@ app.get("/api/suppliers", async (req, res) => {
 });
 
 
+async function getBuyerByDashboardToken(rawToken){
+  const token=clean(rawToken,256);
+  if(!token)return null;
+  const [[buyer]]=await pool.execute(
+    `SELECT b.id,b.email,b.name,b.company,b.country,b.phone,t.id AS token_id
+     FROM buyer_dashboard_tokens t JOIN buyers b ON b.id=t.buyer_id
+     WHERE t.token_hash=? AND t.revoked_at IS NULL AND t.expires_at>NOW()`,
+    [tokenHash(token)]
+  );
+  if(!buyer)return null;
+  await pool.execute("UPDATE buyer_dashboard_tokens SET last_used_at=NOW() WHERE id=?",[buyer.token_id]);
+  await pool.execute("UPDATE buyers SET last_seen=NOW() WHERE id=?",[buyer.id]);
+  return buyer;
+}
+
+async function requireBuyerDashboard(req,res,next){
+  try{
+    const buyer=await getBuyerByDashboardToken(req.get("x-buyer-dashboard-token"));
+    if(!buyer)return res.status(401).json({error:"Buyer dashboard access has expired. Please verify your email again."});
+    req.buyer=buyer; next();
+  }catch(error){
+    console.error("Buyer dashboard auth failed:",error);
+    res.status(500).json({error:"Could not authenticate buyer dashboard."});
+  }
+}
+
+app.get("/api/buyer-dashboard", requireBuyerDashboard, async (req,res)=>{
+  try{
+    const [enquiries]=await pool.execute(
+      `SELECT e.id,e.product_id,e.supplier_id,e.message,e.quantity,e.status,e.created_at,e.updated_at,
+              p.product_name,s.trade_name,s.legal_name,s.country,s.city
+       FROM buyer_enquiries e
+       JOIN supplier_profiles s ON s.id=e.supplier_id
+       LEFT JOIN supplier_products p ON p.id=e.product_id
+       WHERE e.buyer_id=? ORDER BY e.created_at DESC LIMIT 100`,
+      [req.buyer.id]
+    );
+    res.json({
+      buyer:{id:req.buyer.id,email:req.buyer.email,name:req.buyer.name||"",company:req.buyer.company||"",country:req.buyer.country||"",phone:req.buyer.phone||""},
+      enquiries:enquiries.map(e=>({id:e.id,productId:e.product_id,productName:e.product_name||"General enquiry",supplierId:e.supplier_id,supplierName:e.trade_name||e.legal_name,supplierCountry:e.country,supplierCity:e.city,quantity:e.quantity||"",message:e.message||"",status:e.status,createdAt:e.created_at,updatedAt:e.updated_at}))
+    });
+  }catch(error){
+    console.error("Buyer dashboard load failed:",error);
+    res.status(500).json({error:"Could not load buyer dashboard."});
+  }
+});
+
+app.patch("/api/buyer-dashboard/profile", requireBuyerDashboard, async(req,res)=>{
+  const name=clean(req.body?.name,180), company=clean(req.body?.company,180), country=clean(req.body?.country,120), phone=clean(req.body?.phone,80);
+  try{
+    await pool.execute("UPDATE buyers SET name=?,company=?,country=?,phone=?,last_seen=NOW() WHERE id=?",[name||null,company||null,country||null,phone||null,req.buyer.id]);
+    res.json({ok:true});
+  }catch(error){
+    console.error("Buyer profile update failed:",error);
+    res.status(500).json({error:"Could not update buyer profile."});
+  }
+});
+
+app.post("/api/buyer-dashboard/logout", requireBuyerDashboard, async(req,res)=>{
+  await pool.execute("UPDATE buyer_dashboard_tokens SET revoked_at=NOW() WHERE token_hash=?",[tokenHash(req.get("x-buyer-dashboard-token"))]);
+  res.json({ok:true});
+});
+
 app.post("/api/buyer-email/request-otp", connectLimiter, async (req,res)=>{
   const email=clean(req.body?.email,255).toLowerCase();
   if(!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({error:"Please enter a valid email address."});
