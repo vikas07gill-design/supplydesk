@@ -28,7 +28,7 @@ jobs:
       - name: Run production smoke tests
         env:
           PLAYWRIGHT_TEST_BASE_URL: https://supplydesk.in
-        run: npm run test:e2e
+        run: npx playwright test tests/e2e/production-smoke.spec.js
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v5
