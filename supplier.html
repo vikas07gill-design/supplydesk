@@ -38,7 +38,10 @@ nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!i
 <label>Your mobile <span>(optional)</span><input id="customerPhone" maxlength="80"></label>
 <label>Product / requirement<input id="productName" maxlength="255" placeholder="What do you need?"></label>
 <label>Message <span>(optional)</span><textarea id="customerMessage" maxlength="2000" rows="3" placeholder="Quantity, specification or any other requirement"></textarea></label>
-<button class="btn primary submit-connect" type="submit" id="submitConnect">Send Connection Request</button>
+<div style="display:flex;gap:8px;align-items:center;margin-top:7px">
+<button class="btn primary submit-connect" type="submit" id="submitConnect" style="flex:1">Send Connection Request</button>
+<a class="btn" id="buyerDashboardLink" href="/buyer-dashboard.html" style="display:none;white-space:nowrap">Dashboard →</a>
+</div>
 <div class="connect-status" id="connectStatus"></div>
 </form>
 </div>
@@ -177,7 +180,8 @@ form.addEventListener("submit",async e=>{
       throw new Error(detail+(data.requestId?" [Request ID: "+data.requestId+"]":""));
     }
     statusEl.textContent="✓ Request sent. The supplier has been notified by SupplyDesk.";
-    setTimeout(closeConnect,1200);
+    document.getElementById("buyerDashboardLink").style.display="inline-flex";
+    button.textContent="Sent ✓";
   }catch(error){
     statusEl.textContent=error.message;
     statusEl.className="connect-status error";
