@@ -2,6 +2,8 @@ name: SupplyDesk Production Smoke Tests
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   schedule:
@@ -12,29 +14,23 @@ jobs:
     name: Production smoke test
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
           node-version: 20
-
       - name: Install dependencies
         run: npm install
-
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
-
       - name: Run production smoke tests
         env:
           PLAYWRIGHT_TEST_BASE_URL: https://supplydesk.in
         run: npm run test:e2e
-
       - name: Upload Playwright report
-        if: ${{ !cancelled() }}
+        if: always()
         uses: actions/upload-artifact@v5
         with:
           name: supplydesk-playwright-report

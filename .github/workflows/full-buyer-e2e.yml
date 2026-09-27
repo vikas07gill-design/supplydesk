@@ -2,6 +2,8 @@ name: SupplyDesk Full Buyer E2E
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
 
@@ -10,7 +12,6 @@ jobs:
     name: Isolated buyer OTP and enquiry flow
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
     services:
       mysql:
         image: mysql:8.4
@@ -23,19 +24,15 @@ jobs:
           --health-interval=5s
           --health-timeout=5s
           --health-retries=20
-
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
           node-version: 20
-
       - name: Install dependencies
         run: npm install
-
       - name: Initialize isolated test database
         env:
           MYSQL_PWD: root
@@ -43,7 +40,6 @@ jobs:
           sed '/^ALTER TABLE connect_requests/,$d' database/schema.sql > /tmp/schema.sql
           mysql -h 127.0.0.1 -uroot -e "CREATE DATABASE IF NOT EXISTS supplydesk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
           mysql -h 127.0.0.1 -uroot supplydesk < /tmp/schema.sql
-
       - name: Start SupplyDesk test server
         env:
           PORT: 3000
@@ -64,20 +60,17 @@ jobs:
             sleep 1
           done
           curl -fsS http://127.0.0.1:3000/api/version
-
       - name: Seed isolated supplier and product
         env:
           MYSQL_PWD: root
         run: mysql -h 127.0.0.1 -uroot supplydesk < tests/e2e/seed.sql
-
       - name: Run full buyer E2E
         env:
           PLAYWRIGHT_TEST_BASE_URL: http://127.0.0.1:3000
           E2E_TEST_KEY: ci-test-key
         run: npx playwright test tests/e2e/full-buyer-flow.spec.js
-
       - name: Upload Playwright report
-        if: ${{ !cancelled() }}
+        if: always()
         uses: actions/upload-artifact@v5
         with:
           name: supplydesk-full-buyer-e2e-report
@@ -85,7 +78,6 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 14
-
       - name: Upload server log on failure
         if: failure()
         uses: actions/upload-artifact@v5
