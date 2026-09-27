@@ -1578,6 +1578,17 @@ app.patch("/api/admin/applications/:id", requireAdmin, async (req, res) => {
       return res.status(404).json({ error: "Application not found." });
     }
 
+    if (status === "approved") {
+      const [[verification]] = await conn.execute(
+        "SELECT registration_checked,documents_checked,photos_checked,address_checked FROM supplier_verification WHERE application_id=?",
+        [req.params.id]
+      );
+      if (!verification || !verification.registration_checked || !verification.documents_checked || !verification.photos_checked || !verification.address_checked) {
+        await conn.rollback();
+        return res.status(400).json({ error: "Complete the verification checklist for registration, documents, photos and address before approving this supplier." });
+      }
+    }
+
     await conn.execute(
       "UPDATE supplier_applications SET status = ?, admin_notes = ?, reviewed_at = NOW(), reviewed_by = ? WHERE id = ?",
       [status, notes || null, "admin", req.params.id]
