@@ -10,7 +10,7 @@
 <body>
 <header><div class="wrap head"><div><h1>SupplyDesk Admin</h1><div class="muted">Supplier verification & profile update queue</div></div><button id="logout">Clear Token</button></div></header>
 <main class="wrap">
-<div class="toolbar"><input id="adminId" placeholder="Admin ID"><input id="adminPassword" type="password" placeholder="Password"><button class="primary" onclick="login()">Sign In</button><span id="roleBadge" class="badge">Not signed in</span><select id="status"><option value="">All applications</option><option value="under_review">Under Review</option><option value="query">Query</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select><button onclick="loadApps()">Applications</button><button id="updatesBtn" onclick="loadUpdates()" style="display:none">Supplier Updates</button><button id="connectionsBtn" onclick="loadConnections()" style="display:none">Connection Requests</button><button id="testMailBtn" onclick="testEmail()" style="display:none">Test Email</button><button id="testSupplierMailBtn" onclick="testSupplierEmail()" style="display:none">Test Supplier Email</button><button id="testDashboardMailBtn" onclick="testDashboardEmail()" style="display:none">Test Dashboard Email</button><button id="testDashboardOtpBtn" onclick="testDashboardOtp()" style="display:none">Test Dashboard OTP</button><button id="testStorageBtn" onclick="testConnectionStorage()" style="display:none">Test Connection DB</button><button onclick="loadProducts()">Products</button></div>
+<div class="toolbar"><input id="adminId" placeholder="Admin ID"><input id="adminPassword" type="password" placeholder="Password"><button class="primary" onclick="login()">Sign In</button><span id="roleBadge" class="badge">Not signed in</span><select id="status"><option value="">All applications</option><option value="under_review">Under Review</option><option value="query">Query</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select><button onclick="loadApps()">Applications</button><button id="updatesBtn" onclick="loadUpdates()" style="display:none">Supplier Updates</button><button id="connectionsBtn" onclick="loadConnections()" style="display:none">Connection Requests</button><button id="testMailBtn" onclick="testEmail()" style="display:none">Test Email</button><button id="testSupplierMailBtn" onclick="testSupplierEmail()" style="display:none">Test Supplier Email</button><button id="testDashboardMailBtn" onclick="testDashboardEmail()" style="display:none">Test Dashboard Email</button><button id="testDashboardOtpBtn" onclick="testDashboardOtp()" style="display:none">Test Dashboard OTP</button><button id="testStorageBtn" onclick="testConnectionStorage()" style="display:none">Test Connection DB</button><button onclick="loadProducts()">Products</button><select id="productStatus" style="display:none"><option value="pending">Pending Products</option><option value="all">All Products</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="archived">Archived</option></select><input id="productSearch" placeholder="Search product / supplier" style="display:none"><button id="productRefreshBtn" onclick="loadProducts()" style="display:none">Refresh Products</button></div>
 <div id="message" class="muted"></div>
 <div class="grid">
 <section class="card"><div id="list">Enter your admin token to load applications.</div></section>
@@ -30,6 +30,8 @@ async function login(){
     sessionStorage.setItem(key,d.token);sessionStorage.setItem(roleKey,d.role);adminPasswordInput.value="";applyRole();document.getElementById("message").textContent="Signed in successfully.";await loadApps();
   }catch(e){document.getElementById("message").textContent=e.message}
 }
+document.getElementById("productStatus")?.addEventListener("change",loadProducts);
+document.getElementById("productSearch")?.addEventListener("keydown",e=>{if(e.key==="Enter")loadProducts();});
 document.getElementById("logout").onclick=async()=>{try{if(token())await fetch("/api/admin/logout",{method:"POST",headers:{"x-admin-token":token()}})}catch{}sessionStorage.removeItem(key);sessionStorage.removeItem(roleKey);adminIdInput.value="";adminPasswordInput.value="";applyRole();document.getElementById("list").textContent="Sign in to load applications.";document.getElementById("detail").innerHTML="<h2>Select an application</h2>"};
 async function api(url,options={}){const headers=Object.assign({"x-admin-token":token()},options.headers||{});const r=await fetch(url,Object.assign({},options,{headers}));const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||"Request failed");return data}
 async function testEmail(){
@@ -114,18 +116,31 @@ function renderUpdates(items){
   if(!items.length){document.getElementById("list").innerHTML="<div class='muted'>No supplier updates found.</div>";return}
   document.getElementById("list").innerHTML='<div class="row header"><div>Business</div><div>Location</div><div>Submitted</div><div>Status</div><div></div></div>'+items.map(u=>`<div class="row"><div><strong>${esc(u.trade_name||u.legal_name)}</strong><br><span class="muted">${esc(u.business_email)}</span></div><div>${esc(u.city)}, ${esc(u.country)}</div><div>${esc(new Date(u.created_at).toLocaleString())}</div><div><span class="badge">${esc(u.status)}</span></div><div><button onclick="openUpdate('${u.id}')">Review</button></div></div>`).join("");
 }
+function setProductControls(show){
+  ["productStatus","productSearch","productRefreshBtn"].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=show?"inline-block":"none"});
+}
 async function loadProducts(){
+  setProductControls(true);
   try{
-    const data=await api("/api/admin/products?status=pending");
-    document.getElementById("message").textContent="";
-    renderProducts(data.products);
+    const status=document.getElementById("productStatus")?.value||"pending";
+    const q=document.getElementById("productSearch")?.value.trim()||"";
+    const params=new URLSearchParams({status});
+    if(q)params.set("q",q);
+    const data=await api("/api/admin/products?"+params.toString());
+    document.getElementById("message").textContent="Product queue: "+(data.filter?.count??(data.products||[]).length)+" record(s)";
+    renderProducts(data.products||[]);
   }catch(e){document.getElementById("message").textContent=e.message}
 }
 function renderProducts(items){
-  if(!items.length){document.getElementById("list").innerHTML="<div class='muted'>No pending product listings.</div>";return}
-  document.getElementById("list").innerHTML='<div class="row header"><div>Product</div><div>Supplier</div><div>Category</div><div>Status</div><div></div></div>'+items.map(p=>`<div class="row"><div><strong>${esc(p.product_name)}</strong><br><span class="muted">${esc(p.market_scope)}</span></div><div>${esc(p.trade_name||p.legal_name)}<br><span class="muted">${esc(p.city)}, ${esc(p.country)}</span></div><div>${esc(p.category)}<br>${esc(p.subcategory)}</div><div><span class="badge">${esc(p.status)}</span></div><div><button onclick="openProductReview('${p.id}')">Review</button></div></div>`).join("");
+  if(!items.length){
+    document.getElementById("list").innerHTML="<div class='muted'>No products found for this filter.</div>";
+    return;
+  }
+  document.getElementById("list").innerHTML='<div class="row header"><div>Product</div><div>Supplier</div><div>Category</div><div>Status</div><div></div></div>'+items.map(p=>`<div class="row"><div><strong>${esc(p.product_name)}</strong><br><span class="muted">${esc(p.market_scope)} · ${esc(new Date(p.created_at).toLocaleString())}</span></div><div><strong>${esc(p.trade_name||p.legal_name||"Supplier record unavailable")}</strong><br><span class="muted">${esc(p.city||"")}${p.city&&p.country?", ":""}${esc(p.country||"")} · ${esc(p.business_email||"")}</span></div><div>${esc(p.category)}<br>${esc(p.subcategory)}</div><div><span class="badge">${esc(p.status)}</span></div><div><button onclick="openProductReview('${p.id}')">Review</button></div></div>`).join("");
 }
+
 async function openProductReview(id){
+
   try{
     const data=await api("/api/admin/products?status=pending");
     const p=(data.products||[]).find(x=>x.id===id);
