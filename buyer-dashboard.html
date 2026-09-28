@@ -25,6 +25,8 @@ main{padding:34px 0 60px}.hero{display:flex;justify-content:space-between;gap:20
 <div class="card metric"><strong id="active">0</strong><span>Active enquiries</span></div>
 <div class="card metric"><strong id="closed">0</strong><span>Closed enquiries</span></div>
 </div>
+<div class="card" style="margin-bottom:18px"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2 class="section-title" style="margin:0">My requirements</h2><p style="color:var(--muted);margin:5px 0 0;font-size:13px">Requirements you posted and quotations received from suppliers.</p></div><a class="btn primary" href="requirement.html">＋ Post Requirement</a></div><div id="requirements" style="margin-top:15px"></div></div>
+
 <div class="card">
 <h2 class="section-title">My enquiries</h2>
 <div class="table-wrap"><table class="table"><thead><tr><th>Product / Requirement</th><th>Supplier</th><th>Location</th><th>Quantity</th><th>Status</th><th>Date</th></tr></thead><tbody id="rows"></tbody></table></div>
@@ -47,6 +49,7 @@ async function load(){
   const r=await fetch("/api/buyer-dashboard",{headers:{"x-buyer-dashboard-token":token}});
   if(!r.ok)throw new Error();
   const d=await r.json(),b=d.buyer||{},e=d.enquiries||[];
+  await loadRequirements();
   document.getElementById("email").textContent=b.email||"";
   ["name","company","country","phone"].forEach(k=>document.getElementById(k).value=b[k]||"");
   document.getElementById("total").textContent=e.length;
@@ -56,6 +59,20 @@ async function load(){
   rows.innerHTML=e.map(x=>'<tr><td><strong>'+esc(x.productName)+'</strong></td><td>'+esc(x.supplierName)+'</td><td>'+esc((x.supplierCity||"")+" "+(x.supplierCountry||""))+'</td><td>'+esc(x.quantity||"—")+'</td><td><span class="pill '+esc(x.status)+'">'+esc(x.status.replaceAll("_"," "))+'</span></td><td>'+new Date(x.createdAt).toLocaleDateString()+'</td></tr>').join("");
   empty.style.display=e.length?"none":"block";
  }catch(e){localStorage.removeItem("supplydesk_buyer_dashboard_token");location.href="index.html";}
+}
+
+async function loadRequirements(){
+ const el=document.getElementById("requirements");if(!el)return;
+ try{const r=await fetch("/api/buyer-requirements",{headers:{"x-buyer-dashboard-token":token}});if(!r.ok)throw new Error();const d=await r.json(),items=d.requirements||[];
+ if(!items.length){el.innerHTML='<div class="empty">No requirements posted yet.</div>';return;}
+ el.innerHTML=items.map(x=>'<div style="border:1px solid var(--line);border-radius:13px;padding:14px;margin-top:10px"><div style="display:flex;justify-content:space-between;gap:10px"><strong>'+esc(x.title)+'</strong><span class="pill">'+esc(x.status)+'</span></div><div style="font-size:12px;color:var(--muted);margin-top:6px">Qty: '+esc(x.quantity||"Not specified")+(x.unit?" "+esc(x.unit):"")+' · '+esc(x.category||"Custom")+' · '+esc(x.delivery_country||"")+'</div><div style="font-size:12px;margin-top:5px"><b>'+esc(x.quote_count||0)+'</b> quotation(s) received</div><button class="btn primary" style="margin-top:10px" onclick="viewQuotes(\''+esc(x.id)+'\')">View Quotations</button></div>').join("");
+ }catch{el.innerHTML='<div class="empty">Could not load requirements.</div>';}
+}
+async function viewQuotes(id){
+ try{const r=await fetch("/api/buyer-requirements/"+encodeURIComponent(id)+"/quotes",{headers:{"x-buyer-dashboard-token":token}});const d=await r.json();if(!r.ok)throw new Error(d.error||"Could not load quotes.");
+ const items=d.quotes||[];const html=items.length?items.map(q=>'<div style="border-top:1px solid var(--line);padding:13px 0"><strong>'+esc(q.trade_name||q.legal_name)+'</strong><div style="font-size:13px;margin-top:5px">Price: <b>'+esc(q.unit_price)+' '+esc(q.currency)+'</b> · MOQ: '+esc(q.moq||"—")+' · Lead: '+esc(q.lead_time||"—")+'</div><div style="font-size:12px;color:var(--muted);margin-top:4px">'+esc(q.payment_terms||"Payment terms not specified")+(q.incoterm?" · "+esc(q.incoterm):"")+(q.notes?" · "+esc(q.notes):"")+'</div></div>').join(""):'<div class="empty">No quotations yet. Suppliers will appear here after they quote.</div>';
+ const box=document.createElement("div");box.style.cssText="position:fixed;inset:0;background:rgba(4,20,35,.5);z-index:100;padding:20px;overflow:auto";box.innerHTML='<div class="card" style="max-width:720px;margin:7vh auto"><div style="display:flex;justify-content:space-between"><h2 class="section-title">Quotations for '+esc(d.requirement?.title||"Requirement")+'</h2><button class="btn" onclick="this.closest(\'div[style*=fixed]\').remove()">Close</button></div>'+html+'</div>';document.body.appendChild(box);
+ }catch(e){alert(e.message);}
 }
 function esc(v){return String(v||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 async function saveProfile(){
