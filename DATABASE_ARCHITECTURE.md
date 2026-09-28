@@ -35,3 +35,14 @@ Older supplier URLs may use a human-readable slug such as supplier.html?id=india
 ## Deployment
 
 For an existing Hostinger database, let the application startup schema check run after deployment. It creates missing launch tables and adds the current profile/enquiry links without deleting existing business data.
+
+
+## RFQ / quotation flow
+
+- `buyers -> buyer_requirements` stores buyer sourcing requirements.
+- `buyer_requirements -> requirement_supplier_matches` records supplier visibility/view state.
+- `buyer_requirements -> supplier_quotes -> supplier_profiles` stores supplier commercial quotations.
+- Buyer contact details remain protected from suppliers in the requirement inbox.
+- Suppliers see matched open requirements and can submit/update one quotation per requirement.
+- Buyers can review received quotations from the Buyer Dashboard.
+- Admin can review requirements and all supplier quotations.
