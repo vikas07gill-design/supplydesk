@@ -306,3 +306,66 @@ ALTER TABLE connect_requests ADD COLUMN enquiry_id CHAR(36) NULL;
 ALTER TABLE connect_requests ADD INDEX idx_connect_enquiry (enquiry_id);
 ALTER TABLE connect_requests ADD CONSTRAINT fk_connect_enquiry
   FOREIGN KEY (enquiry_id) REFERENCES buyer_enquiries(id) ON DELETE SET NULL;
+
+
+-- Buyer requirement / RFQ and supplier quotation workflow
+CREATE TABLE IF NOT EXISTS buyer_requirements (
+  id CHAR(36) PRIMARY KEY,
+  buyer_id CHAR(36) NOT NULL,
+  requirement_type ENUM('product','raw_material','machinery','service','custom') NOT NULL DEFAULT 'product',
+  title VARCHAR(255) NOT NULL,
+  category VARCHAR(180) NULL,
+  subcategory VARCHAR(180) NULL,
+  description TEXT NOT NULL,
+  quantity VARCHAR(120) NULL,
+  unit VARCHAR(80) NULL,
+  target_price DECIMAL(18,4) NULL,
+  currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+  delivery_country VARCHAR(120) NULL,
+  delivery_city VARCHAR(150) NULL,
+  required_by DATE NULL,
+  market_scope ENUM('Domestic','International','Both') NOT NULL DEFAULT 'Both',
+  status ENUM('open','closed','cancelled') NOT NULL DEFAULT 'open',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NULL,
+  CONSTRAINT fk_requirement_buyer FOREIGN KEY (buyer_id) REFERENCES buyers(id) ON DELETE CASCADE,
+  INDEX idx_requirement_buyer (buyer_id, created_at),
+  INDEX idx_requirement_match (status, category, subcategory, created_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS requirement_supplier_matches (
+  id CHAR(36) PRIMARY KEY,
+  requirement_id CHAR(36) NOT NULL,
+  supplier_id CHAR(36) NOT NULL,
+  status ENUM('available','viewed','quoted','declined') NOT NULL DEFAULT 'available',
+  viewed_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_requirement_supplier (requirement_id, supplier_id),
+  CONSTRAINT fk_req_match_requirement FOREIGN KEY (requirement_id) REFERENCES buyer_requirements(id) ON DELETE CASCADE,
+  CONSTRAINT fk_req_match_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE,
+  INDEX idx_req_match_supplier (supplier_id, status, created_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS supplier_quotes (
+  id CHAR(36) PRIMARY KEY,
+  requirement_id CHAR(36) NOT NULL,
+  supplier_id CHAR(36) NOT NULL,
+  unit_price DECIMAL(18,4) NOT NULL,
+  currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+  quantity_available VARCHAR(120) NULL,
+  moq VARCHAR(120) NULL,
+  lead_time VARCHAR(120) NULL,
+  payment_terms VARCHAR(255) NULL,
+  incoterm VARCHAR(40) NULL,
+  quote_valid_until DATE NULL,
+  sample_available TINYINT(1) NOT NULL DEFAULT 0,
+  notes TEXT NULL,
+  status ENUM('submitted','withdrawn') NOT NULL DEFAULT 'submitted',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NULL,
+  UNIQUE KEY uq_supplier_quote (requirement_id, supplier_id),
+  CONSTRAINT fk_quote_requirement FOREIGN KEY (requirement_id) REFERENCES buyer_requirements(id) ON DELETE CASCADE,
+  CONSTRAINT fk_quote_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE,
+  INDEX idx_quote_requirement (requirement_id, status, created_at),
+  INDEX idx_quote_supplier (supplier_id, created_at)
+) ENGINE=InnoDB;
