@@ -9,6 +9,7 @@ const publicPages = [
   "/supplier.html",
   "/product.html",
   "/supplier-register.html",
+  "/requirement.html",
   "/buyer-dashboard.html",
   "/supplier-dashboard.html"
 ];
@@ -87,4 +88,13 @@ test.describe("SupplyDesk production smoke tests", () => {
     await expect(page.locator("body")).toContainText(/Connect|Enquiry|Product/i);
     expect(errors, "Uncaught browser errors").toEqual([]);
   });
+});
+
+
+test("requirement page renders without a browser crash", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto("/requirement.html", { waitUntil: "domcontentloaded" });
+  await expect(page.locator("body")).toContainText(/Tell us what you need/i);
+  expect(errors, "Uncaught browser errors").toEqual([]);
 });
