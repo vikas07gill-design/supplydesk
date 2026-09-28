@@ -109,7 +109,7 @@ header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0
       <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
       <button class="tab-btn" data-tab="business" onclick="switchTab('business')">Business Profile</button>
       <button class="tab-btn" data-tab="products" onclick="switchTab('products')">My Products</button>
-      <button class="tab-btn" data-tab="requests" onclick="switchTab('requests')">Customer Requests</button>
+      <button class="tab-btn" data-tab="requests" onclick="switchTab('requests')">Customer Requests</button><button class="tab-btn" data-tab="requirements" onclick="switchTab('requirements')">Buyer Requirements</button>
       <button class="tab-btn" data-tab="company" onclick="switchTab('company')">Company Details</button>
       <button class="tab-btn" data-tab="documents" onclick="switchTab('documents')">Documents</button>
     </div>
@@ -222,7 +222,14 @@ header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0
       </div>
     </section>
 
-    <section id="tab-company" class="tab-panel">
+    <section id="tab-requirements" class="tab-panel">
+  <div class="card">
+    <div class="section-toolbar"><div><div class="kicker">New sourcing opportunities</div><h2 class="section-title">Buyer Requirements</h2><p class="section-subtitle">See requirements matched to your category and send a quotation directly to the buyer. Buyer contact details stay private until the buyer chooses to connect.</p></div><button class="btn" onclick="loadRequirements()">Refresh</button></div>
+    <div id="requirementsList"><div class="empty">Loading buyer requirements...</div></div>
+  </div>
+</section>
+
+<section id="tab-company" class="tab-panel">
       <div class="card">
         <div class="section-toolbar">
           <div>
@@ -512,7 +519,31 @@ function switchTab(tab){
   document.querySelectorAll(".tab-btn").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab));
   document.querySelectorAll(".tab-panel").forEach(p=>p.classList.toggle("active",p.id==="tab-"+tab));
   if(history.replaceState)history.replaceState({},document.title,"supplier-dashboard.html#"+tab);
+  if(tab==="requirements")loadRequirements();
   window.scrollTo({top:0,behavior:"smooth"});
+}
+let requirementCache=[];
+async function loadRequirements(){
+  const el=document.getElementById("requirementsList"); if(!el)return;
+  el.innerHTML='<div class="empty">Loading buyer requirements...</div>';
+  try{
+    const d=await api("/api/supplier-dashboard/requirements"); requirementCache=d.requirements||[];
+    if(!requirementCache.length){el.innerHTML='<div class="empty">No matching buyer requirements are available right now.</div>';return;}
+    el.innerHTML=requirementCache.map(r=>'<div class="connection" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div><b>'+esc(r.title)+'</b><small>'+esc(r.requirement_type||"product")+' · '+esc(r.category||"Open category")+(r.subcategory?" · "+esc(r.subcategory):"")+'</small></div><span class="badge">'+(r.quote_id?"Quoted":"Open")+'</span></div><small>Quantity: '+esc(r.quantity||"Not specified")+(r.unit?" "+esc(r.unit):"")+' · Delivery: '+esc((r.delivery_city||"")+" "+(r.delivery_country||""))+'</small><small>'+esc(r.description)+'</small><small>'+((r.target_price!==null&&r.target_price!=="")?"Target price: "+esc(r.target_price)+" "+esc(r.currency):"Target price: Not specified")+(r.required_by?" · Required by: "+esc(new Date(r.required_by).toLocaleDateString()):"")+'</small><div class="product-actions"><button class="btn primary" onclick="openRequirementQuote(\''+esc(r.id)+'\')">'+(r.quote_id?"Update Quotation":"Send Quotation")+' →</button></div></div>').join("");
+  }catch(e){el.innerHTML='<div class="empty">'+esc(e.message)+'</div>';}
+}
+function openRequirementQuote(id){
+  const r=requirementCache.find(x=>x.id===id); if(!r)return;
+  const old=document.getElementById("requirementQuoteModal"); if(old)old.remove();
+  const modal=document.createElement("div");modal.id="requirementQuoteModal";modal.style.cssText="position:fixed;inset:0;background:rgba(4,20,35,.55);z-index:100;padding:20px;overflow:auto";
+  modal.innerHTML='<div style="max-width:680px;margin:5vh auto;background:#fff;border-radius:18px;padding:22px"><div style="display:flex;justify-content:space-between;gap:10px"><div><div class="kicker">Quotation</div><h2 class="section-title" style="margin-bottom:4px">'+esc(r.title)+'</h2><small>'+esc(r.quantity||"Quantity not specified")+' '+esc(r.unit||"")+' · '+esc(r.delivery_city||"")+' '+esc(r.delivery_country||"")+'</small></div><button class="btn" onclick="document.getElementById(\'requirementQuoteModal\').remove()">Close</button></div><div class="profile-grid" style="margin-top:18px"><label>Unit price *<input id="qPrice" type="number" min="0" step="0.0001" value="'+esc(r.quote_unit_price||"")+'"></label><label>Currency<select id="qCurrency"><option>USD</option><option>EUR</option><option>GBP</option><option>INR</option><option>AED</option><option>CNY</option></select></label><label>Quantity available<input id="qAvailable" placeholder="e.g. 20,000"></label><label>MOQ<input id="qMoq" placeholder="e.g. 5,000"></label><label>Lead time<input id="qLead" placeholder="e.g. 15 days"></label><label>Payment terms<input id="qPayment" placeholder="30/70, LC, etc."></label><label>Incoterm<input id="qIncoterm" placeholder="FOB / CIF / EXW"></label><label>Quote valid until<input id="qValid" type="date"></label><label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input id="qSample" type="checkbox" style="width:auto"> Sample available</label><label style="grid-column:1/-1">Notes<textarea id="qNotes" style="min-height:100px" placeholder="Quality, customization, certifications, packing or other commercial terms"></textarea></label></div><div id="qStatus" class="notice hidden" style="margin-top:12px"></div><div style="display:flex;justify-content:flex-end;margin-top:15px"><button class="btn primary" onclick="submitRequirementQuote(\''+esc(r.id)+'\')">Send Quotation to Buyer →</button></div></div>';
+  document.body.appendChild(modal);
+}
+async function submitRequirementQuote(id){
+  const s=document.getElementById("qStatus"); try{
+    const d=await api("/api/supplier-dashboard/requirements/"+encodeURIComponent(id)+"/quote",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({unitPrice:document.getElementById("qPrice").value,currency:document.getElementById("qCurrency").value,quantityAvailable:document.getElementById("qAvailable").value,moq:document.getElementById("qMoq").value,leadTime:document.getElementById("qLead").value,paymentTerms:document.getElementById("qPayment").value,incoterm:document.getElementById("qIncoterm").value,quoteValidUntil:document.getElementById("qValid").value,sampleAvailable:document.getElementById("qSample").checked,notes:document.getElementById("qNotes").value})});
+    s.textContent=d.message;s.className="notice success";s.classList.remove("hidden");setTimeout(()=>{document.getElementById("requirementQuoteModal")?.remove();loadRequirements()},800);
+  }catch(e){s.textContent=e.message;s.className="notice error";s.classList.remove("hidden");}
 }
 function toggleBusinessEditor(force){
   const form=document.getElementById("businessEditForm"),btn=document.getElementById("businessEditBtn");
