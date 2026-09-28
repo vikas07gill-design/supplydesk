@@ -594,7 +594,7 @@ async function requestOtp(){
   s.textContent="⏳ Sending OTP request to SupplyDesk...";s.className="notice";s.classList.remove("hidden");
   btn.disabled=true;btn.textContent="Sending OTP...";
   const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),20000);
+  const timer=setTimeout(()=>controller.abort(),300000);
   try{
     const r=await fetch("/api/supplier-dashboard/request-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email}),signal:controller.signal});
     const data=await r.json().catch(()=>({}));
@@ -619,7 +619,7 @@ async function requestOtp(){
     otpRequestedEmail="";
     document.getElementById("loginOtp").value="";
     s.textContent=e.name==="AbortError"
-      ?"❌ OTP request timed out after 20 seconds. Any OTP from that delayed request will not be accepted here. Please click Resend 6-Digit OTP and use the OTP from the new request."
+      ?"❌ OTP request timed out after 5 minutes. Any OTP from that delayed request will not be accepted here. Please click Resend 6-Digit OTP and use the OTP from the new request."
       :"❌ "+(e.message||"Could not send OTP.");
     s.className="notice error";s.classList.remove("hidden");
     const diag=document.getElementById("diagOtp");
