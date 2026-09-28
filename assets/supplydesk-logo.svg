@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 210" role="img" aria-labelledby="title desc">
+  <title id="title">SupplyDesk</title>
+  <desc id="desc">SupplyDesk global sourcing logo with a connected globe held by a curved hand.</desc>
+  <defs>
+    <linearGradient id="globe" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#20d9ff"/><stop offset=".48" stop-color="#087fef"/><stop offset="1" stop-color="#003b91"/></linearGradient>
+    <linearGradient id="hand" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#19e0cf"/><stop offset=".45" stop-color="#168eea"/><stop offset="1" stop-color="#003d91"/></linearGradient>
+    <linearGradient id="desk" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#0b2440"/><stop offset=".55" stop-color="#087fef"/><stop offset="1" stop-color="#18cfe1"/></linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="3.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <g transform="translate(18 8)">
+    <circle cx="91" cy="82" r="57" fill="#061b35" stroke="url(#globe)" stroke-width="7"/>
+    <ellipse cx="91" cy="82" rx="28" ry="57" fill="none" stroke="#42d9ff" stroke-width="2" opacity=".72"/>
+    <ellipse cx="91" cy="82" rx="48" ry="20" fill="none" stroke="#42d9ff" stroke-width="2" opacity=".52"/>
+    <path d="M38 73c22-20 38-29 55-31 18-2 36 2 54 14M42 101c19 12 38 18 57 17 17-1 32-7 46-18" fill="none" stroke="#27bdf5" stroke-width="2.5" opacity=".75"/>
+    <path d="M63 49c7-6 16-10 25-12M104 48c10 3 18 8 25 15M57 117c10 7 22 11 34 12M111 119c9-3 17-8 24-15" fill="none" stroke="#70e7ff" stroke-width="2" opacity=".6"/>
+    <g fill="#ffad36" filter="url(#glow)">
+      <circle cx="91" cy="31" r="3.2"/><circle cx="43" cy="61" r="3"/><circle cx="138" cy="60" r="3"/><circle cx="123" cy="119" r="3"/>
+    </g>
+    <path d="M34 126c18 13 35 20 54 20 21 0 39-9 53-25 8-9 15-21 20-35 2-6 7-10 12-9 7 1 9 8 7 15-6 22-18 42-35 56-16 14-35 21-57 21-27 0-52-10-72-29-5-5-5-12-1-16 4-4 12-3 19 2z" fill="url(#hand)" stroke="#19cde4" stroke-width="2"/>
+    <path d="M37 126c19 14 37 20 55 20 21 0 40-9 55-26" fill="none" stroke="#8af5ff" stroke-width="3" opacity=".55"/>
+    <g fill="#19cde4"><circle cx="30" cy="41" r="3"/><circle cx="157" cy="38" r="3"/><circle cx="151" cy="128" r="3"/></g>
+  </g>
+  <g transform="translate(190 43)">
+    <text x="0" y="72" font-family="Inter,Arial,sans-serif" font-size="66" font-weight="900" letter-spacing="-3.8" fill="#0b2440">Supply</text>
+    <text x="257" y="72" font-family="Inter,Arial,sans-serif" font-size="66" font-weight="900" letter-spacing="-3.8" fill="url(#desk)">Desk</text>
+    <text x="3" y="108" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" letter-spacing="5.3" fill="#71808e">SOURCE  |  CONNECT  |  GROW</text>
+  </g>
+</svg>
