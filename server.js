@@ -206,6 +206,15 @@ const productImageUpload = multer({
   }
 });
 
+function escapeEmailHtml(value){return String(value??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function buildProfessionalEmail({preheader="",title="",intro="",bodyHtml="",textLines=[],ctaText="",ctaUrl=""}){
+  const safe=(v)=>escapeEmailHtml(v), origin=String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"");
+  const cta=ctaUrl?'<p style="margin:28px 0"><a href="'+safe(ctaUrl)+'" style="display:inline-block;background:#087f8c;color:#fff;text-decoration:none;padding:13px 22px;border-radius:8px;font-weight:700">'+safe(ctaText||"Open SupplyDesk")+"</a></p>":"";
+  const html='<!doctype html><html><body style="margin:0;background:#f4f8fa;font-family:Arial,Helvetica,sans-serif;color:#173746"><div style="display:none;max-height:0;overflow:hidden">'+safe(preheader)+'</div><div style="max-width:620px;margin:28px auto;padding:0 16px"><div style="background:#06182b;padding:18px 24px;border-radius:14px 14px 0 0;color:#fff;font-size:22px;font-weight:800">Supply<span style="color:#45d9ea">Desk</span></div><div style="background:#fff;padding:30px 28px;border:1px solid #dbe8ed;border-top:0;border-radius:0 0 14px 14px"><h1 style="font-size:22px;margin:0 0 16px;color:#092438">'+safe(title)+'</h1>'+(intro?'<p style="line-height:1.6">'+safe(intro)+'</p>':"")+bodyHtml+cta+'<p style="margin-top:30px;color:#71838b;font-size:12px;line-height:1.5">This is an automated message from SupplyDesk. Please do not share passwords or verification codes with anyone.<br>© '+new Date().getFullYear()+' SupplyDesk</p></div></div></body></html>';
+  const text=[title,intro,...textLines,ctaUrl?((ctaText||"Open SupplyDesk")+": "+origin+ctaUrl):"", "", "SupplyDesk"].filter(Boolean).join("\n");
+  return {html,text};
+}
+
 const mailer = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT || 465),
@@ -221,39 +230,20 @@ async function sendSupplierDashboardOtp(supplier, requestId = "") {
 
   // Keep OTP mail deliberately standard. Some corporate mail gateways score
   // custom X-* headers or unusual transactional metadata more aggressively.
-  const text = [
-    "Hello,",
-    "",
-    "Your SupplyDesk supplier dashboard verification code is:",
-    "",
-    otp,
-    "",
-    "This code is valid for 10 minutes.",
-    "Do not share this code with anyone.",
-    "",
-    "If you did not request dashboard access, you can ignore this email.",
-    "",
-    "SupplyDesk",
-    "Reference: " + traceId
-  ].join("\n");
-
-  const html = [
-    "<p>Hello,</p>",
-    "<p>Your SupplyDesk supplier dashboard verification code is:</p>",
-    '<p style="font-size:28px;font-weight:700;letter-spacing:6px">' + otp + "</p>",
-    "<p>This code is valid for <strong>10 minutes</strong>.</p>",
-    "<p>Do not share this code with anyone.</p>",
-    "<p>If you did not request dashboard access, you can ignore this email.</p>",
-    "<p>SupplyDesk<br><small>Reference: " + traceId + "</small></p>"
-  ].join("");
-
+  const email=buildProfessionalEmail({
+    preheader:"Your SupplyDesk supplier dashboard verification code",
+    title:"Verify your Supplier Dashboard",
+    intro:"Use the verification code below to securely access your Supplier Dashboard.",
+    bodyHtml:'<div style="margin:24px 0;padding:20px;background:#eef9f8;border:1px solid #c9ebe5;border-radius:12px;text-align:center"><div style="font-size:12px;color:#58717c;text-transform:uppercase;font-weight:700;letter-spacing:1px">Verification Code</div><div style="font-size:34px;letter-spacing:8px;font-weight:800;color:#087f8c;margin-top:8px">'+otp+'</div></div><p style="line-height:1.6">This code expires in <strong>10 minutes</strong>. Do not share it with anyone.</p><p style="color:#71838b;font-size:12px">Reference: '+escapeEmailHtml(traceId)+'</p>',
+    textLines:["Verification code: "+otp,"Valid for 10 minutes.","Reference: "+traceId]
+  });
   const info = await mailer.sendMail({
     from: process.env.SMTP_FROM,
     replyTo: process.env.SMTP_FROM,
     to: supplier.business_email,
-    subject,
-    text,
-    html
+    subject:"SupplyDesk | Supplier Dashboard Verification",
+    text:email.text,
+    html:email.html
   });
 
   // Every OTP row is an independent login attempt. Do not invalidate
