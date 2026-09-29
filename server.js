@@ -2052,7 +2052,6 @@ async function ensureDashboardSchema() {
   // an existing database that predates the dashboard/product migrations.
   // All statements are idempotent and only create missing tables.
   const statements = [
-    `ALTER TABLE potential_contacts ADD COLUMN location VARCHAR(255) NULL`,
     `CREATE TABLE IF NOT EXISTS potential_contacts (
       id CHAR(36) PRIMARY KEY,
       company_name VARCHAR(255) NOT NULL,
@@ -2194,6 +2193,14 @@ async function ensureDashboardSchema() {
   for (const sql of statements) {
     await pool.query(sql);
   }
+  // Older databases may already have potential_contacts without location.
+  // Run the migration only after the table exists, so a fresh CI database can boot.
+  try {
+    await pool.query("ALTER TABLE potential_contacts ADD COLUMN location VARCHAR(255) NULL");
+  } catch (e) {
+    if (!["ER_DUP_FIELDNAME", "ER_DUP_COLUMN"].includes(e?.code)) throw e;
+  }
+
   await ensureConnectRequestsTable();
   await ensureBuyerSchema();
   await ensureRequirementSchema();
