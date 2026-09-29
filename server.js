@@ -456,7 +456,7 @@ app.post("/api/admin/potential-contacts/import", requireAdmin, async (req,res)=>
       if(!/^\S+@\S+\.\S+$/.test(email)||!name){skipped++;continue}
       if(seenEmail.has(email)||(mobileKey&&seenMobile.has(mobileKey))){skipped++;continue}
       seenEmail.add(email);if(mobileKey)seenMobile.add(mobileKey);
-      const [existing]=await pool.execute("SELECT id FROM potential_contacts WHERE LOWER(email)=? OR (?<>'' AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile,'+',''),' ',''),'-',''),'(',''),')','')=?) LIMIT 1",[email,mobileKey,mobileKey]);
+      const [existing]=await pool.execute("SELECT id FROM potential_contacts WHERE LOWER(email) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci OR (?<>'' AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile,'+',''),' ',''),'-',''),'(',''),')','') COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci LIMIT 1",[email,mobileKey,mobileKey]);
       if(existing.length){skipped++;continue}
       const id=crypto.randomUUID();
       await pool.execute("INSERT INTO potential_contacts (id,company_name,email,mobile,location,contact_type,source,status,last_activity_at) VALUES (?,?,?,?,?,?,?,NOW())",[id,name,email,mobile,location,inviteType,"manual_import","new"]);
@@ -476,7 +476,7 @@ app.get("/api/admin/potential-contacts", requireAdmin, async (req,res)=>{
     if(["supplier","buyer"].includes(type)){where.push("pc.contact_type=?");params.push(type)}
     if(["new","invited","interested","registered","active","unsubscribed"].includes(inviteStatus)){where.push("pc.status=?");params.push(inviteStatus)}
     if(search){where.push("(pc.company_name LIKE ? OR pc.email LIKE ? OR pc.mobile LIKE ? OR pc.location LIKE ?)");const q="%"+search+"%";params.push(q,q,q,q)}
-    const sql="SELECT pc.company_name,pc.email,pc.mobile,pc.location,pc.contact_type,pc.status,pc.source,pc.created_at,pc.last_activity_at,sp.id AS supplier_profile_id,sp.verified AS supplier_verified,sp.published AS supplier_published,b.id AS buyer_id FROM potential_contacts pc LEFT JOIN supplier_profiles sp ON LOWER(sp.business_email)=LOWER(pc.email) LEFT JOIN buyers b ON LOWER(b.email)=LOWER(pc.email) "+(where.length?"WHERE "+where.join(" AND "):"")+" ORDER BY pc.last_activity_at DESC, pc.created_at DESC LIMIT 500";
+    const sql="SELECT pc.company_name,pc.email,pc.mobile,pc.location,pc.contact_type,pc.status,pc.source,pc.created_at,pc.last_activity_at,sp.id AS supplier_profile_id,sp.verified AS supplier_verified,sp.published AS supplier_published,b.id AS buyer_id FROM potential_contacts pc LEFT JOIN supplier_profiles sp ON LOWER(sp.business_email) COLLATE utf8mb4_unicode_ci = LOWER(pc.email) COLLATE utf8mb4_unicode_ci LEFT JOIN buyers b ON LOWER(b.email) COLLATE utf8mb4_unicode_ci = LOWER(pc.email) COLLATE utf8mb4_unicode_ci "+(where.length?"WHERE "+where.join(" AND "):"")+" ORDER BY pc.last_activity_at DESC, pc.created_at DESC LIMIT 500";
     const [contacts]=await pool.execute(sql,params);
     const mapped=contacts.map(c=>({
       ...c,
@@ -2199,6 +2199,14 @@ async function ensureDashboardSchema() {
     await pool.query("ALTER TABLE potential_contacts ADD COLUMN location VARCHAR(255) NULL");
   } catch (e) {
     if (!["ER_DUP_FIELDNAME", "ER_DUP_COLUMN"].includes(e?.code)) throw e;
+  }
+
+  // Normalize legacy potential-contact tables created with a different utf8mb4 collation.
+  // This prevents MySQL "Illegal mix of collations" errors during duplicate checks.
+  try {
+    await pool.query("ALTER TABLE potential_contacts CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+  } catch (e) {
+    console.error("Potential contacts collation migration failed:", e?.message || e);
   }
 
   await ensureConnectRequestsTable();
