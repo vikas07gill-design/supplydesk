@@ -423,6 +423,46 @@ app.post("/api/admin/test-email", requireAdmin, async (req,res)=>{
   }
 });
 
+app.post("/api/admin/invite", requireAdmin, async (req,res)=>{
+  const recipientEmail=clean(req.body?.recipientEmail,255).toLowerCase();
+  const recipientName=clean(req.body?.recipientName,120);
+  const inviteType=clean(req.body?.inviteType,30).toLowerCase();
+  const message=clean(req.body?.message,2500);
+  if(!/^\S+@\S+\.\S+$/.test(recipientEmail)) return res.status(400).json({error:"A valid recipient email is required."});
+  if(!["supplier","buyer"].includes(inviteType)) return res.status(400).json({error:"Invitation type must be supplier or buyer."});
+  if(!message) return res.status(400).json({error:"Invitation message is required."});
+  if(!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) {
+    return res.status(503).json({error:"SMTP environment variables are not configured."});
+  }
+  const origin=String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"");
+  const invitePath=inviteType==="supplier"?"/supplier-register.html":"/index.html";
+  const inviteUrl=origin+invitePath;
+  const safeMessage=escapeEmailHtml(message).replace(/\r?\n/g,"<br>");
+  const email=buildProfessionalEmail({
+    preheader:"You are invited to join SupplyDesk",
+    title:"You are invited to SupplyDesk",
+    intro:recipientName?("Hello "+recipientName+", you have been invited to join SupplyDesk as a "+inviteType+"."):"You have been invited to join SupplyDesk as a "+inviteType+".",
+    bodyHtml:'<div style="margin:22px 0;padding:18px;background:#f5fafb;border:1px solid #dbe8ed;border-radius:12px;line-height:1.7">'+safeMessage+'</div><p style="line-height:1.6">SupplyDesk connects buyers and verified suppliers for global B2B sourcing and business enquiries.</p>',
+    textLines:[message,"Invitation type: "+inviteType],
+    ctaText:inviteType==="supplier"?"Register as Supplier":"Explore SupplyDesk",
+    ctaUrl:inviteUrl
+  });
+  try{
+    const info=await mailer.sendMail({
+      from:process.env.SMTP_FROM,
+      replyTo:process.env.SMTP_FROM,
+      to:recipientEmail,
+      subject:"SupplyDesk | You're Invited to Join",
+      text:email.text,
+      html:email.html
+    });
+    res.json({ok:true,recipient:recipientEmail,messageId:info.messageId});
+  }catch(error){
+    console.error("Admin invitation email failed:",error);
+    res.status(502).json({error:"Invitation email failed: "+(error?.code||"SEND_ERROR")+" "+(error?.responseCode||"")+" "+(error?.message||"Unknown SMTP error")});
+  }
+});
+
 app.get("/api/admin/test-connection-storage", requireAdmin, async (req,res)=>{
   try{
     const [[table]] = await pool.query("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='connect_requests'");
