@@ -74,8 +74,10 @@
     <h2 id="potentialDbTitle">Potential Buyer & Supplier Database</h2>
     <div class="muted" style="margin-bottom:12px">Contacts collected through onboarding are stored for future follow-up and reference.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-      <select id="potentialDbType"><option value="">All</option><option value="supplier">Potential Suppliers</option><option value="buyer">Potential Buyers</option></select>
-      <input id="potentialDbSearch" placeholder="Search company, email or mobile" style="flex:1;min-width:220px;padding:10px;border:1px solid var(--line);border-radius:9px">
+      <select id="potentialDbType"><option value="">All Types</option><option value="supplier">Potential Suppliers</option><option value="buyer">Potential Buyers</option></select>
+      <select id="potentialDbOnboarding"><option value="">All Onboarding</option><option value="active">Active</option><option value="registered">Registered</option><option value="not_onboarded">Not Onboarded</option></select>
+      <select id="potentialDbInvite"><option value="">All Invite Status</option><option value="new">New</option><option value="invited">Invited</option><option value="interested">Interested</option><option value="registered">Registered</option><option value="active">Active</option></select>
+      <input id="potentialDbSearch" placeholder="Search company, email, mobile or location" style="flex:1;min-width:220px;padding:10px;border:1px solid var(--line);border-radius:9px">
       <button onclick="loadPotentialDb()">Refresh</button>
       <button onclick="closePotentialDb()">Close</button>
     </div>
@@ -253,11 +255,13 @@ function parseBulkInviteFile(text){
     const phoneCell=cells.find(x=>x!==emailCell&&/(?:\+?\d[\d\s().-]{7,}\d)/.test(x));
     const phone=phoneCell?(phoneCell.match(/\+?\d[\d\s().-]{7,}\d/)||[""])[0].trim():"";
     const phoneKey=phone.replace(/\D/g,"");
-    const company=(cells.find(x=>x!==emailCell&&x&&!/^\d+$/.test(x))||"").replace(/\*+/g,"").trim();
+    const company=(cells.find(x=>x!==emailCell&&x&&!/^\d+$/.test(x)&&x!==phoneCell)||"").replace(/\*+/g,"").trim();
+    const locationCell=cells.find((x,idx)=>/^(location|city|city\/state|state|address)$/i.test(x)) || cells.find((x,idx)=>idx===1 && x!==emailCell && x!==phoneCell && x!==company);
+    const location=(locationCell||"").replace(/\*+/g,"").trim();
     if(!company||/^(company|email|e-mail)$/i.test(company))continue;
     if(seenEmails.has(email)||(phoneKey&&seenMobiles.has(phoneKey)))continue;
     seenEmails.add(email); if(phoneKey)seenMobiles.add(phoneKey);
-    rows.push({name:company,email,phone});
+    rows.push({name:company,email,phone,location});
   }
   return rows;
 }
@@ -352,20 +356,26 @@ function openPotentialDb(){
 function closePotentialDb(){document.getElementById("potentialDbBackdrop").style.display="none"}
 document.getElementById("potentialDbType").addEventListener("change",loadPotentialDb);
 document.getElementById("potentialDbSearch").addEventListener("keydown",e=>{if(e.key==="Enter")loadPotentialDb()});
+document.getElementById("potentialDbSearch")?.addEventListener("input",()=>loadPotentialDb());
+document.getElementById("potentialDbType")?.addEventListener("change",loadPotentialDb);
+document.getElementById("potentialDbOnboarding")?.addEventListener("change",loadPotentialDb);
+document.getElementById("potentialDbInvite")?.addEventListener("change",loadPotentialDb);
 async function loadPotentialDb(){
   const type=document.getElementById("potentialDbType").value;
   const search=document.getElementById("potentialDbSearch").value.trim();
   const box=document.getElementById("potentialDbList"), status=document.getElementById("potentialDbStatus");
   status.textContent="Loading...";
   try{
-    const q=new URLSearchParams(); if(type)q.set("type",type); if(search)q.set("search",search);
+    const onboarding=document.getElementById("potentialDbOnboarding").value;
+    const invite=document.getElementById("potentialDbInvite").value;
+    const q=new URLSearchParams(); if(type)q.set("type",type); if(search)q.set("search",search); if(onboarding)q.set("onboarding",onboarding); if(invite)q.set("status",invite);
     const data=await api("/api/admin/potential-contacts?"+q.toString());
     status.textContent=data.total+" contacts";
-    box.innerHTML='<table class="bulk-table"><tr><th>Company</th><th>Email</th><th>Mobile</th><th>Type</th><th>Onboarding</th><th>Invite Status</th><th>WhatsApp</th></tr>'+data.contacts.map(c=>{
+    box.innerHTML='<table class="bulk-table"><tr><th>Company</th><th>Email</th><th>Mobile</th><th>Location</th><th>Type</th><th>Onboarding</th><th>Invite Status</th><th>WhatsApp</th></tr>'+data.contacts.map(c=>{
   const digits=String(c.mobile||"").replace(/\\D/g,"");
   const wa=digits.length>=8 ? '<a href="https://wa.me/'+encodeURIComponent(digits)+'?text='+encodeURIComponent("Hello "+(c.company_name||"")+", we invited you to join SupplyDesk. Explore: https://supplydesk.in/")+'" target="_blank" rel="noopener" class="wa-btn">WhatsApp</a>' : '<span class="muted">No mobile</span>';
   const badge=c.onboarded ? '<span class="status-pill onboarded">✓ '+esc(c.onboardedStatus)+'</span>' : '<span class="status-pill pending">○ Not Onboarded</span>';
-  return '<tr><td><strong>'+esc(c.company_name)+'</strong></td><td>'+esc(c.email)+'</td><td>'+esc(c.mobile||"Not available")+'</td><td>'+esc(c.contact_type)+'</td><td>'+badge+'</td><td>'+esc(c.status)+'</td><td>'+wa+'</td></tr>';
+  return '<tr><td><strong>'+esc(c.company_name)+'</strong></td><td>'+esc(c.email)+'</td><td>'+esc(c.mobile||"Not available")+'</td><td>'+esc(c.location||"Not available")+'</td><td>'+esc(c.contact_type)+'</td><td>'+badge+'</td><td>'+esc(c.status)+'</td><td>'+wa+'</td></tr>';
 }).join("")+'</table>';
   }catch(e){status.textContent=e.message;box.innerHTML=""}
 }
