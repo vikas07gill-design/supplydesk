@@ -103,11 +103,8 @@ async function testSupplierEmail(){
   }catch(e){document.getElementById("message").textContent=e.message}
 }
 function inviteDefaults(){
-  const type=document.getElementById("inviteType").value;
   const name=document.getElementById("inviteName").value.trim();
-  const portal=type==="supplier"?"supplier-register.html":"index.html";
-  const roleText=type==="supplier"?"supplier":"buyer";
-  return "Hello"+(name?" "+name:"")+",\n\nYou are invited to join SupplyDesk as a "+roleText+".\n\nSupplyDesk is a global B2B sourcing platform connecting verified suppliers and buyers for international business opportunities.\n\nJoin SupplyDesk: "+location.origin+"/"+portal+"\n\nWe would be happy to have you on the platform.\n\nRegards,\nSupplyDesk Team";
+  return "Hello"+(name?" "+name:"")+",\n\nLooking for more customers and new business opportunities?\n\nSupplyDesk is a global B2B sourcing platform helping businesses connect with buyers and suppliers for international trade. List your business, showcase your products or services, and get discovered by potential customers.\n\nLaunch Offer 🎉\nBusiness listing on SupplyDesk: Normally ₹21,000\nCurrent offer: FREE for a limited time during our launch.\n\nWhy join SupplyDesk?\n• Get discovered by potential buyers\n• Showcase your business and products professionally\n• Receive business enquiries through SupplyDesk\n• Expand your market reach and sales opportunities\n\nExplore SupplyDesk: "+location.origin+"/\n\nCreate your business presence with SupplyDesk while the launch offer is available.\n\nRegards,\nSupplyDesk Team";
 }
 function openInvite(){
   if(!role()){document.getElementById("message").textContent="Sign in as Admin or Super Admin to send invitations.";return}
