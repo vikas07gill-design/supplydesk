@@ -241,27 +241,81 @@ document.getElementById("bulkInviteFile").addEventListener("change",async e=>{
 function parseBulkInviteFile(text){
   const rows=[]; const seenEmails=new Set(); const seenMobiles=new Set();
   const lines=String(text||"").split(/\r?\n/);
+  let headerMap=null;
+
+  const cleanCell=v=>String(v??"").replace(/^\s+|\s+$/g,"").replace(/^["']|["']$/g,"").replace(/^\*+|\*+$/g,"").trim();
+  const headerKey=v=>cleanCell(v).toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ");
+
   for(const raw of lines){
-    const line=raw.trim();
-    if(!line||/^\|?\s*[-:]+/.test(line))continue;
+    let line=raw.trim();
+    if(!line)continue;
+    if(/^#/.test(line))continue;
+    if(/^\|?\s*:?-{2,}/.test(line))continue;
+
     let cells;
-    if(line.includes("|")) cells=line.split("|").map(x=>x.trim()).filter((x,i,a)=>!(i===0&&x==="")&&!(i===a.length-1&&x===""));
-    else cells=line.split(",").map(x=>x.trim().replace(/^["']|["']$/g,""));
-    if(cells.length<2)continue;
-    const emailCell=cells.find(x=>/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(x));
-    if(!emailCell)continue;
-    const emailMatch=emailCell.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i); if(!emailMatch)continue;
+    if(line.includes("|")){
+      cells=line.split("|").map(cleanCell);
+      if(cells[0]==="")cells.shift();
+      if(cells[cells.length-1]==="")cells.pop();
+    }else{
+      // Basic CSV support, including quoted cells containing commas.
+      cells=[]; let cur="",quoted=false;
+      for(let i=0;i<line.length;i++){
+        const ch=line[i];
+        if(ch==='"'){
+          if(quoted && line[i+1]==='"'){cur+='"';i++;continue}
+          quoted=!quoted; continue;
+        }
+        if(ch===','&&!quoted){cells.push(cleanCell(cur));cur="";continue}
+        cur+=ch;
+      }
+      cells.push(cleanCell(cur));
+    }
+    if(!cells.length)continue;
+
+    const normalized=cells.map(headerKey);
+    const looksLikeHeader=normalized.some(x=>/^(company|company name|email|e mail|mobile|mobile no|phone|phone no|location|city|city state|state|address)$/.test(x));
+    if(looksLikeHeader){
+      headerMap={};
+      normalized.forEach((x,i)=>{
+        if(!headerMap.company && /^(company|company name|business|business name)$/.test(x))headerMap.company=i;
+        if(headerMap.email===undefined && /^(email|e mail|email id|business email)$/.test(x))headerMap.email=i;
+        if(headerMap.phone===undefined && /^(mobile|mobile no|mobile number|phone|phone no|phone number|whatsapp)$/.test(x))headerMap.phone=i;
+        if(headerMap.location===undefined && /^(location|city|city state|state|address)$/.test(x))headerMap.location=i;
+      });
+      continue;
+    }
+
+    const emailCell=headerMap?.email!==undefined?cells[headerMap.email]:"";
+    const emailMatch=(emailCell||cells.join(" ")).match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    if(!emailMatch)continue;
     const email=emailMatch[0].toLowerCase();
-    const phoneCell=cells.find(x=>x!==emailCell&&/(?:\+?\d[\d\s().-]{7,}\d)/.test(x));
-    const phone=phoneCell?(phoneCell.match(/\+?\d[\d\s().-]{7,}\d/)||[""])[0].trim():"";
-    const phoneKey=phone.replace(/\D/g,"");
-    const company=(cells.find(x=>x!==emailCell&&x&&!/^\d+$/.test(x)&&x!==phoneCell)||"").replace(/\*+/g,"").trim();
-    const locationCell=cells.find((x,idx)=>/^(location|city|city\/state|state|address)$/i.test(x)) || cells.find((x,idx)=>idx===1 && x!==emailCell && x!==phoneCell && x!==company);
-    const location=(locationCell||"").replace(/\*+/g,"").trim();
-    if(!company||/^(company|email|e-mail)$/i.test(company))continue;
+
+    let phone="";
+    if(headerMap?.phone!==undefined)phone=cells[headerMap.phone]||"";
+    if(!phone) {
+      const phoneCell=cells.find(x=>x!==emailCell&&/(?:\+?\d[\d\s().-]{7,}\d)/.test(x));
+      phone=phoneCell?(phoneCell.match(/\+?\d[\d\s().-]{7,}\d/)||[""])[0].trim():"";
+    }
+
+    let company=headerMap?.company!==undefined?cells[headerMap.company]||"":"";
+    if(!company){
+      company=(cells.find(x=>x!==emailCell&&x!==phone&&!/^\d+$/.test(x)&&!/^(location|city|state|address)$/i.test(x))||"");
+    }
+
+    let location=headerMap?.location!==undefined?cells[headerMap.location]||"":"";
+    if(!location){
+      const candidates=cells.filter(x=>x&&x!==emailCell&&x!==phone&&x!==company);
+      if(candidates.length)location=candidates[candidates.length-1];
+    }
+
+    company=cleanCell(company); location=cleanCell(location);
+    if(!company||/^(company|company name|email|e-mail)$/i.test(company))continue;
+
+    const phoneKey=String(phone||"").replace(/\D/g,"");
     if(seenEmails.has(email)||(phoneKey&&seenMobiles.has(phoneKey)))continue;
     seenEmails.add(email); if(phoneKey)seenMobiles.add(phoneKey);
-    rows.push({name:company,email,phone,location});
+    rows.push({name:company,email,phone:String(phone||"").trim(),location});
   }
   return rows;
 }
