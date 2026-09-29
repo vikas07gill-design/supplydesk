@@ -465,19 +465,20 @@ app.post("/api/admin/bulk-invite", requireAdmin, async (req,res)=>{
   const defaultMessage="Looking for more customers and new business opportunities?\n\nSupplyDesk is a global B2B sourcing platform helping businesses connect with buyers and suppliers for international trade. List your business, showcase your products or services, and get discovered by potential customers.\n\nWhy join SupplyDesk?\n• Get discovered by potential buyers\n• Showcase your business and products professionally\n• Receive business enquiries through SupplyDesk\n• Expand your market reach and sales opportunities\n\nExplore SupplyDesk: "+String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"")+"/\n\nCreate your business presence with SupplyDesk while the launch offer is available.";
   const results=[]; let sent=0,skipped=0,failed=0;
   for(let i=0;i<recipients.length;i++){
-    const row=recipients[i]||{}; const email=clean(row.email,255).toLowerCase(); const name=clean(row.name,180);
-    if(!/^\S+@\S+\.\S+$/.test(email)){failed++;results.push({name,email,status:"failed",reason:"Invalid email"});continue}
+    const row=recipients[i]||{}; const email=clean(row.email,255).toLowerCase(); const name=clean(row.name,180); const phone=clean(row.phone,40);
+    if(!/^\S+@\S+\.\S+$/.test(email)){failed++;results.push({name,email,phone,status:"failed",reason:"Invalid email"});continue}
     try{
+      await pool.execute("INSERT INTO potential_contacts (id,company_name,email,mobile,contact_type,source,status,last_activity_at) VALUES (?,?,?,?,?,?,?,NOW()) ON DUPLICATE KEY UPDATE company_name=VALUES(company_name),mobile=COALESCE(NULLIF(VALUES(mobile),''),mobile),contact_type=VALUES(contact_type),source=VALUES(source),last_activity_at=NOW()",[crypto.randomUUID(),name,email,phone,inviteType,"bulk_onboarding","invited"]);
       const [[recent]]=await pool.execute("SELECT id FROM admin_invitation_log WHERE recipient_email=? AND sent_at>=DATE_SUB(NOW(),INTERVAL 30 DAY) AND status='sent' LIMIT 1",[email]);
-      if(recent){skipped++;results.push({name,email,status:"skipped",reason:"Already invited in last 30 days"});continue}
+      if(recent){skipped++;results.push({name,email,phone,status:"skipped",reason:"Already invited in last 30 days"});continue}
       const info=await sendAdminInvitation({recipientEmail:email,recipientName:name,inviteType,message:defaultMessage});
       await pool.execute("INSERT INTO admin_invitation_log (id,recipient_name,recipient_email,invite_type,status,message_id,sent_at,error_text) VALUES (?,?,?,?,?,?,NOW(),NULL)",[crypto.randomUUID(),name,email,inviteType,"sent",info.messageId||null]);
-      sent++;results.push({name,email,status:"sent"});
+      sent++;results.push({name,email,phone,status:"sent"});
     }catch(error){
       failed++;
       const reason=(error?.message||"Send failed").slice(0,500);
       try{await pool.execute("INSERT INTO admin_invitation_log (id,recipient_name,recipient_email,invite_type,status,message_id,sent_at,error_text) VALUES (?,?,?,?,?,?,NULL,?)",[crypto.randomUUID(),name,email,inviteType,"failed",null,reason]);}catch(logError){console.error("Invitation log failed:",logError)}
-      results.push({name,email,status:"failed",reason});
+      results.push({name,email,phone,status:"failed",reason});
     }
     if(i<recipients.length-1) await new Promise(resolve=>setTimeout(resolve,delayMs));
   }
@@ -2002,6 +2003,21 @@ async function ensureDashboardSchema() {
   // an existing database that predates the dashboard/product migrations.
   // All statements are idempotent and only create missing tables.
   const statements = [
+    `CREATE TABLE IF NOT EXISTS potential_contacts (
+      id CHAR(36) PRIMARY KEY,
+      company_name VARCHAR(255) NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      mobile VARCHAR(40) NULL,
+      contact_type ENUM('supplier','buyer') NOT NULL DEFAULT 'supplier',
+      source VARCHAR(80) NOT NULL DEFAULT 'bulk_onboarding',
+      status ENUM('invited','interested','registered','active','unsubscribed') NOT NULL DEFAULT 'invited',
+      last_activity_at DATETIME NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_potential_contact_email (email),
+      INDEX idx_potential_contact_type (contact_type, status),
+      INDEX idx_potential_contact_mobile (mobile)
+    ) ENGINE=InnoDB`,
     `CREATE TABLE IF NOT EXISTS admin_invitation_log (
       id CHAR(36) PRIMARY KEY,
       recipient_name VARCHAR(180) NULL,
