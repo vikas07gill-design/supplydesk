@@ -524,7 +524,7 @@ app.post("/api/admin/bulk-invite", requireAdmin, async (req,res)=>{
       const emailKey=potentialKey(email), mobileHash=mobileKey?potentialMobileKey(mobileKey):"";
       const [existing]=await pool.execute("SELECT company_name,email,mobile FROM potential_contacts WHERE email_key=? OR (?<>'' AND mobile_key=?) LIMIT 1",[emailKey,mobileHash,mobileHash]);
       if(existing.length){skipped++;results.push({name,email,phone,status:"skipped",reason:"Duplicate email/mobile already in Potential Database"});continue}
-      await pool.execute("INSERT INTO potential_contacts (id,company_name,email,mobile,contact_type,source,status,last_activity_at) VALUES (?,?,?,?,?,?,?,NOW())",[crypto.randomUUID(),name,email,phone,inviteType,"bulk_onboarding","invited"]);
+      await pool.execute("INSERT INTO potential_contacts (id,company_name,email,email_key,mobile,mobile_key,location,contact_type,source,status,last_activity_at) VALUES (?,?,?,?,?,?,?,?,?, ?,NOW())",[crypto.randomUUID(),name,email,emailKey,phone,mobileHash,clean(row.location,255),inviteType,"bulk_onboarding","invited"]);
       const info=await sendAdminInvitation({recipientEmail:email,recipientName:name,inviteType,message:defaultMessage});
       await pool.execute("INSERT INTO admin_invitation_log (id,recipient_name,recipient_email,invite_type,status,message_id,sent_at,error_text) VALUES (?,?,?,?,?,?,NOW(),NULL)",[crypto.randomUUID(),name,email,inviteType,"sent",info.messageId||null]);
       sent++;results.push({name,email,phone,status:"sent"});
