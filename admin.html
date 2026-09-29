@@ -239,91 +239,78 @@ document.getElementById("bulkInviteFile").addEventListener("change",async e=>{
   renderBulkInvitePreview();
 });
 function parseBulkInviteFile(text){
-  const rows=[]; const seenEmails=new Set(); const seenMobiles=new Set();
+  const rows=[], errors=[], seenEmails=new Set(), seenMobiles=new Set();
   const lines=String(text||"").split(/\r?\n/);
-  let headerMap=null;
-
+  let headerMap=null, headerFound=false;
   const cleanCell=v=>String(v??"").replace(/^\s+|\s+$/g,"").replace(/^["']|["']$/g,"").replace(/^\*+|\*+$/g,"").trim();
   const headerKey=v=>cleanCell(v).toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ");
-
-  for(const raw of lines){
-    let line=raw.trim();
-    if(!line)continue;
-    if(/^#/.test(line))continue;
-    if(/^\|?\s*:?-{2,}/.test(line))continue;
-
-    let cells;
+  function splitLine(line){
     if(line.includes("|")){
-      cells=line.split("|").map(cleanCell);
+      const cells=line.split("|").map(cleanCell);
       if(cells[0]==="")cells.shift();
       if(cells[cells.length-1]==="")cells.pop();
-    }else{
-      // Basic CSV support, including quoted cells containing commas.
-      cells=[]; let cur="",quoted=false;
-      for(let i=0;i<line.length;i++){
-        const ch=line[i];
-        if(ch==='"'){
-          if(quoted && line[i+1]==='"'){cur+='"';i++;continue}
-          quoted=!quoted; continue;
-        }
-        if(ch===','&&!quoted){cells.push(cleanCell(cur));cur="";continue}
-        cur+=ch;
-      }
-      cells.push(cleanCell(cur));
+      return cells;
     }
+    const cells=[]; let cur="",quoted=false;
+    for(let i=0;i<line.length;i++){
+      const ch=line[i];
+      if(ch==='"'){ if(quoted && line[i+1]==='"'){cur+='"';i++;continue} quoted=!quoted; continue; }
+      if(ch===','&&!quoted){cells.push(cleanCell(cur));cur="";continue}
+      cur+=ch;
+    }
+    cells.push(cleanCell(cur)); return cells;
+  }
+  const aliases={
+    company:/^(company|company name|business|business name|organisation|organization|supplier name|buyer name)$/,
+    email:/^(email|e mail|email id|business email|business e mail|email address)$/,
+    phone:/^(mobile|mobile no|mobile number|phone|phone no|phone number|whatsapp|whatsapp no|whatsapp number)$/,
+    location:/^(location|city|city state|city location|state|state city|address|city\/state)$/
+  };
+  for(let lineNo=0;lineNo<lines.length;lineNo++){
+    const line=lines[lineNo].trim();
+    if(!line || /^#/.test(line) || /^\|?\s*:?-{2,}/.test(line))continue;
+    const cells=splitLine(line);
     if(!cells.length)continue;
-
     const normalized=cells.map(headerKey);
-    const looksLikeHeader=normalized.some(x=>/^(company|company name|email|e mail|mobile|mobile no|phone|phone no|location|city|city state|state|address)$/.test(x));
-    if(looksLikeHeader){
+    const isHeader=normalized.some(x=>Object.values(aliases).some(re=>re.test(x)));
+    if(isHeader && !headerFound){
       headerMap={};
-      normalized.forEach((x,i)=>{
-        if(!headerMap.company && /^(company|company name|business|business name)$/.test(x))headerMap.company=i;
-        if(headerMap.email===undefined && /^(email|e mail|email id|business email)$/.test(x))headerMap.email=i;
-        if(headerMap.phone===undefined && /^(mobile|mobile no|mobile number|phone|phone no|phone number|whatsapp)$/.test(x))headerMap.phone=i;
-        if(headerMap.location===undefined && /^(location|city|city state|state|address)$/.test(x))headerMap.location=i;
-      });
+      normalized.forEach((x,i)=>{for(const [key,re] of Object.entries(aliases)){if(headerMap[key]===undefined&&re.test(x))headerMap[key]=i;}});
+      headerFound=true;
+      const missing=["company","email","phone","location"].filter(k=>headerMap[k]===undefined);
+      if(missing.length)errors.push("Header missing: "+missing.join(", "));
       continue;
     }
-
-    const emailCell=headerMap?.email!==undefined?cells[headerMap.email]:"";
-    const emailMatch=(emailCell||cells.join(" ")).match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-    if(!emailMatch)continue;
-    const email=emailMatch[0].toLowerCase();
-
-    let phone="";
-    if(headerMap?.phone!==undefined)phone=cells[headerMap.phone]||"";
-    if(!phone) {
-      const phoneCell=cells.find(x=>x!==emailCell&&/(?:\+?\d[\d\s().-]{7,}\d)/.test(x));
-      phone=phoneCell?(phoneCell.match(/\+?\d[\d\s().-]{7,}\d/)||[""])[0].trim():"";
-    }
-
-    let company=headerMap?.company!==undefined?cells[headerMap.company]||"":"";
-    if(!company){
-      company=(cells.find(x=>x!==emailCell&&x!==phone&&!/^\d+$/.test(x)&&!/^(location|city|state|address)$/i.test(x))||"");
-    }
-
-    let location=headerMap?.location!==undefined?cells[headerMap.location]||"":"";
-    if(!location){
-      const candidates=cells.filter(x=>x&&x!==emailCell&&x!==phone&&x!==company);
-      if(candidates.length)location=candidates[candidates.length-1];
-    }
-
-    company=cleanCell(company); location=cleanCell(location);
-    if(!company||/^(company|company name|email|e-mail)$/i.test(company))continue;
-
-    const phoneKey=String(phone||"").replace(/\D/g,"");
-    if(seenEmails.has(email)||(phoneKey&&seenMobiles.has(phoneKey)))continue;
+    if(!headerFound)continue;
+    const company=cleanCell(cells[headerMap.company]||"");
+    const emailRaw=cleanCell(cells[headerMap.email]||"");
+    const phone=cleanCell(cells[headerMap.phone]||"");
+    const location=cleanCell(cells[headerMap.location]||"");
+    const emailMatch=emailRaw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    const rowLabel="Row "+(lineNo+1);
+    if(!company&&!emailRaw&&!phone&&!location)continue;
+    if(!company){errors.push(rowLabel+": Company is blank");continue}
+    if(!emailMatch){errors.push(rowLabel+": Invalid or blank email");continue}
+    if(!location){errors.push(rowLabel+": Location is blank");continue}
+    const email=emailMatch[0].toLowerCase(), phoneKey=phone.replace(/\D/g,"");
+    if(seenEmails.has(email)){errors.push(rowLabel+": Duplicate email");continue}
+    if(phoneKey&&seenMobiles.has(phoneKey)){errors.push(rowLabel+": Duplicate mobile");continue}
     seenEmails.add(email); if(phoneKey)seenMobiles.add(phoneKey);
-    rows.push({name:company,email,phone:String(phone||"").trim(),location});
+    rows.push({name:company,email,phone,location});
   }
+  if(!headerFound)errors.unshift("No recognized header row found. Use: Company | Email | Mobile | Location | Type | Onboarding | Invite Status | WhatsApp");
+  window.potentialBulkParseMeta={headerFound,headerMap,errors,totalLines:lines.length};
   return rows;
 }
 function renderBulkInvitePreview(){
-  const box=document.getElementById("bulkInvitePreview");
-  if(!bulkInviteRows.length){box.textContent="No valid company/email rows found. Expected a table or CSV containing Company and Email.";return}
+  const box=document.getElementById("bulkInvitePreview"),meta=window.potentialBulkParseMeta||{};
+  if(!meta.headerFound){box.innerHTML="<strong>No valid header detected.</strong><div class='muted' style='margin-top:6px'>Locked mapping: Company → Company · Email → Email · Mobile → Mobile · Location → Location. No column guessing.</div>";return}
   const shown=bulkInviteRows.slice(0,8);
-  box.innerHTML="<strong>"+bulkInviteRows.length+" valid recipients ready.</strong><table class='bulk-table'><tr><th>Company</th><th>Email</th><th>Mobile</th></tr>"+shown.map(r=>"<tr><td>"+esc(r.name)+"</td><td>"+esc(r.email)+"</td><td>"+esc(r.phone||"Not available")+"</td></tr>").join("")+"</table>"+(bulkInviteRows.length>8?"<div class='muted' style='margin-top:6px'>Showing first 8. All valid rows will be processed.</div>":"");
+  const mapping="<div style='margin-bottom:8px'><strong>Locked column mapping:</strong> Company → Company · Email → Email · Mobile → Mobile · Location → Location</div>";
+  const table=shown.length?"<table class='bulk-table'><tr><th>Company</th><th>Email</th><th>Mobile</th><th>Location</th></tr>"+shown.map(r=>"<tr><td>"+esc(r.name)+"</td><td>"+esc(r.email)+"</td><td>"+esc(r.phone||"Not available")+"</td><td>"+esc(r.location||"Not available")+"</td></tr>").join("")+"</table>":"<div class='danger'>No valid rows ready.</div>";
+  const err=(meta.errors||[]).slice(0,8);
+  const errorHtml=err.length?"<div style='margin-top:8px;color:#b43d3d'><strong>"+meta.errors.length+" validation issue(s):</strong><br>"+err.map(esc).join("<br>")+(meta.errors.length>8?"<br>…":"")+"</div>":"";
+  box.innerHTML=mapping+"<strong>"+bulkInviteRows.length+" valid rows ready.</strong>"+table+errorHtml;
 }
 function renderBulkInviteResults(){
   const box=document.getElementById("bulkInviteResultList");
@@ -356,12 +343,13 @@ document.getElementById("potentialBulkFile").addEventListener("change",async e=>
   const raw=await file.text(); const rows=parseBulkInviteFile(raw);
   window.potentialBulkRows=rows; window.potentialBulkSendRows=[];
   document.getElementById("potentialBulkSendBtn").disabled=true;
-  document.getElementById("potentialBulkPreview").textContent=rows.length+" unique contacts ready for import after email/mobile duplicate removal.";
+  renderBulkInvitePreview();
+  document.getElementById("potentialBulkStatus").textContent=(window.potentialBulkParseMeta?.errors||[]).length+" validation issue(s) found. Invalid rows will not be imported.";
 });
 async function importPotentialContacts(){
   const rows=window.potentialBulkRows||[], status=document.getElementById("potentialBulkStatus");
   const btn=document.getElementById("potentialBulkImportBtn"), send=document.getElementById("potentialBulkSendBtn");
-  if(!rows.length){status.textContent="Please select a valid Company + Email list first.";return}
+  if(!rows.length){status.textContent="No valid rows found. Fix the Company / Email / Mobile / Location columns first.";return}
   btn.disabled=true; status.textContent="Importing contacts into Potential Database...";
   try{
     const data=await api("/api/admin/potential-contacts/import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({inviteType:document.getElementById("potentialBulkType").value,recipients:rows})});
