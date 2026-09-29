@@ -69,8 +69,7 @@ async function loadLiveProduct(){
   }catch(e){ document.getElementById("name").textContent="Product unavailable"; document.getElementById("desc").textContent="We could not load this product right now. Please try again."; }
 }
 loadLiveProduct();
-</script></body></html>
-<script>
+</script><script>
 function openConnect(){
   if(!liveProduct)return;
   document.getElementById("connectBox").classList.add("open");
