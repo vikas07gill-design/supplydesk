@@ -472,9 +472,14 @@ app.get("/api/admin/potential-contacts", requireAdmin, async (req,res)=>{
     const where=[]; const params=[];
     if(["supplier","buyer"].includes(type)){where.push("contact_type=?");params.push(type)}
     if(search){where.push("(company_name LIKE ? OR email LIKE ? OR mobile LIKE ?)");const q="%"+search+"%";params.push(q,q,q)}
-    const sql="SELECT company_name,email,mobile,contact_type,status,source,created_at,last_activity_at FROM potential_contacts "+(where.length?"WHERE "+where.join(" AND "):"")+" ORDER BY last_activity_at DESC, created_at DESC LIMIT 500";
+    const sql="SELECT pc.company_name,pc.email,pc.mobile,pc.contact_type,pc.status,pc.source,pc.created_at,pc.last_activity_at,sp.id AS supplier_profile_id,sp.verified AS supplier_verified,sp.published AS supplier_published,b.id AS buyer_id FROM potential_contacts pc LEFT JOIN supplier_profiles sp ON LOWER(sp.business_email)=LOWER(pc.email) LEFT JOIN buyers b ON LOWER(b.email)=LOWER(pc.email) "+(where.length?"WHERE "+where.join(" AND "):"")+" ORDER BY pc.last_activity_at DESC, pc.created_at DESC LIMIT 500";
     const [contacts]=await pool.execute(sql,params);
-    res.json({ok:true,total:contacts.length,contacts});
+    const mapped=contacts.map(c=>({
+      ...c,
+      onboarded: c.contact_type==="supplier" ? !!c.supplier_profile_id : !!c.buyer_id,
+      onboardedStatus: c.contact_type==="supplier" ? (c.supplier_profile_id ? (c.supplier_verified&&c.supplier_published ? "Active" : "Registered") : "Not Onboarded") : (c.buyer_id ? "Registered" : "Not Onboarded")
+    }));
+    res.json({ok:true,total:mapped.length,contacts:mapped});
   }catch(error){console.error("Potential contacts load failed:",error);res.status(500).json({error:"Could not load potential contacts."})}
 });
 
