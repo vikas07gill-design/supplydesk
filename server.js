@@ -439,11 +439,11 @@ app.post("/api/admin/invite", requireAdmin, async (req,res)=>{
   const inviteUrl=origin+"/";
   const safeMessage=escapeEmailHtml(message).replace(/\r?\n/g,"<br>");
   const email=buildProfessionalEmail({
-    preheader:"Grow your business with SupplyDesk. Limited-time free listing offer.",
+    preheader:"Get more customers with SupplyDesk. Limited-time launch offer: listing FREE.",
     title:"Get More Customers. Grow Your Business.",
     intro:recipientName?("Hello "+recipientName+", we would like to invite your business to explore SupplyDesk."):"We would like to invite your business to explore SupplyDesk.",
-    bodyHtml:'<div style="margin:22px 0;padding:18px;background:#f5fafb;border:1px solid #dbe8ed;border-radius:12px;line-height:1.7">'+safeMessage+'</div><p style="line-height:1.6">SupplyDesk helps businesses showcase products and services, reach potential buyers and create new B2B sales opportunities.</p><p style="margin:18px 0;padding:16px;background:#eef9f8;border:1px solid #c9ebe5;border-radius:12px;line-height:1.6"><strong>Launch Offer</strong><br>Business listing: <strong>Normally INR 21,000</strong><br><strong>Currently FREE for a limited time</strong> during our launch.</p>',
-    textLines:[message,"Invitation type: "+inviteType,"Launch offer: business listing normally INR 21,000, currently free for a limited time during launch."],
+    bodyHtml:'<div style="margin:22px 0;padding:18px;background:#f5fafb;border:1px solid #dbe8ed;border-radius:12px;line-height:1.7">'+safeMessage+'</div><p style="line-height:1.6">SupplyDesk helps businesses showcase products and services, reach potential buyers and create new B2B sales opportunities.</p><div style="margin:24px 0;padding:20px;background:#eef9f8;border:1px solid #bfe4df;border-radius:12px;text-align:center"><div style="display:inline-block;background:#087f8c;color:#fff;padding:5px 10px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.6px">LIMITED-TIME LAUNCH OFFER</div><div style="margin-top:12px;color:#5c7078;font-size:13px">Business Listing</div><div style="margin-top:4px;font-size:17px;color:#64777f"><span style="text-decoration:line-through">INR 21,000</span></div><div style="margin-top:3px;font-size:30px;line-height:1.15;font-weight:900;color:#087f8c">FREE</div><div style="margin-top:6px;font-size:12px;color:#526970">Available free during the launch period.</div></div><div style="margin:24px 0"><div style="font-size:13px;font-weight:800;color:#092438;margin-bottom:10px">KEY BUSINESS BENEFITS</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:separate;border-spacing:0 7px"><tr><td width="28" valign="top" style="color:#087f8c;font-weight:900;font-size:16px">✓</td><td style="font-size:13px;line-height:1.5">Get discovered by potential buyers</td></tr><tr><td width="28" valign="top" style="color:#087f8c;font-weight:900;font-size:16px">✓</td><td style="font-size:13px;line-height:1.5">Showcase your business and products professionally</td></tr><tr><td width="28" valign="top" style="color:#087f8c;font-weight:900;font-size:16px">✓</td><td style="font-size:13px;line-height:1.5">Receive business enquiries through SupplyDesk</td></tr><tr><td width="28" valign="top" style="color:#087f8c;font-weight:900;font-size:16px">✓</td><td style="font-size:13px;line-height:1.5">Expand your market reach and sales opportunities</td></tr></table></div>',
+    textLines:[message,"Invitation type: "+inviteType,"Launch offer: business listing normally INR 21,000, currently FREE for a limited time during launch."],
     ctaText:"Explore SupplyDesk",
     ctaUrl:inviteUrl
   });
@@ -452,7 +452,7 @@ app.post("/api/admin/invite", requireAdmin, async (req,res)=>{
       from:process.env.SMTP_FROM,
       replyTo:process.env.SMTP_FROM,
       to:recipientEmail,
-      subject:"SupplyDesk | You're Invited to Join",
+      subject:"SupplyDesk | Get More Customers. Limited-Time Launch Offer",
       text:email.text,
       html:email.html
     });
