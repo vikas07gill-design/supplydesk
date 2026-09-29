@@ -219,6 +219,7 @@ function parseBulkInviteFile(text){
     const phoneCell=cells.find(x=>x!==emailCell&&/(?:\+?\d[\d\s().-]{7,}\d)/.test(x));
     const phone=phoneCell?(phoneCell.match(/\+?\d[\d\s().-]{7,}\d/)||[""])[0].trim():"";
     const phoneKey=phone.replace(/\D/g,"");
+    const phoneKey=phone.replace(/\D/g,"");
     const company=(cells.find(x=>x!==emailCell&&x&&!/^\d+$/.test(x))||"").replace(/\*+/g,"").trim();
     if(!company||/^(company|email|e-mail)$/i.test(company))continue;
     if(seenEmails.has(email)||(phoneKey&&seenMobiles.has(phoneKey)))continue;
