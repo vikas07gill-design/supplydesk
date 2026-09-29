@@ -439,6 +439,32 @@ async function sendAdminInvitation({recipientEmail,recipientName,inviteType,mess
   return await mailer.sendMail({from:process.env.SMTP_FROM,replyTo:process.env.SMTP_FROM,to:recipientEmail,subject:"SupplyDesk | Get More Customers. Limited-Time Launch Offer",text:email.text,html:email.html});
 }
 
+app.post("/api/admin/potential-contacts/import", requireAdmin, async (req,res)=>{
+  const inviteType=clean(req.body?.inviteType,30).toLowerCase();
+  const recipients=Array.isArray(req.body?.recipients)?req.body.recipients.slice(0,500):[];
+  if(!["supplier","buyer"].includes(inviteType)) return res.status(400).json({error:"Contact type must be supplier or buyer."});
+  if(!recipients.length) return res.status(400).json({error:"At least one contact is required."});
+  const added=[]; let skipped=0;
+  try{
+    const seenEmail=new Set(), seenMobile=new Set();
+    for(const raw of recipients){
+      const email=clean(raw?.email,255).toLowerCase();
+      const name=clean(raw?.name,180);
+      const mobile=clean(raw?.phone,40);
+      const mobileKey=mobile.replace(/\D/g,"");
+      if(!/^\S+@\S+\.\S+$/.test(email)||!name){skipped++;continue}
+      if(seenEmail.has(email)||(mobileKey&&seenMobile.has(mobileKey))){skipped++;continue}
+      seenEmail.add(email);if(mobileKey)seenMobile.add(mobileKey);
+      const [existing]=await pool.execute("SELECT id FROM potential_contacts WHERE LOWER(email)=? OR (?<>'' AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile,'+',''),' ',''),'-',''),'(',''),')','')=?) LIMIT 1",[email,mobileKey,mobileKey]);
+      if(existing.length){skipped++;continue}
+      const id=crypto.randomUUID();
+      await pool.execute("INSERT INTO potential_contacts (id,company_name,email,mobile,contact_type,source,status,last_activity_at) VALUES (?,?,?,?,?,?,?,NOW())",[id,name,email,mobile,inviteType,"manual_import","new"]);
+      added.push({id,name,email,phone:mobile});
+    }
+    res.json({ok:true,added:added.length,skipped,contacts:added});
+  }catch(error){console.error("Potential contacts import failed:",error);res.status(500).json({error:"Could not import potential contacts."})}
+});
+
 app.get("/api/admin/potential-contacts", requireAdmin, async (req,res)=>{
   try{
     const type=clean(req.query?.type,20).toLowerCase();
