@@ -435,16 +435,16 @@ app.post("/api/admin/invite", requireAdmin, async (req,res)=>{
     return res.status(503).json({error:"SMTP environment variables are not configured."});
   }
   const origin=String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"");
-  const invitePath=inviteType==="supplier"?"/supplier-register.html":"/index.html";
-  const inviteUrl=origin+invitePath;
+  
+  const inviteUrl=origin+"/";
   const safeMessage=escapeEmailHtml(message).replace(/\r?\n/g,"<br>");
   const email=buildProfessionalEmail({
-    preheader:"You are invited to join SupplyDesk",
-    title:"You are invited to SupplyDesk",
-    intro:recipientName?("Hello "+recipientName+", you have been invited to join SupplyDesk as a "+inviteType+"."):"You have been invited to join SupplyDesk as a "+inviteType+".",
-    bodyHtml:'<div style="margin:22px 0;padding:18px;background:#f5fafb;border:1px solid #dbe8ed;border-radius:12px;line-height:1.7">'+safeMessage+'</div><p style="line-height:1.6">SupplyDesk connects buyers and verified suppliers for global B2B sourcing and business enquiries.</p>',
-    textLines:[message,"Invitation type: "+inviteType],
-    ctaText:inviteType==="supplier"?"Register as Supplier":"Explore SupplyDesk",
+    preheader:"Grow your business with SupplyDesk. Limited-time free listing offer.",
+    title:"Get More Customers. Grow Your Business.",
+    intro:recipientName?("Hello "+recipientName+", we would like to invite your business to explore SupplyDesk."):"We would like to invite your business to explore SupplyDesk.",
+    bodyHtml:'<div style="margin:22px 0;padding:18px;background:#f5fafb;border:1px solid #dbe8ed;border-radius:12px;line-height:1.7">'+safeMessage+'</div><p style="line-height:1.6">SupplyDesk helps businesses showcase products and services, reach potential buyers and create new B2B sales opportunities.</p><p style="margin:18px 0;padding:16px;background:#eef9f8;border:1px solid #c9ebe5;border-radius:12px;line-height:1.6"><strong>Launch Offer</strong><br>Business listing: <strong>Normally INR 21,000</strong><br><strong>Currently FREE for a limited time</strong> during our launch.</p>',
+    textLines:[message,"Invitation type: "+inviteType,"Launch offer: business listing normally INR 21,000, currently free for a limited time during launch."],
+    ctaText:"Explore SupplyDesk",
     ctaUrl:inviteUrl
   });
   try{
