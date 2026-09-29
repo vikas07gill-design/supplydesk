@@ -203,7 +203,7 @@ document.getElementById("bulkInviteFile").addEventListener("change",async e=>{
   renderBulkInvitePreview();
 });
 function parseBulkInviteFile(text){
-  const rows=[]; const seen=new Set();
+  const rows=[]; const seenEmails=new Set(); const seenMobiles=new Set();
   const lines=String(text||"").split(/\r?\n/);
   for(const raw of lines){
     const line=raw.trim();
@@ -218,9 +218,11 @@ function parseBulkInviteFile(text){
     const email=emailMatch[0].toLowerCase();
     const phoneCell=cells.find(x=>x!==emailCell&&/(?:\+?\d[\d\s().-]{7,}\d)/.test(x));
     const phone=phoneCell?(phoneCell.match(/\+?\d[\d\s().-]{7,}\d/)||[""])[0].trim():"";
+    const phoneKey=phone.replace(/\D/g,"");
     const company=(cells.find(x=>x!==emailCell&&x&&!/^\d+$/.test(x))||"").replace(/\*+/g,"").trim();
     if(!company||/^(company|email|e-mail)$/i.test(company))continue;
-    if(seen.has(email))continue; seen.add(email);
+    if(seenEmails.has(email)||(phoneKey&&seenMobiles.has(phoneKey)))continue;
+    seenEmails.add(email); if(phoneKey)seenMobiles.add(phoneKey);
     rows.push({name:company,email,phone});
   }
   return rows;
