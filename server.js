@@ -423,6 +423,23 @@ app.post("/api/admin/test-email", requireAdmin, async (req,res)=>{
   }
 });
 
+async function sendAdminInvitation({recipientEmail,recipientName,inviteType,message}){
+  if(!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) throw new Error("SMTP environment variables are not configured.");
+  const origin=String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"");
+  const inviteUrl=origin+"/";
+  const safeMessage=escapeEmailHtml(message).replace(/\r?\n/g,"<br>");
+  const email=buildProfessionalEmail({
+    preheader:"Get more customers with SupplyDesk. Limited-time launch offer: listing FREE.",
+    title:"Get More Customers. Grow Your Business.",
+    intro:recipientName?("Hello "+recipientName+", we would like to invite your business to explore SupplyDesk."):"We would like to invite your business to explore SupplyDesk.",
+    bodyHtml:'<div style="margin:22px 0;padding:18px;background:#f5fafb;border:1px solid #dbe8ed;border-radius:12px;line-height:1.7">'+safeMessage+'</div><p style="line-height:1.6">SupplyDesk helps businesses showcase products and services, reach potential buyers and create new B2B sales opportunities.</p><div style="margin:24px 0;padding:20px;background:#eef9f8;border:1px solid #bfe4df;border-radius:12px;text-align:center"><div style="display:inline-block;background:#087f8c;color:#fff;padding:5px 10px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.6px">LIMITED-TIME LAUNCH OFFER</div><div style="margin-top:12px;color:#5c7078;font-size:13px">Business Listing</div><div style="margin-top:4px;font-size:17px;color:#64777f"><span style="text-decoration:line-through">INR 21,000</span></div><div style="margin-top:3px;font-size:30px;line-height:1.15;font-weight:900;color:#087f8c">FREE</div><div style="margin-top:6px;font-size:12px;color:#526970">Available free during the launch period.</div></div><div style="margin:24px 0"><div style="font-size:13px;font-weight:800;color:#092438;margin-bottom:10px">KEY BUSINESS BENEFITS</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:separate;border-spacing:0 7px"><tr><td width="28" valign="top" style="color:#087f8c;font-weight:900;font-size:16px">✓</td><td style="font-size:13px;line-height:1.5">Get discovered by potential buyers</td></tr><tr><td width="28" valign="top" style="color:#087f8c;font-weight:900;font-size:16px">✓</td><td style="font-size:13px;line-height:1.5">Showcase your business and products professionally</td></tr><tr><td width="28" valign="top" style="color:#087f8c;font-weight:900;font-size:16px">✓</td><td style="font-size:13px;line-height:1.5">Receive business enquiries through SupplyDesk</td></tr><tr><td width="28" valign="top" style="color:#087f8c;font-weight:900;font-size:16px">✓</td><td style="font-size:13px;line-height:1.5">Expand your market reach and sales opportunities</td></tr></table></div>',
+    textLines:[message,"Invitation type: "+inviteType,"Launch offer: business listing normally INR 21,000, currently FREE for a limited time during launch.","To stop future onboarding emails, reply with Unsubscribe."],
+    ctaText:"Explore SupplyDesk", ctaUrl:inviteUrl
+  });
+  return await mailer.sendMail({from:process.env.SMTP_FROM,replyTo:process.env.SMTP_FROM,to:recipientEmail,subject:"SupplyDesk | Get More Customers. Limited-Time Launch Offer",text:email.text,html:email.html});
+}
+
+app.post("/api/admin/invite", requireAdmin, async (req,res)=>{
 app.post("/api/admin/invite", requireAdmin, async (req,res)=>{
   const recipientEmail=clean(req.body?.recipientEmail,255).toLowerCase();
   const recipientName=clean(req.body?.recipientName,120);
@@ -431,36 +448,41 @@ app.post("/api/admin/invite", requireAdmin, async (req,res)=>{
   if(!/^\S+@\S+\.\S+$/.test(recipientEmail)) return res.status(400).json({error:"A valid recipient email is required."});
   if(!["supplier","buyer"].includes(inviteType)) return res.status(400).json({error:"Invitation type must be supplier or buyer."});
   if(!message) return res.status(400).json({error:"Invitation message is required."});
-  if(!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) {
-    return res.status(503).json({error:"SMTP environment variables are not configured."});
-  }
-  const origin=String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"");
-  
-  const inviteUrl=origin+"/";
-  const safeMessage=escapeEmailHtml(message).replace(/\r?\n/g,"<br>");
-  const email=buildProfessionalEmail({
-    preheader:"Get more customers with SupplyDesk. Limited-time launch offer: listing FREE.",
-    title:"Get More Customers. Grow Your Business.",
-    intro:recipientName?("Hello "+recipientName+", we would like to invite your business to explore SupplyDesk."):"We would like to invite your business to explore SupplyDesk.",
-    bodyHtml:'<div style="margin:22px 0;padding:18px;background:#f5fafb;border:1px solid #dbe8ed;border-radius:12px;line-height:1.7">'+safeMessage+'</div><p style="line-height:1.6">SupplyDesk helps businesses showcase products and services, reach potential buyers and create new B2B sales opportunities.</p><div style="margin:24px 0;padding:20px;background:#eef9f8;border:1px solid #bfe4df;border-radius:12px;text-align:center"><div style="display:inline-block;background:#087f8c;color:#fff;padding:5px 10px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.6px">LIMITED-TIME LAUNCH OFFER</div><div style="margin-top:12px;color:#5c7078;font-size:13px">Business Listing</div><div style="margin-top:4px;font-size:17px;color:#64777f"><span style="text-decoration:line-through">INR 21,000</span></div><div style="margin-top:3px;font-size:30px;line-height:1.15;font-weight:900;color:#087f8c">FREE</div><div style="margin-top:6px;font-size:12px;color:#526970">Available free during the launch period.</div></div><div style="margin:24px 0"><div style="font-size:13px;font-weight:800;color:#092438;margin-bottom:10px">KEY BUSINESS BENEFITS</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:separate;border-spacing:0 7px"><tr><td width="28" valign="top" style="color:#087f8c;font-weight:900;font-size:16px">✓</td><td style="font-size:13px;line-height:1.5">Get discovered by potential buyers</td></tr><tr><td width="28" valign="top" style="color:#087f8c;font-weight:900;font-size:16px">✓</td><td style="font-size:13px;line-height:1.5">Showcase your business and products professionally</td></tr><tr><td width="28" valign="top" style="color:#087f8c;font-weight:900;font-size:16px">✓</td><td style="font-size:13px;line-height:1.5">Receive business enquiries through SupplyDesk</td></tr><tr><td width="28" valign="top" style="color:#087f8c;font-weight:900;font-size:16px">✓</td><td style="font-size:13px;line-height:1.5">Expand your market reach and sales opportunities</td></tr></table></div>',
-    textLines:[message,"Invitation type: "+inviteType,"Launch offer: business listing normally INR 21,000, currently FREE for a limited time during launch."],
-    ctaText:"Explore SupplyDesk",
-    ctaUrl:inviteUrl
-  });
   try{
-    const info=await mailer.sendMail({
-      from:process.env.SMTP_FROM,
-      replyTo:process.env.SMTP_FROM,
-      to:recipientEmail,
-      subject:"SupplyDesk | Get More Customers. Limited-Time Launch Offer",
-      text:email.text,
-      html:email.html
-    });
+    const info=await sendAdminInvitation({recipientEmail,recipientName,inviteType,message});
     res.json({ok:true,recipient:recipientEmail,messageId:info.messageId});
   }catch(error){
     console.error("Admin invitation email failed:",error);
     res.status(502).json({error:"Invitation email failed: "+(error?.code||"SEND_ERROR")+" "+(error?.responseCode||"")+" "+(error?.message||"Unknown SMTP error")});
   }
+});
+
+app.post("/api/admin/bulk-invite", requireAdmin, async (req,res)=>{
+  const inviteType=clean(req.body?.inviteType,30).toLowerCase();
+  const delayMs=Math.min(Math.max(Number(req.body?.delayMs||2500),1000),10000);
+  const recipients=Array.isArray(req.body?.recipients)?req.body.recipients.slice(0,100):[];
+  if(!["supplier","buyer"].includes(inviteType)) return res.status(400).json({error:"Invitation type must be supplier or buyer."});
+  if(!recipients.length) return res.status(400).json({error:"At least one recipient is required."});
+  const defaultMessage="Looking for more customers and new business opportunities?\n\nSupplyDesk is a global B2B sourcing platform helping businesses connect with buyers and suppliers for international trade. List your business, showcase your products or services, and get discovered by potential customers.\n\nWhy join SupplyDesk?\n• Get discovered by potential buyers\n• Showcase your business and products professionally\n• Receive business enquiries through SupplyDesk\n• Expand your market reach and sales opportunities\n\nExplore SupplyDesk: "+String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"")+"/\n\nCreate your business presence with SupplyDesk while the launch offer is available.";
+  const results=[]; let sent=0,skipped=0,failed=0;
+  for(let i=0;i<recipients.length;i++){
+    const row=recipients[i]||{}; const email=clean(row.email,255).toLowerCase(); const name=clean(row.name,180);
+    if(!/^\S+@\S+\.\S+$/.test(email)){failed++;results.push({name,email,status:"failed",reason:"Invalid email"});continue}
+    try{
+      const [[recent]]=await pool.execute("SELECT id FROM admin_invitation_log WHERE recipient_email=? AND sent_at>=DATE_SUB(NOW(),INTERVAL 30 DAY) AND status='sent' LIMIT 1",[email]);
+      if(recent){skipped++;results.push({name,email,status:"skipped",reason:"Already invited in last 30 days"});continue}
+      const info=await sendAdminInvitation({recipientEmail:email,recipientName:name,inviteType,message:defaultMessage});
+      await pool.execute("INSERT INTO admin_invitation_log (id,recipient_name,recipient_email,invite_type,status,message_id,sent_at,error_text) VALUES (?,?,?,?,?,?,NOW(),NULL)",[crypto.randomUUID(),name,email,inviteType,"sent",info.messageId||null]);
+      sent++;results.push({name,email,status:"sent"});
+    }catch(error){
+      failed++;
+      const reason=(error?.message||"Send failed").slice(0,500);
+      try{await pool.execute("INSERT INTO admin_invitation_log (id,recipient_name,recipient_email,invite_type,status,message_id,sent_at,error_text) VALUES (?,?,?,?,?,?,NULL,?)",[crypto.randomUUID(),name,email,inviteType,"failed",null,reason]);}catch(logError){console.error("Invitation log failed:",logError)}
+      results.push({name,email,status:"failed",reason});
+    }
+    if(i<recipients.length-1) await new Promise(resolve=>setTimeout(resolve,delayMs));
+  }
+  res.json({ok:true,total:recipients.length,sent,skipped,failed,results});
 });
 
 app.get("/api/admin/test-connection-storage", requireAdmin, async (req,res)=>{
@@ -1974,6 +1996,19 @@ async function ensureDashboardSchema() {
   // an existing database that predates the dashboard/product migrations.
   // All statements are idempotent and only create missing tables.
   const statements = [
+    `CREATE TABLE IF NOT EXISTS admin_invitation_log (
+      id CHAR(36) PRIMARY KEY,
+      recipient_name VARCHAR(180) NULL,
+      recipient_email VARCHAR(255) NOT NULL,
+      invite_type ENUM('supplier','buyer') NOT NULL DEFAULT 'supplier',
+      status ENUM('sent','failed') NOT NULL,
+      message_id VARCHAR(255) NULL,
+      sent_at DATETIME NULL,
+      error_text VARCHAR(500) NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_admin_invite_email (recipient_email, sent_at),
+      INDEX idx_admin_invite_status (status, created_at)
+    ) ENGINE=InnoDB`,
     `CREATE TABLE IF NOT EXISTS supplier_dashboard_tokens (
       id CHAR(36) PRIMARY KEY,
       supplier_id CHAR(36) NOT NULL,
