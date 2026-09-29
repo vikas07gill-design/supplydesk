@@ -470,16 +470,19 @@ app.get("/api/admin/potential-contacts", requireAdmin, async (req,res)=>{
   try{
     const type=clean(req.query?.type,20).toLowerCase();
     const search=clean(req.query?.search,255);
+    const onboarding=clean(req.query?.onboarding,30).toLowerCase();
+    const inviteStatus=clean(req.query?.status,30).toLowerCase();
     const where=[]; const params=[];
-    if(["supplier","buyer"].includes(type)){where.push("contact_type=?");params.push(type)}
-    if(search){where.push("(company_name LIKE ? OR email LIKE ? OR mobile LIKE ?)");const q="%"+search+"%";params.push(q,q,q)}
+    if(["supplier","buyer"].includes(type)){where.push("pc.contact_type=?");params.push(type)}
+    if(["new","invited","interested","registered","active","unsubscribed"].includes(inviteStatus)){where.push("pc.status=?");params.push(inviteStatus)}
+    if(search){where.push("(pc.company_name LIKE ? OR pc.email LIKE ? OR pc.mobile LIKE ? OR pc.location LIKE ?)");const q="%"+search+"%";params.push(q,q,q,q)}
     const sql="SELECT pc.company_name,pc.email,pc.mobile,pc.location,pc.contact_type,pc.status,pc.source,pc.created_at,pc.last_activity_at,sp.id AS supplier_profile_id,sp.verified AS supplier_verified,sp.published AS supplier_published,b.id AS buyer_id FROM potential_contacts pc LEFT JOIN supplier_profiles sp ON LOWER(sp.business_email)=LOWER(pc.email) LEFT JOIN buyers b ON LOWER(b.email)=LOWER(pc.email) "+(where.length?"WHERE "+where.join(" AND "):"")+" ORDER BY pc.last_activity_at DESC, pc.created_at DESC LIMIT 500";
     const [contacts]=await pool.execute(sql,params);
     const mapped=contacts.map(c=>({
       ...c,
       onboarded: c.contact_type==="supplier" ? !!c.supplier_profile_id : !!c.buyer_id,
       onboardedStatus: c.contact_type==="supplier" ? (c.supplier_profile_id ? (c.supplier_verified&&c.supplier_published ? "Active" : "Registered") : "Not Onboarded") : (c.buyer_id ? "Registered" : "Not Onboarded")
-    }));
+    })).filter(c=>!onboarding || (onboarding==="not_onboarded" ? !c.onboarded : c.onboardedStatus.toLowerCase()===onboarding));
     res.json({ok:true,total:mapped.length,contacts:mapped});
   }catch(error){console.error("Potential contacts load failed:",error);res.status(500).json({error:"Could not load potential contacts."})}
 });
