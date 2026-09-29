@@ -242,8 +242,8 @@ function parseBulkInviteFile(text){
   const rows=[], errors=[], seenEmails=new Set(), seenMobiles=new Set();
   const lines=String(text||"").split(/\r?\n/);
   let headerMap=null, headerFound=false;
-  const cleanCell=v=>String(v??"").replace(/^\s+|\s+$/g,"").replace(/^["']|["']$/g,"").replace(/^\*+|\*+$/g,"").trim();
-  const headerKey=v=>cleanCell(v).toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ");
+  const cleanCell=v=>String(v??"").replace(/^\s+|\s+$/g,"").replace(/^["'\`]|["'\`]$/g,"").replace(/^\*+|\*+$/g,"").trim();
+  const headerKey=v=>cleanCell(v).toLowerCase().replace(/[.:/\\()_\-]+/g," ").replace(/\s+/g," ").trim();
   function splitLine(line){
     if(line.includes("|")){
       const cells=line.split("|").map(cleanCell);
@@ -251,6 +251,7 @@ function parseBulkInviteFile(text){
       if(cells[cells.length-1]==="")cells.pop();
       return cells;
     }
+    if(line.includes("\t")) return line.split("\t").map(cleanCell);
     const cells=[]; let cur="",quoted=false;
     for(let i=0;i<line.length;i++){
       const ch=line[i];
@@ -263,8 +264,8 @@ function parseBulkInviteFile(text){
   const aliases={
     company:/^(company|company name|business|business name|organisation|organization|supplier name|buyer name)$/,
     email:/^(email|e mail|email id|business email|business e mail|email address)$/,
-    phone:/^(mobile|mobile no|mobile number|phone|phone no|phone number|whatsapp|whatsapp no|whatsapp number)$/,
-    location:/^(location|city|city state|city location|state|state city|address|city\/state)$/
+    phone:/^(mobile|mobile no|mobile number|phone|phone no|phone number|whatsapp|whatsapp no|whatsapp number|contact number)$/,
+    location:/^(location|city|city state|city location|state|state city|address|city state country|city state location)$/
   };
   for(let lineNo=0;lineNo<lines.length;lineNo++){
     const line=lines[lineNo].trim();
@@ -291,6 +292,7 @@ function parseBulkInviteFile(text){
     if(!company&&!emailRaw&&!phone&&!location)continue;
     if(!company){errors.push(rowLabel+": Company is blank");continue}
     if(!emailMatch){errors.push(rowLabel+": Invalid or blank email");continue}
+    if(!phone.replace(/\D/g,""))errors.push(rowLabel+": Mobile is blank");
     if(!location){errors.push(rowLabel+": Location is blank");continue}
     const email=emailMatch[0].toLowerCase(), phoneKey=phone.replace(/\D/g,"");
     if(seenEmails.has(email)){errors.push(rowLabel+": Duplicate email");continue}
@@ -298,7 +300,6 @@ function parseBulkInviteFile(text){
     seenEmails.add(email); if(phoneKey)seenMobiles.add(phoneKey);
     rows.push({name:company,email,phone,location});
   }
-  if(!headerFound)errors.unshift("No recognized header row found. Use: Company | Email | Mobile | Location | Type | Onboarding | Invite Status | WhatsApp");
   window.potentialBulkParseMeta={headerFound,headerMap,errors,totalLines:lines.length};
   return rows;
 }
