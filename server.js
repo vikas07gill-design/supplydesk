@@ -440,7 +440,6 @@ async function sendAdminInvitation({recipientEmail,recipientName,inviteType,mess
 }
 
 app.post("/api/admin/invite", requireAdmin, async (req,res)=>{
-app.post("/api/admin/invite", requireAdmin, async (req,res)=>{
   const recipientEmail=clean(req.body?.recipientEmail,255).toLowerCase();
   const recipientName=clean(req.body?.recipientName,120);
   const inviteType=clean(req.body?.inviteType,30).toLowerCase();
