@@ -197,10 +197,12 @@ function parseBulkInviteFile(text){
     if(!emailCell)continue;
     const emailMatch=emailCell.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i); if(!emailMatch)continue;
     const email=emailMatch[0].toLowerCase();
+    const phoneCell=cells.find(x=>x!==emailCell&&/(?:\+?\d[\d\s().-]{7,}\d)/.test(x));
+    const phone=phoneCell?(phoneCell.match(/\+?\d[\d\s().-]{7,}\d/)||[""])[0].trim():"";
     const company=(cells.find(x=>x!==emailCell&&x&&!/^\d+$/.test(x))||"").replace(/\*+/g,"").trim();
     if(!company||/^(company|email|e-mail)$/i.test(company))continue;
     if(seen.has(email))continue; seen.add(email);
-    rows.push({name:company,email});
+    rows.push({name:company,email,phone});
   }
   return rows;
 }
@@ -208,7 +210,7 @@ function renderBulkInvitePreview(){
   const box=document.getElementById("bulkInvitePreview");
   if(!bulkInviteRows.length){box.textContent="No valid company/email rows found. Expected a table or CSV containing Company and Email.";return}
   const shown=bulkInviteRows.slice(0,8);
-  box.innerHTML="<strong>"+bulkInviteRows.length+" valid recipients ready.</strong><table class='bulk-table'><tr><th>Company</th><th>Email</th></tr>"+shown.map(r=>"<tr><td>"+esc(r.name)+"</td><td>"+esc(r.email)+"</td></tr>").join("")+"</table>"+(bulkInviteRows.length>8?"<div class='muted' style='margin-top:6px'>Showing first 8. All valid rows will be processed.</div>":"");
+  box.innerHTML="<strong>"+bulkInviteRows.length+" valid recipients ready.</strong><table class='bulk-table'><tr><th>Company</th><th>Email</th><th>Mobile</th></tr>"+shown.map(r=>"<tr><td>"+esc(r.name)+"</td><td>"+esc(r.email)+"</td><td>"+esc(r.phone||"Not available")+"</td></tr>").join("")+"</table>"+(bulkInviteRows.length>8?"<div class='muted' style='margin-top:6px'>Showing first 8. All valid rows will be processed.</div>":"");
 }
 async function sendBulkInvites(){
   if(!bulkInviteRows.length){document.getElementById("bulkInviteStatus").textContent="Upload a valid manufacturer list first.";return}
