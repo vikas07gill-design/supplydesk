@@ -451,6 +451,7 @@ app.post("/api/admin/potential-contacts/import", requireAdmin, async (req,res)=>
       const email=clean(raw?.email,255).toLowerCase();
       const name=clean(raw?.name,180);
       const mobile=clean(raw?.phone,40);
+      const location=clean(raw?.location,255);
       const mobileKey=mobile.replace(/\D/g,"");
       if(!/^\S+@\S+\.\S+$/.test(email)||!name){skipped++;continue}
       if(seenEmail.has(email)||(mobileKey&&seenMobile.has(mobileKey))){skipped++;continue}
@@ -458,7 +459,7 @@ app.post("/api/admin/potential-contacts/import", requireAdmin, async (req,res)=>
       const [existing]=await pool.execute("SELECT id FROM potential_contacts WHERE LOWER(email)=? OR (?<>'' AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile,'+',''),' ',''),'-',''),'(',''),')','')=?) LIMIT 1",[email,mobileKey,mobileKey]);
       if(existing.length){skipped++;continue}
       const id=crypto.randomUUID();
-      await pool.execute("INSERT INTO potential_contacts (id,company_name,email,mobile,contact_type,source,status,last_activity_at) VALUES (?,?,?,?,?,?,?,NOW())",[id,name,email,mobile,inviteType,"manual_import","new"]);
+      await pool.execute("INSERT INTO potential_contacts (id,company_name,email,mobile,location,contact_type,source,status,last_activity_at) VALUES (?,?,?,?,?,?,?,NOW())",[id,name,email,mobile,location,inviteType,"manual_import","new"]);
       added.push({id,name,email,phone:mobile});
     }
     res.json({ok:true,added:added.length,skipped,contacts:added});
@@ -472,7 +473,7 @@ app.get("/api/admin/potential-contacts", requireAdmin, async (req,res)=>{
     const where=[]; const params=[];
     if(["supplier","buyer"].includes(type)){where.push("contact_type=?");params.push(type)}
     if(search){where.push("(company_name LIKE ? OR email LIKE ? OR mobile LIKE ?)");const q="%"+search+"%";params.push(q,q,q)}
-    const sql="SELECT pc.company_name,pc.email,pc.mobile,pc.contact_type,pc.status,pc.source,pc.created_at,pc.last_activity_at,sp.id AS supplier_profile_id,sp.verified AS supplier_verified,sp.published AS supplier_published,b.id AS buyer_id FROM potential_contacts pc LEFT JOIN supplier_profiles sp ON LOWER(sp.business_email)=LOWER(pc.email) LEFT JOIN buyers b ON LOWER(b.email)=LOWER(pc.email) "+(where.length?"WHERE "+where.join(" AND "):"")+" ORDER BY pc.last_activity_at DESC, pc.created_at DESC LIMIT 500";
+    const sql="SELECT pc.company_name,pc.email,pc.mobile,pc.location,pc.contact_type,pc.status,pc.source,pc.created_at,pc.last_activity_at,sp.id AS supplier_profile_id,sp.verified AS supplier_verified,sp.published AS supplier_published,b.id AS buyer_id FROM potential_contacts pc LEFT JOIN supplier_profiles sp ON LOWER(sp.business_email)=LOWER(pc.email) LEFT JOIN buyers b ON LOWER(b.email)=LOWER(pc.email) "+(where.length?"WHERE "+where.join(" AND "):"")+" ORDER BY pc.last_activity_at DESC, pc.created_at DESC LIMIT 500";
     const [contacts]=await pool.execute(sql,params);
     const mapped=contacts.map(c=>({
       ...c,
@@ -2048,11 +2049,13 @@ async function ensureDashboardSchema() {
   // an existing database that predates the dashboard/product migrations.
   // All statements are idempotent and only create missing tables.
   const statements = [
+    `ALTER TABLE potential_contacts ADD COLUMN location VARCHAR(255) NULL`,
     `CREATE TABLE IF NOT EXISTS potential_contacts (
       id CHAR(36) PRIMARY KEY,
       company_name VARCHAR(255) NOT NULL,
       email VARCHAR(255) NOT NULL,
       mobile VARCHAR(40) NULL,
+      location VARCHAR(255) NULL,
       contact_type ENUM('supplier','buyer') NOT NULL DEFAULT 'supplier',
       source VARCHAR(80) NOT NULL DEFAULT 'bulk_onboarding',
       status ENUM('invited','interested','registered','active','unsubscribed') NOT NULL DEFAULT 'invited',
