@@ -439,6 +439,19 @@ async function sendAdminInvitation({recipientEmail,recipientName,inviteType,mess
   return await mailer.sendMail({from:process.env.SMTP_FROM,replyTo:process.env.SMTP_FROM,to:recipientEmail,subject:"SupplyDesk | Get More Customers. Limited-Time Launch Offer",text:email.text,html:email.html});
 }
 
+app.get("/api/admin/potential-contacts", requireAdmin, async (req,res)=>{
+  try{
+    const type=clean(req.query?.type,20).toLowerCase();
+    const search=clean(req.query?.search,255);
+    const where=[]; const params=[];
+    if(["supplier","buyer"].includes(type)){where.push("contact_type=?");params.push(type)}
+    if(search){where.push("(company_name LIKE ? OR email LIKE ? OR mobile LIKE ?)");const q="%"+search+"%";params.push(q,q,q)}
+    const sql="SELECT company_name,email,mobile,contact_type,status,source,created_at,last_activity_at FROM potential_contacts "+(where.length?"WHERE "+where.join(" AND "):"")+" ORDER BY last_activity_at DESC, created_at DESC LIMIT 500";
+    const [contacts]=await pool.execute(sql,params);
+    res.json({ok:true,total:contacts.length,contacts});
+  }catch(error){console.error("Potential contacts load failed:",error);res.status(500).json({error:"Could not load potential contacts."})}
+});
+
 app.post("/api/admin/invite", requireAdmin, async (req,res)=>{
   const recipientEmail=clean(req.body?.recipientEmail,255).toLowerCase();
   const recipientName=clean(req.body?.recipientName,120);
