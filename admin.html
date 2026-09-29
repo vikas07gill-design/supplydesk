@@ -97,6 +97,7 @@
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
         <button id="potentialBulkImportBtn" class="primary" onclick="importPotentialContacts()">1. Import & Save to Database</button>
         <button id="potentialBulkSendBtn" onclick="sendPotentialBulkInvites()" disabled>2. Send Invitation Emails</button>
+        <button id="potentialBulkWhatsAppBtn" onclick="preparePotentialBulkWhatsApp()" disabled>3. Bulk WhatsApp</button>
       </div>
       <div id="potentialBulkStatus" class="muted" style="margin-top:10px"></div>
     </div>
@@ -306,7 +307,7 @@ async function importPotentialContacts(){
   btn.disabled=true; status.textContent="Importing contacts into Potential Database...";
   try{
     const data=await api("/api/admin/potential-contacts/import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({inviteType:document.getElementById("potentialBulkType").value,recipients:rows})});
-    window.potentialBulkSendRows=data.contacts||[]; send.disabled=!window.potentialBulkSendRows.length;
+    window.potentialBulkSendRows=data.contacts||[]; send.disabled=!window.potentialBulkSendRows.length; document.getElementById("potentialBulkWhatsAppBtn").disabled=!window.potentialBulkSendRows.some(r=>String(r.phone||"").replace(/\\D/g,"").length>=8);
     status.innerHTML="<strong>Import complete:</strong> "+data.added+" new contacts saved, "+data.skipped+" skipped.";
     document.getElementById("potentialBulkPreview").textContent=data.added+" new contacts saved. Click “2. Send Invitation Emails” when you are ready.";
     await loadPotentialDb();
@@ -321,9 +322,27 @@ async function sendPotentialBulkInvites(){
   try{
     const data=await api("/api/admin/bulk-invite",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({inviteType:document.getElementById("potentialBulkType").value,delayMs:Number(document.getElementById("potentialBulkDelay").value),recipients:rows})});
     status.innerHTML="<strong>Email outreach complete:</strong> "+data.sent+" sent, "+data.skipped+" skipped, "+data.failed+" failed.";
-    window.potentialBulkSendRows=[]; await loadPotentialDb();
+    window.potentialBulkSendRows=[]; document.getElementById("potentialBulkWhatsAppBtn").disabled=true; await loadPotentialDb();
   }catch(e){status.textContent=e.message}
   finally{btn.disabled=false}
+}
+function preparePotentialBulkWhatsApp(){
+  const rows=window.potentialBulkSendRows||[];
+  const status=document.getElementById("potentialBulkStatus");
+  if(!rows.length){status.textContent="Import new contacts first.";return}
+  const withMobile=rows.filter(r=>String(r.phone||"").replace(/\\D/g,"").length>=8);
+  if(!withMobile.length){status.textContent="No valid mobile numbers found for WhatsApp.";return}
+  if(!confirm("Prepare WhatsApp outreach for "+withMobile.length+" contacts? WhatsApp requires the final Send action inside WhatsApp."))return;
+  const textMsg="Hello, we invited you to join SupplyDesk, a global B2B sourcing platform. Explore: https://supplydesk.in/";
+  let opened=0;
+  withMobile.forEach((r,i)=>{
+    const digits=String(r.phone||"").replace(/\\D/g,"");
+    setTimeout(()=>{
+      const w=window.open("https://wa.me/"+encodeURIComponent(digits)+"?text="+encodeURIComponent(textMsg),"_blank","noopener");
+      if(w)opened++;
+    },i*700);
+  });
+  status.innerHTML="<strong>WhatsApp prepared:</strong> "+withMobile.length+" contacts. If the browser blocks multiple tabs, use the WhatsApp button beside each contact. Messages are not auto-sent; WhatsApp requires the final Send action.";
 }
 function openPotentialDb(){
   if(!role()){document.getElementById("message").textContent="Sign in as Admin or Super Admin.";return}
