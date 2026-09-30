@@ -765,7 +765,7 @@ document.getElementById("productForm").onsubmit=async e=>{
       s.className="notice error";s.classList.remove("hidden");btn.disabled=false;btn.textContent=id?"Submit Changes for Review":"Submit for Review";return;
     }
     try{
-      const req=await api("/api/supplier-dashboard/product-taxonomy-requests",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({product_name:productName,category:"Other",subcategory:"Other",description:description+" | Supplier category: "+otherCategory+" | Supplier sub-category: "+otherSubcategory})});
+      const req=await api("/api/supplier-dashboard/product-taxonomy-requests",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({product_id:id||"",product_name:productName,category:"Other",subcategory:"Other",supplier_category:otherCategory,supplier_subcategory:otherSubcategory,description})});
       s.textContent=req.message;s.className="notice success";s.classList.remove("hidden");btn.disabled=false;btn.textContent=id?"Submit Changes for Review":"Submit for Review";return;
     }catch(e){s.textContent=e.message;s.className="notice error";s.classList.remove("hidden");btn.disabled=false;btn.textContent=id?"Submit Changes for Review":"Submit for Review";return;}
   }
