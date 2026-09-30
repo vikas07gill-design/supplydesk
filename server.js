@@ -2067,7 +2067,7 @@ async function ensureDashboardSchema() {
       location VARCHAR(255) NULL,
       contact_type ENUM('supplier','buyer') NOT NULL DEFAULT 'supplier',
       source VARCHAR(80) NOT NULL DEFAULT 'bulk_onboarding',
-      status ENUM('invited','interested','registered','active','unsubscribed') NOT NULL DEFAULT 'invited',
+      status ENUM('new','invited','interested','registered','active','unsubscribed') NOT NULL DEFAULT 'new',
       last_activity_at DATETIME NULL,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -2202,6 +2202,14 @@ async function ensureDashboardSchema() {
   for (const sql of statements) {
     await pool.query(sql);
   }
+  // Potential contacts imported into the database start as "new".
+  // Older production tables may still have the legacy ENUM without "new".
+  try {
+    await pool.query("ALTER TABLE potential_contacts MODIFY COLUMN status ENUM('new','invited','interested','registered','active','unsubscribed') NOT NULL DEFAULT 'new'");
+  } catch (e) {
+    console.error("Potential contacts status migration failed:", e?.message || e);
+  }
+
   // Duplicate detection uses ASCII SHA-256 keys, not collation-sensitive email/mobile comparisons.
   // This avoids production failures when legacy columns use different MySQL collations.
   for (const [column, ddl] of [
