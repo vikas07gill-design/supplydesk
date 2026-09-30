@@ -3,6 +3,7 @@ DELETE FROM buyer_enquiries;
 DELETE FROM buyer_email_otps;
 DELETE FROM buyer_dashboard_tokens;
 DELETE FROM buyers;
+DELETE FROM supplier_products WHERE product_name='Plastic Storage Container';
 DELETE FROM supplier_products WHERE id='00000000-0000-4000-8000-000000000003';
 DELETE FROM supplier_profiles WHERE id='00000000-0000-4000-8000-000000000002';
 DELETE FROM supplier_verification WHERE application_id='00000000-0000-4000-8000-000000000001';
