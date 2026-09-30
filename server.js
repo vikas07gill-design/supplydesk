@@ -1529,16 +1529,36 @@ app.patch("/api/supplier-dashboard/products/:id", requireSupplierDashboard, asyn
 });
 
 app.post("/api/supplier-dashboard/product-taxonomy-requests", requireSupplierDashboard, async (req,res) => {
+  const productId=clean(req.body?.product_id,80)||null;
   const productName=clean(req.body?.product_name,255);
   const category=clean(req.body?.category,180);
   const subcategory=clean(req.body?.subcategory,180);
+  const supplierCategory=clean(req.body?.supplier_category,180);
+  const supplierSubcategory=clean(req.body?.supplier_subcategory,180);
   const description=clean(req.body?.description,3000)||null;
-  if(!productName||!category||!subcategory) return res.status(400).json({error:"Product name, category and sub-category are required."});
+  if(!productName||!supplierCategory||!supplierSubcategory) return res.status(400).json({error:"Product name, your category and your sub-category are required."});
   if(category!=="Other" || subcategory!=="Other") return res.status(400).json({error:"Taxonomy requests are only required when Other is selected."});
   try{
-    const id=crypto.randomUUID();
-    await pool.execute("INSERT INTO product_taxonomy_requests (id,supplier_id,product_name,requested_category,requested_subcategory,description,status) VALUES (?,?,?,?,?,?, 'pending')",[id,req.supplier.id,productName,category,subcategory,description]);
-    res.status(201).json({ok:true,id,message:"Product submitted to SupplyDesk. Our team will review and create the appropriate common category and sub-category."});
+    let linkedProductId=productId;
+    if(productId){
+      const [result]=await pool.execute(
+        "UPDATE supplier_products SET category='Other',subcategory='Other',description=?,status='pending',admin_notes=? WHERE id=? AND supplier_id=?",
+        [description,"Taxonomy review requested: "+supplierCategory+" → "+supplierSubcategory,productId,req.supplier.id]
+      );
+      if(!result.affectedRows)return res.status(404).json({error:"Product not found."});
+    }else{
+      linkedProductId=crypto.randomUUID();
+      await pool.execute(
+        "INSERT INTO supplier_products (id,supplier_id,product_name,category,subcategory,description,market_scope,status,admin_notes) VALUES (?,?,?,?,?,?,?,'pending',?)",
+        [linkedProductId,req.supplier.id,productName,"Other","Other",description,"Both","Taxonomy review requested: "+supplierCategory+" → "+supplierSubcategory]
+      );
+    }
+    const requestId=crypto.randomUUID();
+    await pool.execute(
+      "INSERT INTO product_taxonomy_requests (id,supplier_id,product_id,product_name,requested_category,requested_subcategory,description,status) VALUES (?,?,?,?,?,?,?,'pending')",
+      [requestId,req.supplier.id,linkedProductId,productName,supplierCategory,supplierSubcategory,description]
+    );
+    res.status(201).json({ok:true,id:linkedProductId,requestId,message:"Product submitted for review. SupplyDesk will create the common category and sub-category before publication."});
   }catch(error){
     console.error("Product taxonomy request failed:",error);
     res.status(500).json({error:"Could not submit taxonomy request."});
@@ -2112,6 +2132,7 @@ async function ensureDashboardSchema() {
     `CREATE TABLE IF NOT EXISTS product_taxonomy_requests (
       id CHAR(36) PRIMARY KEY,
       supplier_id CHAR(36) NOT NULL,
+      product_id CHAR(36) NULL,
       product_name VARCHAR(255) NOT NULL,
       requested_category VARCHAR(180) NOT NULL,
       requested_subcategory VARCHAR(180) NOT NULL,
@@ -2123,6 +2144,7 @@ async function ensureDashboardSchema() {
       reviewed_at DATETIME NULL,
       reviewed_by VARCHAR(120) NULL,
       CONSTRAINT fk_taxonomy_request_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE,
+      CONSTRAINT fk_taxonomy_request_product FOREIGN KEY (product_id) REFERENCES supplier_products(id) ON DELETE SET NULL,
       INDEX idx_taxonomy_request_status (status, created_at),
       INDEX idx_taxonomy_request_supplier (supplier_id, created_at)
     ) ENGINE=InnoDB`,
@@ -2238,6 +2260,8 @@ async function ensureDashboardSchema() {
   for (const sql of statements) {
     await pool.query(sql);
   }
+  try { await pool.query("ALTER TABLE product_taxonomy_requests ADD COLUMN product_id CHAR(36) NULL"); } catch (e) { if (!["ER_DUP_FIELDNAME","ER_DUP_COLUMN"].includes(e?.code)) throw e; }
+  try { await pool.query("ALTER TABLE product_taxonomy_requests ADD INDEX idx_taxonomy_request_product (product_id)"); } catch (e) { if (!["ER_DUP_KEYNAME","ER_DUP_INDEX","ER_DUP_KEY"].includes(e?.code)) throw e; }
   // Older databases may already have potential_contacts without location.
   // Run the migration only after the table exists, so a fresh CI database can boot.
   try {
