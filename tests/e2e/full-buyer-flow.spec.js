@@ -20,6 +20,11 @@ test.describe("SupplyDesk full buyer enquiry flow", () => {
     const productId = seededProduct.id;
     expect(productId).toBeTruthy();
 
+    const detailResponse = await page.request.get("/api/products/" + encodeURIComponent(productId));
+    expect(detailResponse.status(), "Seeded product detail API must resolve").toBe(200);
+    const detailBody = await detailResponse.json();
+    expect(detailBody.product?.name).toBe("E2E Test Product");
+
     await page.goto("/product.html?id=" + encodeURIComponent(productId), { waitUntil: "domcontentloaded" });
     await expect(page.locator("#name")).toHaveText("E2E Test Product");
 
