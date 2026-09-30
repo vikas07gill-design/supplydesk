@@ -362,14 +362,15 @@ async function importPotentialContacts(){
   finally{btn.disabled=false}
 }
 async function sendPotentialBulkInvites(){
-  const rows=window.potentialBulkSendRows||[], status=document.getElementById("potentialBulkStatus"), btn=document.getElementById("potentialBulkSendBtn");
+  const rows=window.potentialBulkSendRows||[],status=document.getElementById("potentialBulkStatus"),btn=document.getElementById("potentialBulkSendBtn");
   if(!rows.length){status.textContent="Import new contacts first.";return}
   if(!confirm("Send SupplyDesk invitation emails to "+rows.length+" newly imported contacts?"))return;
-  btn.disabled=true; status.textContent="Sending invitation emails...";
+  btn.disabled=true;status.textContent="Sending invitation emails...";
   try{
-    const data=await api("/api/admin/bulk-invite",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({inviteType:document.getElementById("potentialBulkType").value,delayMs:Number(document.getElementById("potentialBulkDelay").value),recipients:rows})});
-    status.innerHTML="<strong>Email outreach complete:</strong> "+data.sent+" sent, "+data.skipped+" skipped, "+data.failed+" failed.";
-    window.potentialBulkSendRows=[]; document.getElementById("potentialBulkWhatsAppBtn").disabled=true; await loadPotentialDb();
+    const data=await api("/api/admin/potential-contacts/send-invites",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({inviteType:document.getElementById("potentialBulkType").value,delayMs:Number(document.getElementById("potentialBulkDelay").value),ids:rows.map(r=>r.id)})});
+    status.innerHTML="<strong>Email outreach complete:</strong> "+data.sent+" sent, "+data.failed+" failed.";
+    await loadPotentialDb();
+    if(data.failed)status.innerHTML+=" Please review failed rows below.";
   }catch(e){status.textContent=e.message}
   finally{btn.disabled=false}
 }
