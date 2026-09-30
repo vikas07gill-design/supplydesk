@@ -111,7 +111,8 @@ const catalog = {
   "Tools & Hardware": ["Hand Tools","Power Tools","Hardware"],
   "Metal Products": ["Steel Products","Aluminium Products","Fabricated Parts"],
   "Industrial Components": ["Bearings","Fasteners","Seals"],
-  "Manufacturing Services": ["Contract Manufacturing","Assembly","Fabrication"]
+  "Manufacturing Services": ["Contract Manufacturing","Assembly","Fabrication"],
+  "Other": ["Other"]
 };
 
 const categories = Object.keys(catalog);
@@ -1527,6 +1528,33 @@ app.patch("/api/supplier-dashboard/products/:id", requireSupplierDashboard, asyn
   res.json({ok:true,message:"Product changes submitted for review."});
 });
 
+app.post("/api/supplier-dashboard/product-taxonomy-requests", requireSupplierDashboard, async (req,res) => {
+  const productName=clean(req.body?.product_name,255);
+  const category=clean(req.body?.category,180);
+  const subcategory=clean(req.body?.subcategory,180);
+  const description=clean(req.body?.description,3000)||null;
+  if(!productName||!category||!subcategory) return res.status(400).json({error:"Product name, category and sub-category are required."});
+  if(category!=="Other" || subcategory!=="Other") return res.status(400).json({error:"Taxonomy requests are only required when Other is selected."});
+  try{
+    const id=crypto.randomUUID();
+    await pool.execute("INSERT INTO product_taxonomy_requests (id,supplier_id,product_name,requested_category,requested_subcategory,description,status) VALUES (?,?,?,?,?,?, 'pending')",[id,req.supplier.id,productName,category,subcategory,description]);
+    res.status(201).json({ok:true,id,message:"Product submitted to SupplyDesk. Our team will review and create the appropriate common category and sub-category."});
+  }catch(error){
+    console.error("Product taxonomy request failed:",error);
+    res.status(500).json({error:"Could not submit taxonomy request."});
+  }
+});
+
+app.get("/api/admin/product-taxonomy-requests", requireAdmin, async (req,res) => {
+  try{
+    const [rows]=await pool.execute("SELECT r.*, s.legal_name, s.trade_name, s.business_email FROM product_taxonomy_requests r JOIN supplier_profiles s ON s.id=r.supplier_id WHERE r.status='pending' ORDER BY r.created_at ASC");
+    res.json({requests:rows});
+  }catch(error){
+    console.error("Admin taxonomy request load failed:",error);
+    res.status(500).json({error:"Could not load taxonomy requests."});
+  }
+});
+
 app.delete("/api/supplier-dashboard/products/:id", requireSupplierDashboard, async (req,res) => {
   const [result]=await pool.execute("UPDATE supplier_products SET status='archived' WHERE id=? AND supplier_id=?",[clean(req.params.id,80),req.supplier.id]);
   if(!result.affectedRows) return res.status(404).json({error:"Product not found."});
@@ -2080,6 +2108,23 @@ async function ensureDashboardSchema() {
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_admin_invite_email (recipient_email, sent_at),
       INDEX idx_admin_invite_status (status, created_at)
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS product_taxonomy_requests (
+      id CHAR(36) PRIMARY KEY,
+      supplier_id CHAR(36) NOT NULL,
+      product_name VARCHAR(255) NOT NULL,
+      requested_category VARCHAR(180) NOT NULL,
+      requested_subcategory VARCHAR(180) NOT NULL,
+      description TEXT NULL,
+      status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+      admin_notes TEXT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      reviewed_at DATETIME NULL,
+      reviewed_by VARCHAR(120) NULL,
+      CONSTRAINT fk_taxonomy_request_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE,
+      INDEX idx_taxonomy_request_status (status, created_at),
+      INDEX idx_taxonomy_request_supplier (supplier_id, created_at)
     ) ENGINE=InnoDB`,
     `CREATE TABLE IF NOT EXISTS supplier_dashboard_tokens (
       id CHAR(36) PRIMARY KEY,
