@@ -290,6 +290,13 @@ header{background:rgba(5,20,35,.92);color:#fff;border-bottom:1px solid rgba(255,
 <div class="profile-grid">
 <div class="field"><label>Category *</label><select id="productCategory" required></select></div>
 <div class="field"><label>Sub-category *</label><select id="productSubcategory" required></select></div>
+<div id="otherTaxonomyFields" class="field full hidden">
+  <div class="notice" style="margin:0 0 10px">This product does not fit the current common taxonomy. Enter the category/sub-category you use. SupplyDesk will review it and create the common taxonomy if appropriate.</div>
+  <div class="profile-grid">
+    <div class="field"><label>Your Category Name *</label><input id="otherCategoryName" maxlength="180" placeholder="Example: Disposable Plastic Items"></div>
+    <div class="field"><label>Your Sub-category Name *</label><input id="otherSubcategoryName" maxlength="180" placeholder="Example: Plastic Trays"></div>
+  </div>
+</div>
 <div class="field"><label>MOQ</label><input id="productMoq" placeholder="Example: 500 pcs"></div>
 <div class="field"><label>Unit</label><input id="productUnit" placeholder="pcs / kg / ton / set"></div>
 <div class="field full"><label>Market</label><select id="productMarket"><option>Both</option><option>Domestic</option><option>International</option></select></div>
@@ -329,7 +336,8 @@ const catalog={
 "Tools & Hardware":["Hand Tools","Power Tools","Hardware"],
 "Metal Products":["Steel Products","Aluminium Products","Fabricated Parts"],
 "Industrial Components":["Bearings","Fasteners","Seals"],
-"Manufacturing Services":["Contract Manufacturing","Assembly","Fabrication"]
+"Manufacturing Services":["Contract Manufacturing","Assembly","Fabrication"],
+"Other":["Other"]
 };
 let dashboardData=null;
 
@@ -561,12 +569,59 @@ function toggleCompanyEditor(force){
   if(open)document.getElementById("pLegal")?.focus();
 }
 
+const taxonomyKeywords=[
+  {category:"Plastics & Packaging",subcategory:"Plastic Containers",words:["plastic container","storage container","food container","container box","plastic box","tupperware"]},
+  {category:"Plastics & Packaging",subcategory:"Plastic Bottles",words:["plastic bottle","pet bottle","hdpe bottle","bottle"]},
+  {category:"Plastics & Packaging",subcategory:"Packaging Films",words:["packaging film","stretch film","shrink film","ldpe film","poly film"]},
+  {category:"Plastics & Packaging",subcategory:"Plastic Components",words:["plastic component","plastic part","injection moulded part","injection molded part","plastic moulding","plastic molding"]},
+  {category:"Machinery",subcategory:"Injection Moulding Machines",words:["injection moulding machine","injection molding machine","plastic injection machine"]},
+  {category:"Machinery",subcategory:"CNC Machines",words:["cnc machine","cnc lathe","cnc milling"]},
+  {category:"Machinery",subcategory:"Packaging Machines",words:["packaging machine","packing machine","filling machine","sealing machine"]},
+  {category:"Electronics & Components",subcategory:"PCB",words:["pcb","printed circuit board"]},
+  {category:"Electronics & Components",subcategory:"Sensors",words:["sensor","proximity sensor","temperature sensor"]},
+  {category:"Automotive",subcategory:"Auto Components",words:["auto component","automotive component","car part","vehicle component","brake part"]},
+  {category:"Textiles & Apparel",subcategory:"Fabrics",words:["fabric","textile fabric","cotton fabric","polyester fabric"]},
+  {category:"Textiles & Apparel",subcategory:"Garments",words:["garment","t shirt","shirt","trouser","apparel"]},
+  {category:"Food & Agriculture",subcategory:"Food Ingredients",words:["food ingredient","spice","flavour","flavor","starch"]},
+  {category:"Chemicals",subcategory:"Industrial Chemicals",words:["industrial chemical","solvent","chemical raw material"]},
+  {category:"Consumer Products",subcategory:"Kitchenware",words:["kitchenware","kitchen utensil","cookware"]},
+  {category:"Construction Materials",subcategory:"Tiles & Surfaces",words:["tile","ceramic tile","floor tile","wall tile"]},
+  {category:"Tools & Hardware",subcategory:"Hand Tools",words:["hand tool","wrench","spanner","screwdriver","pliers"]},
+  {category:"Tools & Hardware",subcategory:"Power Tools",words:["power tool","drill machine","grinder","cutting machine"]},
+  {category:"Metal Products",subcategory:"Steel Products",words:["steel product","steel sheet","steel plate","steel coil"]},
+  {category:"Industrial Components",subcategory:"Bearings",words:["bearing","ball bearing","roller bearing"]},
+  {category:"Industrial Components",subcategory:"Fasteners",words:["fastener","bolt","nut","screw","washer"]},
+  {category:"Manufacturing Services",subcategory:"Contract Manufacturing",words:["contract manufacturing","contract manufacturer","private label manufacturing"]}
+];
+
 function fillCategorySelect(){
   const cat=document.getElementById("productCategory"),sub=document.getElementById("productSubcategory");
   cat.innerHTML=Object.keys(catalog).map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join("");
-  function fill(){sub.innerHTML=(catalog[cat.value]||[]).map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join("")}
+  function fill(){
+    sub.innerHTML=(catalog[cat.value]||[]).map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join("");
+    toggleOtherTaxonomyFields();
+  }
   cat.onchange=fill;fill();
 }
+function toggleOtherTaxonomyFields(){
+  const isOther=document.getElementById("productCategory")?.value==="Other";
+  const wrap=document.getElementById("otherTaxonomyFields");
+  if(wrap)wrap.classList.toggle("hidden",!isOther);
+}
+function suggestProductTaxonomy(){
+  const name=(document.getElementById("productName")?.value||"").trim().toLowerCase();
+  const desc=(document.getElementById("productDescription")?.value||"").trim().toLowerCase();
+  const text=name+" "+desc;
+  if(text.trim().length<3)return;
+  const hit=taxonomyKeywords
+    .map(x=>({...x,score:x.words.reduce((n,w)=>n+(text.includes(w)?(w.length>5?3:2):0),0)}))
+    .sort((a,b)=>b.score-a.score)[0];
+  if(!hit||hit.score<=0)return;
+  const cat=document.getElementById("productCategory"),sub=document.getElementById("productSubcategory");
+  cat.value=hit.category;cat.dispatchEvent(new Event("change"));
+  sub.value=hit.subcategory;
+}
+
 let productFormMode="add";
 function openProduct(product,mode){
   productFormMode=mode|| (product?"edit":"add");
@@ -581,6 +636,9 @@ function openProduct(product,mode){
   document.getElementById("productUnit").value=product?.unit||"";
   document.getElementById("productMarket").value=product?.market_scope||"Both";
   document.getElementById("productDescription").value=product?.description||"";
+  document.getElementById("otherCategoryName").value="";
+  document.getElementById("otherSubcategoryName").value="";
+  toggleOtherTaxonomyFields();
   document.getElementById("productImages").value="";
   document.getElementById("imagePreview").innerHTML=(product?.images||[]).filter(x=>x.status!=="archived").map(x=>'<img data-modal-image="'+esc(x.id)+'" data-product-id="'+esc(product.id)+'" alt="">').join("");
   hydrateModalImages(product?.id);
@@ -690,9 +748,28 @@ document.getElementById("verifyOtpBtn").onclick=async()=>{
   }
 };
 
+document.getElementById("productName").addEventListener("blur",suggestProductTaxonomy);
+document.getElementById("productDescription").addEventListener("blur",suggestProductTaxonomy);
+
 document.getElementById("productForm").onsubmit=async e=>{
   e.preventDefault();const id=document.getElementById("productId").value;const btn=document.getElementById("productBtn"),s=document.getElementById("productStatus");btn.disabled=true;btn.textContent="Saving...";
-  const body={product_name:document.getElementById("productName").value.trim(),category:document.getElementById("productCategory").value,subcategory:document.getElementById("productSubcategory").value,moq:document.getElementById("productMoq").value.trim(),unit:document.getElementById("productUnit").value.trim(),market_scope:document.getElementById("productMarket").value,description:document.getElementById("productDescription").value.trim()};
+  const productName=document.getElementById("productName").value.trim();
+  const selectedCategory=document.getElementById("productCategory").value;
+  const selectedSubcategory=document.getElementById("productSubcategory").value;
+  const description=document.getElementById("productDescription").value.trim();
+  const otherCategory=document.getElementById("otherCategoryName").value.trim();
+  const otherSubcategory=document.getElementById("otherSubcategoryName").value.trim();
+  if(selectedCategory==="Other"){
+    if(!otherCategory||!otherSubcategory){
+      s.textContent="Please enter your category and sub-category so SupplyDesk can review it.";
+      s.className="notice error";s.classList.remove("hidden");btn.disabled=false;btn.textContent=id?"Submit Changes for Review":"Submit for Review";return;
+    }
+    try{
+      const req=await api("/api/supplier-dashboard/product-taxonomy-requests",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({product_name:productName,category:"Other",subcategory:"Other",description:description+" | Supplier category: "+otherCategory+" | Supplier sub-category: "+otherSubcategory})});
+      s.textContent=req.message;s.className="notice success";s.classList.remove("hidden");btn.disabled=false;btn.textContent=id?"Submit Changes for Review":"Submit for Review";return;
+    }catch(e){s.textContent=e.message;s.className="notice error";s.classList.remove("hidden");btn.disabled=false;btn.textContent=id?"Submit Changes for Review":"Submit for Review";return;}
+  }
+  const body={product_name:productName,category:selectedCategory,subcategory:selectedSubcategory,moq:document.getElementById("productMoq").value.trim(),unit:document.getElementById("productUnit").value.trim(),market_scope:document.getElementById("productMarket").value,description};
   try{
     const d=await api(id?"/api/supplier-dashboard/products/"+id:"/api/supplier-dashboard/products",{method:id?"PATCH":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const productId=id||d.id;
