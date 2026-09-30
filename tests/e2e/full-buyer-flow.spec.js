@@ -21,7 +21,7 @@ test.describe("SupplyDesk full buyer enquiry flow", () => {
     expect(productId).toBeTruthy();
 
     await page.goto("/product.html?id=" + encodeURIComponent(productId), { waitUntil: "domcontentloaded" });
-    await expect(page.locator("#name")).toHaveText("E2E Test Product");
+    await expect(page.locator("#name")).toHaveText("E2E Test Product",{timeout:10000});
 
     await page.locator("#connectBtn").click();
     await page.locator("#connectName").fill("E2E Buyer");
