@@ -447,29 +447,57 @@ app.post("/api/admin/potential-contacts/import", requireAdmin, async (req,res)=>
   const recipients=Array.isArray(req.body?.recipients)?req.body.recipients.slice(0,500):[];
   if(!["supplier","buyer"].includes(inviteType)) return res.status(400).json({error:"Contact type must be supplier or buyer."});
   if(!recipients.length) return res.status(400).json({error:"At least one contact is required."});
-  const added=[]; let skipped=0;
-  try{
-    const seenEmail=new Set(), seenMobile=new Set();
-    for(const raw of recipients){
-      const email=clean(raw?.email,255).toLowerCase();
-      const name=clean(raw?.name,180);
-      const mobile=clean(raw?.phone,40);
-      const location=clean(raw?.location,255);
-      const mobileKey=mobile.replace(/\D/g,"");
-      if(!/^\S+@\S+\.\S+$/.test(email)||!name){skipped++;continue}
-      if(seenEmail.has(email)||(mobileKey&&seenMobile.has(mobileKey))){skipped++;continue}
-      seenEmail.add(email);if(mobileKey)seenMobile.add(mobileKey);
-      const emailKey=potentialKey(email), mobileHash=mobileKey?potentialMobileKey(mobileKey):"";
+  const added=[],skipped=[],failed=[];
+  const seenEmail=new Set(),seenMobile=new Set();
+  for(const raw of recipients){
+    const email=clean(raw?.email,255).toLowerCase();
+    const name=clean(raw?.name,180);
+    const mobile=clean(raw?.phone,40);
+    const location=clean(raw?.location,255);
+    const mobileKey=mobile.replace(/\D/g,"");
+    if(!/^\S+@\S+\.\S+$/.test(email)||!name){skipped.push({name,email,phone:mobile,reason:"Missing/invalid company or email"});continue}
+    if(seenEmail.has(email)||(mobileKey&&seenMobile.has(mobileKey))){skipped.push({name,email,phone:mobile,reason:"Duplicate email/mobile in this file"});continue}
+    seenEmail.add(email);if(mobileKey)seenMobile.add(mobileKey);
+    const emailKey=potentialKey(email),mobileHash=mobileKey?potentialMobileKey(mobileKey):"";
+    try{
       const [existing]=await pool.execute("SELECT id FROM potential_contacts WHERE email_key=? OR (?<>'' AND mobile_key=?) LIMIT 1",[emailKey,mobileHash,mobileHash]);
-      if(existing.length){skipped++;continue}
+      if(existing.length){skipped.push({name,email,phone:mobile,reason:"Already in Potential Database"});continue}
       const id=crypto.randomUUID();
       await pool.execute("INSERT INTO potential_contacts (id,company_name,email,email_key,mobile,mobile_key,location,contact_type,source,status,last_activity_at) VALUES (?,?,?,?,?,?,?,?,?, ?,NOW())",[id,name,email,emailKey,mobile,mobileHash,location,inviteType,"manual_import","new"]);
-      added.push({id,name,email,phone:mobile});
+      added.push({id,name,email,phone:mobile,location});
+    }catch(error){
+      console.error("Potential contact row import failed:",{email,code:error?.code,message:error?.message});
+      failed.push({name,email,phone:mobile,reason:(error?.message||error?.code||"Database insert failed").slice(0,300)});
     }
-    res.json({ok:true,added:added.length,skipped,contacts:added});
-  }catch(error){console.error("Potential contacts import failed:",error);res.status(500).json({error:"Could not import potential contacts."})}
+  }
+  res.json({ok:true,added:added.length,skipped:skipped.length,failed:failed.length,contacts:added,skippedRows:skipped,failedRows:failed});
 });
 
+app.post("/api/admin/potential-contacts/send-invites", requireAdmin, async (req,res)=>{
+  const ids=Array.isArray(req.body?.ids)?req.body.ids.slice(0,100):[];
+  const inviteType=clean(req.body?.inviteType,30).toLowerCase();
+  const delayMs=Math.min(Math.max(Number(req.body?.delayMs||2500),1000),10000);
+  if(!["supplier","buyer"].includes(inviteType)) return res.status(400).json({error:"Contact type must be supplier or buyer."});
+  if(!ids.length) return res.status(400).json({error:"No potential contacts selected."});
+  const results=[];let sent=0,failed=0;
+  const defaultMessage="Looking for more customers and new business opportunities?\n\nSupplyDesk is a global B2B sourcing platform helping businesses connect with buyers and suppliers for international trade. List your business, showcase your products or services, and get discovered by potential customers.\n\nWhy join SupplyDesk?\n• Get discovered by potential buyers\n• Showcase your business and products professionally\n• Receive business enquiries through SupplyDesk\n• Expand your market reach and sales opportunities\n\nExplore SupplyDesk: "+String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"")+"/\n\nCreate your business presence with SupplyDesk while the launch offer is available.";
+  for(let i=0;i<ids.length;i++){
+    const id=clean(ids[i],80);
+    try{
+      const [[contact]]=await pool.execute("SELECT id,company_name,email,mobile,location,contact_type FROM potential_contacts WHERE id=? LIMIT 1",[id]);
+      if(!contact){failed++;results.push({id,status:"failed",reason:"Contact not found"});continue}
+      if(contact.contact_type!==inviteType){failed++;results.push({id,email:contact.email,status:"failed",reason:"Contact type mismatch"});continue}
+      const info=await sendAdminInvitation({recipientEmail:contact.email,recipientName:contact.company_name,inviteType,message:defaultMessage});
+      await pool.execute("UPDATE potential_contacts SET status='invited',last_activity_at=NOW() WHERE id=?",[id]);
+      await pool.execute("INSERT INTO admin_invitation_log (id,recipient_name,recipient_email,invite_type,status,message_id,sent_at,error_text) VALUES (?,?,?,?,?,?,NOW(),NULL)",[crypto.randomUUID(),contact.company_name,contact.email,inviteType,"sent",info.messageId||null]);
+      sent++;results.push({id,name:contact.company_name,email:contact.email,phone:contact.mobile,status:"sent"});
+    }catch(error){
+      failed++;results.push({id,status:"failed",reason:(error?.message||error?.code||"Send failed").slice(0,300)});
+    }
+    if(i<ids.length-1)await new Promise(resolve=>setTimeout(resolve,delayMs));
+  }
+  res.json({ok:true,total:ids.length,sent,failed,results});
+});
 app.get("/api/admin/potential-contacts", requireAdmin, async (req,res)=>{
   try{
     const type=clean(req.query?.type,20).toLowerCase();
@@ -2067,7 +2095,7 @@ async function ensureDashboardSchema() {
       location VARCHAR(255) NULL,
       contact_type ENUM('supplier','buyer') NOT NULL DEFAULT 'supplier',
       source VARCHAR(80) NOT NULL DEFAULT 'bulk_onboarding',
-      status ENUM('new','invited','interested','registered','active','unsubscribed') NOT NULL DEFAULT 'new',
+      status VARCHAR(30) NOT NULL DEFAULT 'new',
       last_activity_at DATETIME NULL,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -2205,7 +2233,7 @@ async function ensureDashboardSchema() {
   // Potential contacts imported into the database start as "new".
   // Older production tables may still have the legacy ENUM without "new".
   try {
-    await pool.query("ALTER TABLE potential_contacts MODIFY COLUMN status ENUM('new','invited','interested','registered','active','unsubscribed') NOT NULL DEFAULT 'new'");
+    await pool.query("ALTER TABLE potential_contacts MODIFY COLUMN status VARCHAR(30) NOT NULL DEFAULT 'new'");
   } catch (e) {
     console.error("Potential contacts status migration failed:", e?.message || e);
   }
