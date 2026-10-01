@@ -402,23 +402,96 @@ async function requireSuperAdmin(req,res,next){
   }catch(error){console.error("Super Admin auth failed:",error);res.status(500).json({error:"Could not authenticate Super Admin."});}
 }
 
-app.post("/api/admin/login", async (req,res)=>{
+const adminLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false,
+  message: { error: "Too many sign-in attempts. Please wait 15 minutes and try again." }
+});
+const scryptAsync=(pw,salt)=>new Promise((resolve,reject)=>crypto.scrypt(pw,salt,64,(e,k)=>e?reject(e):resolve(k.toString("hex"))));
+async function hashAdminPassword(password){const salt=crypto.randomBytes(16).toString("hex");return {salt,hash:await scryptAsync(password,salt)};}
+async function verifyAdminPassword(password,salt,hash){try{const h=await scryptAsync(password,salt);return safeEqual(h,hash);}catch{return false;}}
+const DUMMY_SALT=crypto.randomBytes(16).toString("hex");
+const envAdminIds=()=>[process.env.ADMIN_ID,process.env.SUPER_ADMIN_ID,process.env.TEST_ADMIN_ID].map(x=>String(x||"").trim().toLowerCase()).filter(Boolean);
+
+app.post("/api/admin/login", adminLoginLimiter, async (req,res)=>{
   const adminId=clean(req.body?.adminId,120);
   const password=String(req.body?.password||"");
   const normalId=String(process.env.ADMIN_ID||"").trim();
   const normalPassword=String(process.env.ADMIN_PASSWORD||"");
   const superId=String(process.env.SUPER_ADMIN_ID||"").trim();
   const superPassword=String(process.env.SUPER_ADMIN_PASSWORD||"");
-  let role=null;
-  if(superId && safeEqual(adminId,superId) && safeEqual(password,superPassword)) role="super_admin";
-  else if(normalId && safeEqual(adminId,normalId) && safeEqual(password,normalPassword)) role="admin";
-  else return res.status(401).json({error:"Invalid Admin ID or password."});
-  const rawToken=crypto.randomBytes(32).toString("hex");
-  await pool.execute("INSERT INTO admin_sessions (id,token_hash,role,admin_id,expires_at) VALUES (?,?,?,?,DATE_ADD(NOW(),INTERVAL 12 HOUR))",[crypto.randomUUID(),tokenHash(rawToken),role,adminId]);
-  res.json({ok:true,token:rawToken,role,expiresInHours:12});
+  const testId=String(process.env.TEST_ADMIN_ID||"").trim();
+  const testPassword=String(process.env.TEST_ADMIN_PASSWORD||"");
+  let role=null, sessionAdminId=adminId;
+  try{
+    if(superId && safeEqual(adminId,superId) && safeEqual(password,superPassword)) role="super_admin";
+    else if(normalId && safeEqual(adminId,normalId) && safeEqual(password,normalPassword)) role="admin";
+    else if(testId && testPassword && safeEqual(adminId,testId) && safeEqual(password,testPassword)) role="tester";
+    else if(adminId){
+      // Team accounts created by the Super Admin (stored with a salted scrypt hash).
+      const [[u]]=await pool.execute("SELECT id,admin_id,role,password_salt,password_hash,active FROM admin_users WHERE admin_id=? LIMIT 1",[adminId]);
+      const ok=await verifyAdminPassword(password,u?u.password_salt:DUMMY_SALT,u?u.password_hash:"0".repeat(128));
+      if(u && ok && u.active){role=u.role;sessionAdminId=u.admin_id;await pool.execute("UPDATE admin_users SET last_login_at=NOW() WHERE id=?",[u.id]);}
+    }
+    if(!role)return res.status(401).json({error:"Invalid Admin ID or password."});
+    const rawToken=crypto.randomBytes(32).toString("hex");
+    await pool.execute("INSERT INTO admin_sessions (id,token_hash,role,admin_id,expires_at) VALUES (?,?,?,?,DATE_ADD(NOW(),INTERVAL 12 HOUR))",[crypto.randomUUID(),tokenHash(rawToken),role,sessionAdminId]);
+    res.json({ok:true,token:rawToken,role,adminId:sessionAdminId,expiresInHours:12});
+  }catch(error){console.error("Admin login failed:",error);res.status(500).json({error:"Could not sign in. Please try again."});}
 });
 
-app.post("/api/admin/test-email", requireAdmin, async (req,res)=>{
+// Diagnostic tools (test mail, test OTP, DB check) are limited to the Test ID and Super Admin.
+async function requireTester(req,res,next){
+  try{
+    const session=await getAdminSession(req);
+    if(!session)return res.status(401).json({error:"Unauthorized"});
+    if(!["tester","super_admin"].includes(session.role))return res.status(403).json({error:"Test tools are available only to the Test Admin account."});
+    req.admin=session; next();
+  }catch(error){console.error("Tester auth failed:",error);res.status(500).json({error:"Could not authenticate."});}
+}
+
+// Team management (Super Admin only).
+const ADMIN_ID_RE=/^[A-Za-z0-9._@-]{3,60}$/;
+app.get("/api/super-admin/team", requireSuperAdmin, async (req,res)=>{
+  try{
+    const [users]=await pool.execute("SELECT id,admin_id,display_name,role,active,created_by,created_at,last_login_at FROM admin_users ORDER BY created_at DESC LIMIT 200");
+    res.json({users,envTestAccount:Boolean(process.env.TEST_ADMIN_ID&&process.env.TEST_ADMIN_PASSWORD)});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not load team."});}
+});
+app.post("/api/super-admin/team", requireSuperAdmin, async (req,res)=>{
+  const adminId=clean(req.body?.adminId,60),displayName=clean(req.body?.displayName,180)||null,role=clean(req.body?.role,20),password=String(req.body?.password||"");
+  if(!ADMIN_ID_RE.test(adminId))return res.status(400).json({error:"Admin ID must be 3-60 characters: letters, numbers, . _ @ -"});
+  if(!["admin","tester"].includes(role))return res.status(400).json({error:"Role must be Admin or Test Admin."});
+  if(password.length<10||password.length>200)return res.status(400).json({error:"Password must be at least 10 characters."});
+  if(envAdminIds().includes(adminId.toLowerCase()))return res.status(409).json({error:"This ID is reserved. Choose another."});
+  try{
+    const [[dup]]=await pool.execute("SELECT id FROM admin_users WHERE admin_id=? LIMIT 1",[adminId]);
+    if(dup)return res.status(409).json({error:"This Admin ID already exists."});
+    const {salt,hash}=await hashAdminPassword(password);
+    const id=crypto.randomUUID();
+    await pool.execute("INSERT INTO admin_users (id,admin_id,display_name,role,password_salt,password_hash,active,created_by,password_changed_at) VALUES (?,?,?,?,?,?,1,?,NOW())",[id,adminId,displayName,role,salt,hash,req.admin.admin_id]);
+    res.status(201).json({ok:true,id});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not create the account."});}
+});
+app.patch("/api/super-admin/team/:id", requireSuperAdmin, async (req,res)=>{
+  const id=clean(req.params.id,80),sets=[],params=[];let endSessions=false;
+  try{
+    const [[u]]=await pool.execute("SELECT id,admin_id FROM admin_users WHERE id=?",[id]);
+    if(!u)return res.status(404).json({error:"Account not found."});
+    if(typeof req.body?.active==="boolean"){sets.push("active=?");params.push(req.body.active?1:0);if(!req.body.active)endSessions=true;}
+    if(req.body?.role!==undefined){const role=clean(req.body.role,20);if(!["admin","tester"].includes(role))return res.status(400).json({error:"Invalid role."});sets.push("role=?");params.push(role);endSessions=true;}
+    if(req.body?.displayName!==undefined){sets.push("display_name=?");params.push(clean(req.body.displayName,180)||null);}
+    if(req.body?.password!==undefined){
+      const pw=String(req.body.password);if(pw.length<10||pw.length>200)return res.status(400).json({error:"Password must be at least 10 characters."});
+      const {salt,hash}=await hashAdminPassword(pw);sets.push("password_salt=?","password_hash=?","password_changed_at=NOW()");params.push(salt,hash);endSessions=true;
+    }
+    if(!sets.length)return res.status(400).json({error:"Nothing to update."});
+    await pool.execute("UPDATE admin_users SET "+sets.join(",")+" WHERE id=?",[...params,id]);
+    if(endSessions)await pool.execute("DELETE FROM admin_sessions WHERE admin_id=?",[u.admin_id]);
+    res.json({ok:true});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not update the account."});}
+});
+
+app.post("/api/admin/test-email", requireTester, async (req,res)=>{
   const recipient=clean(req.body?.recipient,255).toLowerCase() || String(process.env.SMTP_USER||"").trim().toLowerCase();
   if(!/^\S+@\S+\.\S+$/.test(recipient)) return res.status(400).json({error:"A valid test email recipient is required."});
   if(!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) {
@@ -638,7 +711,7 @@ app.post("/api/admin/bulk-invite", requireAdmin, async (req,res)=>{
   res.json({ok:true,total:recipients.length,sent,skipped,failed,remaining:remaining===null?null:Math.max(remaining-sent-skipped,0),results});
 });
 
-app.get("/api/admin/test-connection-storage", requireAdmin, async (req,res)=>{
+app.get("/api/admin/test-connection-storage", requireTester, async (req,res)=>{
   try{
     const [[table]] = await pool.query("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='connect_requests'");
     if(!table) return res.status(500).json({ok:false,error:"connect_requests table does not exist in the active database."});
@@ -653,7 +726,7 @@ app.get("/api/admin/test-connection-storage", requireAdmin, async (req,res)=>{
   }
 });
 
-app.post("/api/admin/test-dashboard-otp", requireAdmin, async (req,res)=>{
+app.post("/api/admin/test-dashboard-otp", requireTester, async (req,res)=>{
   const lookup=clean(req.body?.supplierId,255);
   if(!lookup)return res.status(400).json({error:"Supplier ID or registered business email is required."});
   try{
@@ -673,7 +746,7 @@ app.post("/api/admin/test-dashboard-otp", requireAdmin, async (req,res)=>{
   }
 });
 
-app.post("/api/admin/test-supplier-email", requireAdmin, async (req,res)=>{
+app.post("/api/admin/test-supplier-email", requireTester, async (req,res)=>{
   const supplierId=clean(req.body?.supplierId,80);
   if(!supplierId)return res.status(400).json({error:"Supplier ID is required."});
   try{
@@ -2432,6 +2505,7 @@ async function ensureDashboardSchema() {
   await ensureConnectRequestsTable();
   await ensureBuyerSchema();
   await ensureRequirementSchema();
+  await ensureAdminAuthSchema();
 
   // Bring older production databases up to the current launch schema.
   try { await pool.query("ALTER TABLE supplier_profiles ADD COLUMN profile_details_json TEXT NULL"); }
@@ -2445,6 +2519,14 @@ async function ensureDashboardSchema() {
   }
 }
 
+
+async function ensureAdminAuthSchema() {
+  await pool.query("CREATE TABLE IF NOT EXISTS admin_sessions (id CHAR(36) PRIMARY KEY, token_hash CHAR(64) NOT NULL UNIQUE, role ENUM('admin','super_admin','tester') NOT NULL, admin_id VARCHAR(120) NOT NULL, expires_at DATETIME NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, last_used_at DATETIME NULL, INDEX idx_admin_session_expiry (expires_at), INDEX idx_admin_session_role (role)) ENGINE=InnoDB");
+  await pool.query("ALTER TABLE admin_sessions MODIFY role ENUM('admin','super_admin','tester') NOT NULL");
+  try { await pool.query("ALTER TABLE admin_sessions ADD INDEX idx_admin_session_admin (admin_id)"); }
+  catch (e) { if(!["ER_DUP_KEYNAME"].includes(e?.code)) throw e; }
+  await pool.query("CREATE TABLE IF NOT EXISTS admin_users (id CHAR(36) PRIMARY KEY, admin_id VARCHAR(120) NOT NULL, display_name VARCHAR(180) NULL, role ENUM('admin','tester') NOT NULL DEFAULT 'admin', password_salt CHAR(32) NOT NULL, password_hash CHAR(128) NOT NULL, active TINYINT(1) NOT NULL DEFAULT 1, created_by VARCHAR(120) NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, last_login_at DATETIME NULL, password_changed_at DATETIME NULL, UNIQUE KEY uq_admin_user_id (admin_id)) ENGINE=InnoDB");
+}
 
 async function ensureRequirementSchema() {
   await pool.execute("CREATE TABLE IF NOT EXISTS buyer_requirements (id CHAR(36) PRIMARY KEY, buyer_id CHAR(36) NOT NULL, requirement_type ENUM('product','raw_material','machinery','service','custom') NOT NULL DEFAULT 'product', title VARCHAR(255) NOT NULL, category VARCHAR(180) NULL, subcategory VARCHAR(180) NULL, description TEXT NOT NULL, quantity VARCHAR(120) NULL, unit VARCHAR(80) NULL, target_price DECIMAL(18,4) NULL, currency VARCHAR(10) NOT NULL DEFAULT 'USD', delivery_country VARCHAR(120) NULL, delivery_city VARCHAR(150) NULL, required_by DATE NULL, market_scope ENUM('Domestic','International','Both') NOT NULL DEFAULT 'Both', status ENUM('open','closed','cancelled') NOT NULL DEFAULT 'open', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NULL, CONSTRAINT fk_requirement_buyer FOREIGN KEY (buyer_id) REFERENCES buyers(id) ON DELETE CASCADE, INDEX idx_requirement_buyer (buyer_id, created_at), INDEX idx_requirement_match (status, category, subcategory, created_at)) ENGINE=InnoDB");
