@@ -243,6 +243,24 @@ CREATE TABLE IF NOT EXISTS buyer_email_otps (
   INDEX idx_buyer_email_otp_token (verification_token_hash)
 ) ENGINE=InnoDB;
 
+-- connect_requests is created here so this file also works on a fresh database
+CREATE TABLE IF NOT EXISTS connect_requests (
+  id CHAR(36) PRIMARY KEY,
+  supplier_id CHAR(36) NOT NULL,
+  customer_name VARCHAR(180) NOT NULL,
+  customer_email VARCHAR(255) NOT NULL,
+  customer_phone VARCHAR(80) NULL,
+  product_name VARCHAR(255) NULL,
+  source_action ENUM('phone','email','contact') NOT NULL DEFAULT 'contact',
+  message TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_connect_supplier
+    FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id)
+    ON DELETE CASCADE,
+  INDEX idx_connect_supplier (supplier_id, created_at),
+  INDEX idx_connect_customer (customer_email, created_at)
+) ENGINE=InnoDB;
+
 ALTER TABLE connect_requests ADD COLUMN enquiry_id CHAR(36) NULL;
 ALTER TABLE connect_requests ADD INDEX idx_connect_enquiry (enquiry_id);
 ALTER TABLE connect_requests ADD CONSTRAINT fk_connect_enquiry

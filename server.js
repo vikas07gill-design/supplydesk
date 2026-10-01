@@ -910,15 +910,17 @@ app.post("/api/buyer-dashboard/logout", requireBuyerDashboard, async(req,res)=>{
 app.post("/api/buyer-email/request-otp", connectLimiter, async (req,res)=>{
   const email=clean(req.body?.email,255).toLowerCase();
   if(!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({error:"Please enter a valid email address."});
-  if(!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) return res.status(503).json({error:"Email verification service is not configured yet."});
+  const e2eMode=String(process.env.E2E_TEST_MODE||"").toLowerCase()==="true";
+  const e2eKey=clean(req.get("x-e2e-key"),256);
+  const configuredE2eKey=clean(process.env.E2E_TEST_KEY,256);
+  const authorizedE2e=e2eMode && configuredE2eKey && safeEqual(e2eKey,configuredE2eKey);
+  // test mode returns the code in the response, so it must not need SMTP (CI has none)
+  if(!authorizedE2e && (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM)) return res.status(503).json({error:"Email verification service is not configured yet."});
   const otp=String(crypto.randomInt(100000,1000000));
   try{
     await pool.execute("UPDATE buyer_email_otps SET expires_at=NOW() WHERE email=? AND verified_at IS NULL AND expires_at>NOW()",[email]);
     await pool.execute("INSERT INTO buyer_email_otps (id,email,otp_hash,expires_at) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 10 MINUTE))",[crypto.randomUUID(),email,hashToken(otp)]);
-    const e2eMode=String(process.env.E2E_TEST_MODE||"").toLowerCase()==="true";
-    const e2eKey=clean(req.get("x-e2e-key"),256);
-    const configuredE2eKey=clean(process.env.E2E_TEST_KEY,256);
-    if(e2eMode && configuredE2eKey && safeEqual(e2eKey,configuredE2eKey)){
+    if(authorizedE2e){
       return res.json({ok:true,message:"Test verification code created.",expiresInMinutes:10,testOtp:otp});
     }
     await mailer.sendMail({from:process.env.SMTP_FROM,to:email,subject:"SupplyDesk: Verify your email",text:["Your SupplyDesk email verification code is:","",otp,"","This code is valid for 10 minutes.","","If you did not request this code, you can ignore this email.","","SupplyDesk"].join("\n")});
@@ -1198,7 +1200,7 @@ app.post("/api/supplier-update/request", supplierUpdateLimiter, async (req, res)
       "INSERT INTO supplier_update_tokens (id, supplier_id, token_hash, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 30 MINUTE))",
       [crypto.randomUUID(), supplier.id, hashToken(rawToken)]
     );
-    const origin = String(process.env.PUBLIC_ORIGIN || "").replace(/\/$/, "");
+    const origin = String(process.env.PUBLIC_ORIGIN || "https://supplydesk.in").replace(/\/$/, "");
     const link = origin + "/supplier-update.html?token=" + encodeURIComponent(rawToken);
     await mailer.sendMail({
       from: process.env.SMTP_FROM,
@@ -1226,10 +1228,11 @@ app.get("/api/supplier-update/:token", async (req, res) => {
   try {
     const tokenHash = hashToken(clean(req.params.token, 128));
     const [[row]] = await pool.execute(
-      "SELECT t.id AS token_id, t.expires_at, t.used_at, s.id, s.legal_name, s.trade_name, s.business_type, s.country, s.city, s.address, s.business_email, s.business_phone, s.contact_person, s.designation, s.website, s.category, s.subcategory FROM supplier_update_tokens t JOIN supplier_profiles s ON s.id = t.supplier_id WHERE t.token_hash = ? AND s.verified = 1 AND s.published = 1",
+      "SELECT t.id AS token_id, (t.expires_at > NOW()) AS not_expired, t.used_at, s.id, s.legal_name, s.trade_name, s.business_type, s.country, s.city, s.address, s.business_email, s.business_phone, s.contact_person, s.designation, s.website, s.category, s.subcategory FROM supplier_update_tokens t JOIN supplier_profiles s ON s.id = t.supplier_id WHERE t.token_hash = ? AND s.verified = 1 AND s.published = 1",
       [tokenHash]
     );
-    if (!row || row.used_at || new Date(row.expires_at).getTime() < Date.now()) return res.status(410).json({ error: "This update link has expired or has already been used." });
+    // expiry is checked in SQL: comparing a DATETIME in JS depends on the Node/DB timezones matching
+    if (!row || row.used_at || !row.not_expired) return res.status(410).json({ error: "This update link has expired or has already been used." });
     res.json({ supplier: {
       id: row.id, legalName: row.legal_name, tradeName: row.trade_name, businessType: row.business_type,
       country: row.country, city: row.city, address: row.address, email: row.business_email,
@@ -1254,10 +1257,10 @@ app.post("/api/supplier-update/:token", supplierUpdateLimiter,
     const tokenHash = hashToken(clean(req.params.token, 128));
     try {
       const [[supplier]] = await pool.execute(
-        "SELECT t.id AS token_id, t.used_at, t.expires_at, s.* FROM supplier_update_tokens t JOIN supplier_profiles s ON s.id=t.supplier_id WHERE t.token_hash=? AND s.verified=1 AND s.published=1",
+        "SELECT t.id AS token_id, t.used_at, (t.expires_at > NOW()) AS not_expired, s.* FROM supplier_update_tokens t JOIN supplier_profiles s ON s.id=t.supplier_id WHERE t.token_hash=? AND s.verified=1 AND s.published=1",
         [tokenHash]
       );
-      if (!supplier || supplier.used_at || new Date(supplier.expires_at).getTime() < Date.now()) return res.status(410).json({ error: "This update link has expired or has already been used." });
+      if (!supplier || supplier.used_at || !supplier.not_expired) return res.status(410).json({ error: "This update link has expired or has already been used." });
       const body=req.body||{};
       const fields={
         legal_name: clean(body.legalName,255), trade_name: clean(body.tradeName,255),
@@ -1738,7 +1741,7 @@ app.get("/api/super-admin/suppliers/:id", requireSuperAdmin, async (req,res)=>{
 
 app.get("/api/admin/supplier-updates", requireAdmin, async (req,res)=>{
   try {
-    const [rows]=await pool.execute("SELECT u.id,u.status,u.created_at,u.reviewed_at,s.legal_name,s.trade_name,s.country,s.city FROM supplier_update_requests u JOIN supplier_profiles s ON s.id=u.supplier_id ORDER BY u.created_at DESC LIMIT 200");
+    const [rows]=await pool.execute("SELECT u.id,u.status,u.submitted_at AS created_at,u.reviewed_at,s.legal_name,s.trade_name,s.country,s.city FROM supplier_update_requests u JOIN supplier_profiles s ON s.id=u.supplier_id ORDER BY u.submitted_at DESC LIMIT 200");
     res.json({updates:rows});
   } catch(error) { console.error(error); res.status(500).json({error:"Could not load supplier updates."}); }
 });
@@ -1776,8 +1779,12 @@ app.patch("/api/admin/supplier-updates/:id", requireAdmin, async (req,res)=>{
         const set=keys.map(k=>map[k]+"=?").join(",");
         const values=keys.map(k=>k==="profile_details"?JSON.stringify(changes[k]||{}):changes[k]);
         await conn.execute("UPDATE supplier_profiles SET "+set+" WHERE id=?",[...values,u.supplier_id]);
-        const appSet=keys.map(k=>"a."+map[k]+"=?").join(",");
-        await conn.execute("UPDATE supplier_applications a JOIN supplier_profiles s ON s.application_id=a.id SET "+appSet+" WHERE s.id=?",[...values,u.supplier_id]);
+        // profile_details only exists on supplier_profiles, not on the original application
+        const appKeys=keys.filter(k=>k!=="profile_details");
+        if(appKeys.length){
+          const appSet=appKeys.map(k=>"a."+map[k]+"=?").join(",");
+          await conn.execute("UPDATE supplier_applications a JOIN supplier_profiles s ON s.application_id=a.id SET "+appSet+" WHERE s.id=?",[...appKeys.map(k=>changes[k]),u.supplier_id]);
+        }
       }
     }
     await conn.execute("UPDATE supplier_update_requests SET status=?,admin_notes=?,reviewed_at=NOW(),reviewed_by=? WHERE id=?",[status,notes||null,req.admin.admin_id,req.params.id]);
@@ -2011,15 +2018,18 @@ app.patch("/api/admin/applications/:id", requireAdmin, async (req, res) => {
   }
 });
 
+// Only serve the website itself. The project folder also holds server.js, SQL files,
+// tests, docs, config and the uploads folder, none of which may be downloadable.
 app.use((req, res, next) => {
-  const blocked = [
-    /^\/database(?:\/|$)/i,
-    /^\/\.github(?:\/|$)/i,
-    /^\/\.env(?:\.|$)/i,
-    /^\/package(?:\.json|-lock\.json)$/i,
-    /^\/HOSTINGER_SETUP\.md$/i
-  ];
-  if (blocked.some(pattern => pattern.test(req.path))) return res.status(404).send("Not found");
+  let p;
+  try { p = decodeURIComponent(req.path); } catch { return res.status(404).send("Not found"); }
+  if (p.includes("..") || p.includes("\\") || p.includes("\0") || /(^|\/)\./.test(p)) return res.status(404).send("Not found");
+  const allowed =
+    p === "/" ||
+    /^\/assets\/[A-Za-z0-9._\/-]+$/.test(p) ||
+    /^\/[A-Za-z0-9_-]+$/.test(p) ||
+    /^\/[A-Za-z0-9_-]+\.(html|png|jpe?g|webp|svg|ico|gif|txt|xml|webmanifest)$/i.test(p);
+  if (!allowed) return res.status(404).send("Not found");
   next();
 });
 
