@@ -1,87 +1,28 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Buyer Dashboard | SupplyDesk</title>
-<style>
-:root{--navy:#06182b;--blue:#287bf4;--teal:#16b9d1;--bg:#f4f9fc;--ink:#102a3a;--muted:#6f8792;--line:#dce9ee;--white:#fff}
-*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#edf7fb,#f8fbfd);color:var(--ink);font-family:Inter,system-ui,-apple-system,sans-serif}
-.wrap{max-width:1180px;margin:auto;padding:0 22px}nav{height:76px;background:rgba(6,24,43,.96);color:#fff;display:flex;align-items:center;box-shadow:0 8px 28px rgba(3,24,40,.14)}
-.nav{display:flex;align-items:center;justify-content:space-between}.brand{font-size:24px;font-weight:950;letter-spacing:-.05em}.brand b{color:#45d9ea}.nav-actions{display:flex;gap:8px}.btn{border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:11px;padding:11px 15px;font-weight:850;cursor:pointer}.btn.primary{background:linear-gradient(135deg,var(--teal),var(--blue));border:0;color:#fff}
-main{padding:34px 0 60px}.hero{display:flex;justify-content:space-between;gap:20px;align-items:end;margin-bottom:22px}.eyebrow{font-size:11px;color:#078f9c;font-weight:900;letter-spacing:.13em;text-transform:uppercase}.hero h1{font-size:42px;letter-spacing:-.06em;margin:8px 0}.hero p{color:var(--muted);margin:0}.email{font-size:13px;font-weight:800;color:#54707d}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px}.card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 12px 35px rgba(13,63,84,.05)}.metric strong{display:block;font-size:30px}.metric span{color:var(--muted);font-size:12px}
-.section-title{font-size:22px;letter-spacing:-.04em;margin:28px 0 12px}.table-wrap{overflow:auto}.table{width:100%;border-collapse:collapse;min-width:720px}.table th,.table td{text-align:left;padding:14px;border-bottom:1px solid #edf2f4;font-size:13px}.table th{color:#68818b;font-size:11px;text-transform:uppercase;letter-spacing:.08em}.pill{display:inline-flex;border-radius:999px;padding:6px 9px;background:#eef7f6;color:#14766e;font-size:10px;font-weight:900}.pill.closed{background:#f0f2f4;color:#687781}.pill.contacted{background:#edf4ff;color:#356ac2}
-.empty{text-align:center;padding:40px;color:var(--muted)}.profile{display:grid;grid-template-columns:1fr 1fr;gap:12px}.profile label{font-size:11px;font-weight:850;color:#607983}.profile input{width:100%;margin-top:6px;padding:11px;border:1px solid var(--line);border-radius:10px}.status{margin-top:12px;font-size:13px}.error{color:#b42318}.success{color:#087f6f}
-@media(max-width:700px){.hero{display:block}.hero h1{font-size:34px}.grid,.profile{grid-template-columns:1fr}}
-</style>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Buyer Dashboard | SupplyDesk</title><meta name="description" content="Track your enquiries and requirements on SupplyDesk.">
+<meta name="theme-color" content="#14463f">
+<link rel="icon" type="image/svg+xml" href="assets/supplydesk-icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Chivo:wght@400;500;600;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/desk.css">
 </head>
 <body>
-<nav><div class="wrap nav"><a class="brand" href="index.html" aria-label="SupplyDesk home"><img src="assets/supplydesk-logo-dark.svg" alt="SupplyDesk" style="width:180px;height:auto;display:block"></a><div class="nav-actions"><a class="btn" href="index.html">Browse SupplyDesk</a><button class="btn" onclick="logout()">Logout</button></div></div></nav>
+<header class="deskbar"><div class="wrap in"><a class="logo" href="index.html" aria-label="SupplyDesk home"><img src="assets/supplydesk-logo-dark.svg" alt="SupplyDesk" width="185" height="54"></a><nav class="links" aria-label="Main"><a href="search.html?type=product">Products</a><a href="search.html?type=supplier">Suppliers</a><a href="categories.html">Categories</a><a href="services.html">Services</a><a href="requirement.html">Post a requirement</a></nav><a class="btn y sm cta" href="supplier-register.html">List your business</a><details class="menu"><summary>Menu</summary><div class="drop"><a href="search.html?type=product">Products</a><a href="search.html?type=supplier">Suppliers</a><a href="categories.html">Categories</a><a href="services.html">Services</a><a href="requirement.html">Post a requirement</a><a href="buyer-dashboard.html">My enquiries</a><a href="supplier-dashboard.html">Supplier login</a><a href="supplier-register.html"><strong>List your business</strong></a></div></details></div></header>
 <main class="wrap">
-<section class="hero"><div><div class="eyebrow">Buyer Dashboard</div><h1>Your sourcing activity</h1><p>Track your enquiries and keep your buyer details ready for future sourcing.</p></div><div class="email" id="email"></div></section>
-<div class="grid">
-<div class="card metric"><strong id="total">0</strong><span>Total enquiries</span></div>
-<div class="card metric"><strong id="active">0</strong><span>Active enquiries</span></div>
-<div class="card metric"><strong id="closed">0</strong><span>Closed enquiries</span></div>
-</div>
-<div class="card" style="margin-bottom:18px"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2 class="section-title" style="margin:0">My requirements</h2><p style="color:var(--muted);margin:5px 0 0;font-size:13px">Requirements you posted and quotations received from suppliers.</p></div><a class="btn primary" href="requirement.html">＋ Post Requirement</a></div><div id="requirements" style="margin-top:15px"></div></div>
-
-<div class="card">
-<h2 class="section-title">My enquiries</h2>
-<div class="table-wrap"><table class="table"><thead><tr><th>Product / Requirement</th><th>Supplier</th><th>Location</th><th>Quantity</th><th>Status</th><th>Date</th></tr></thead><tbody id="rows"></tbody></table></div>
-<div class="empty" id="empty">No enquiries yet. Browse products and send your first enquiry.</div>
-</div>
-<div class="card" style="margin-top:18px">
-<h2 class="section-title">Buyer profile</h2>
-<div class="profile">
-<div><label>Name<input id="name" maxlength="180"></label></div><div><label>Company<input id="company" maxlength="180"></label></div>
-<div><label>Country<input id="country" maxlength="120"></label></div><div><label>Phone<input id="phone" maxlength="80"></label></div>
-</div>
-<div style="margin-top:14px"><button class="btn primary" onclick="saveProfile()">Save profile</button></div><div class="status" id="status"></div>
-</div>
+<section class="phead" style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap"><div><span class="crumb-hand hand" id="who">your desk</span><h1>Your sourcing <span>activity.</span></h1><p class="lead">Track your enquiries and quotations, and keep your buyer details ready for next time.</p></div><button class="btn ghost" id="logout" type="button">Log out</button></section>
+<div class="metrics"><div class="metric"><strong id="total">0</strong><span>total enquiries</span></div><div class="metric"><strong id="active">0</strong><span>active enquiries</span></div><div class="metric"><strong id="closed">0</strong><span>closed enquiries</span></div></div>
+<div id="loadError" class="status error" role="alert" style="margin-bottom:26px"></div>
+<section class="sheet"><div class="btnrow" style="justify-content:space-between"><div><h2 style="margin:0">My requirements</h2><p class="sec-sub" style="margin:4px 0 0">Requirements you posted and the quotations suppliers sent back.</p></div><a class="btn r" href="requirement.html">Post a requirement</a></div><div id="requirements" style="margin-top:14px"></div></section>
+<section class="sheet"><h2>My enquiries</h2>
+<div class="table-wrap" style="margin-top:12px"><table class="table"><thead><tr><th>Product or requirement</th><th>Supplier</th><th>Location</th><th>Quantity</th><th>Status</th><th>Date</th></tr></thead><tbody id="rows"></tbody></table></div>
+<div class="empty" id="empty" style="margin-top:12px">No enquiries yet. Browse products and send your first enquiry.</div></section>
+<section class="sheet"><h2>Buyer profile</h2>
+<div class="fgrid" style="margin-top:12px"><div class="field"><label for="pname">Name</label><input id="pname" maxlength="180"></div><div class="field"><label for="pcompany">Company</label><input id="pcompany" maxlength="180"></div>
+<div class="field"><label for="pcountry">Country</label><input id="pcountry" maxlength="120"></div><div class="field"><label for="pphone">Phone</label><input id="pphone" maxlength="80"></div></div>
+<div class="btnrow" style="margin-top:18px"><button class="btn y" id="save" type="button">Save profile</button></div><div class="status" id="status" role="status" aria-live="polite"></div></section>
 </main>
-<script>
-const token=localStorage.getItem("supplydesk_buyer_dashboard_token")||"";
-if(!token)location.href="index.html";
-async function load(){
- try{
-  const r=await fetch("/api/buyer-dashboard",{headers:{"x-buyer-dashboard-token":token}});
-  if(!r.ok)throw new Error();
-  const d=await r.json(),b=d.buyer||{},e=d.enquiries||[];
-  await loadRequirements();
-  document.getElementById("email").textContent=b.email||"";
-  ["name","company","country","phone"].forEach(k=>document.getElementById(k).value=b[k]||"");
-  document.getElementById("total").textContent=e.length;
-  document.getElementById("active").textContent=e.filter(x=>x.status!=="closed").length;
-  document.getElementById("closed").textContent=e.filter(x=>x.status==="closed").length;
-  const rows=document.getElementById("rows"),empty=document.getElementById("empty");
-  rows.innerHTML=e.map(x=>'<tr><td><strong>'+esc(x.productName)+'</strong></td><td>'+esc(x.supplierName)+'</td><td>'+esc((x.supplierCity||"")+" "+(x.supplierCountry||""))+'</td><td>'+esc(x.quantity||"—")+'</td><td><span class="pill '+esc(x.status)+'">'+esc(x.status.replaceAll("_"," "))+'</span></td><td>'+new Date(x.createdAt).toLocaleDateString()+'</td></tr>').join("");
-  empty.style.display=e.length?"none":"block";
- }catch(e){localStorage.removeItem("supplydesk_buyer_dashboard_token");location.href="index.html";}
-}
-
-async function loadRequirements(){
- const el=document.getElementById("requirements");if(!el)return;
- try{const r=await fetch("/api/buyer-requirements",{headers:{"x-buyer-dashboard-token":token}});if(!r.ok)throw new Error();const d=await r.json(),items=d.requirements||[];
- if(!items.length){el.innerHTML='<div class="empty">No requirements posted yet.</div>';return;}
- el.innerHTML=items.map(x=>'<div style="border:1px solid var(--line);border-radius:13px;padding:14px;margin-top:10px"><div style="display:flex;justify-content:space-between;gap:10px"><strong>'+esc(x.title)+'</strong><span class="pill">'+esc(x.status)+'</span></div><div style="font-size:12px;color:var(--muted);margin-top:6px">Qty: '+esc(x.quantity||"Not specified")+(x.unit?" "+esc(x.unit):"")+' · '+esc(x.category||"Custom")+' · '+esc(x.delivery_country||"")+'</div><div style="font-size:12px;margin-top:5px"><b>'+esc(x.quote_count||0)+'</b> quotation(s) received</div><button class="btn primary" style="margin-top:10px" onclick="viewQuotes(\''+esc(x.id)+'\')">View Quotations</button></div>').join("");
- }catch{el.innerHTML='<div class="empty">Could not load requirements.</div>';}
-}
-async function viewQuotes(id){
- try{const r=await fetch("/api/buyer-requirements/"+encodeURIComponent(id)+"/quotes",{headers:{"x-buyer-dashboard-token":token}});const d=await r.json();if(!r.ok)throw new Error(d.error||"Could not load quotes.");
- const items=d.quotes||[];const html=items.length?items.map(q=>'<div style="border-top:1px solid var(--line);padding:13px 0"><strong>'+esc(q.trade_name||q.legal_name)+'</strong><div style="font-size:13px;margin-top:5px">Price: <b>'+esc(q.unit_price)+' '+esc(q.currency)+'</b> · MOQ: '+esc(q.moq||"—")+' · Lead: '+esc(q.lead_time||"—")+'</div><div style="font-size:12px;color:var(--muted);margin-top:4px">'+esc(q.payment_terms||"Payment terms not specified")+(q.incoterm?" · "+esc(q.incoterm):"")+(q.notes?" · "+esc(q.notes):"")+'</div></div>').join(""):'<div class="empty">No quotations yet. Suppliers will appear here after they quote.</div>';
- const box=document.createElement("div");box.style.cssText="position:fixed;inset:0;background:rgba(4,20,35,.5);z-index:100;padding:20px;overflow:auto";box.innerHTML='<div class="card" style="max-width:720px;margin:7vh auto"><div style="display:flex;justify-content:space-between"><h2 class="section-title">Quotations for '+esc(d.requirement?.title||"Requirement")+'</h2><button class="btn" onclick="this.closest(\'div[style*=fixed]\').remove()">Close</button></div>'+html+'</div>';document.body.appendChild(box);
- }catch(e){alert(e.message);}
-}
-function esc(v){return String(v||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-async function saveProfile(){
- const status=document.getElementById("status");
- const body={name:document.getElementById("name").value.trim(),company:document.getElementById("company").value.trim(),country:document.getElementById("country").value.trim(),phone:document.getElementById("phone").value.trim()};
- const r=await fetch("/api/buyer-dashboard/profile",{method:"PATCH",headers:{"Content-Type":"application/json","x-buyer-dashboard-token":token},body:JSON.stringify(body)});
- const d=await r.json().catch(()=>({}));status.className="status "+(r.ok?"success":"error");status.textContent=r.ok?"Profile saved.":(d.error||"Could not save profile.");
-}
-async function logout(){try{await fetch("/api/buyer-dashboard/logout",{method:"POST",headers:{"x-buyer-dashboard-token":token}})}catch(e){}localStorage.removeItem("supplydesk_buyer_dashboard_token");location.href="index.html"}
-load();
-</script>
+<footer class="deskfoot"><div class="wrap in"><span>© 2026 SupplyDesk · Information and connection platform</span><div class="fl"><a href="search.html">Search</a><a href="categories.html">Categories</a><a href="services.html">Services</a><a href="supplier-register.html">Register a supplier</a><a href="supplier-dashboard.html">Supplier login</a><a href="buyer-dashboard.html">My enquiries</a></div></div></footer>
+<script src="assets/desk.js"></script>
+<script src="assets/buyer.js"></script>
 </body></html>

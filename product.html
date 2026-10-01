@@ -1,181 +1,33 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Crect width="64" height="64" rx="18" fill="%23087f8c"/%3E%3Ccircle cx="32" cy="32" r="22" fill="none" stroke="white" stroke-width="3"/%3E%3Cpath d="M16 39c8-12 16-17 33-19M17 25c9 9 18 14 31 14" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" opacity=".8"/%3E%3Ccircle cx="18" cy="39" r="3" fill="white"/%3E%3Ccircle cx="49" cy="20" r="3" fill="white"/%3E%3C/svg%3E"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Product | SupplyDesk</title><style>
-:root{--ink:#0d2430;--muted:#667780;--line:#dbe7eb;--bg:#f5fafb;--brand:#087f8c}.wrap{max-width:1050px;margin:auto;padding:0 20px}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,sans-serif}a{text-decoration:none;color:inherit}nav{height:70px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center}.nav{width:100%;display:flex;justify-content:space-between;align-items:center}.logo{font-size:21px;font-weight:900}.logo span{display:inline-grid;place-items:center;width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,#2fd0bd,#2377b7);color:#fff;margin-right:8px}.btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);background:#fff;border-radius:10px;padding:10px 15px;font-weight:800}.primary{background:var(--brand);border-color:var(--brand);color:#fff}.back{padding:26px 0 12px;color:var(--brand);font-size:13px}.hero{background:#fff;border:1px solid var(--line);border-radius:21px;padding:28px;display:grid;grid-template-columns:1fr 1fr;gap:28px;box-shadow:0 12px 35px rgba(13,36,48,.06)}.visual{min-height:310px;border-radius:18px;background:linear-gradient(145deg,#e7f8f5,#eaf3fb);display:grid;place-items:center;border:1px solid var(--line);position:relative;overflow:hidden}.shape{width:175px;height:175px;border-radius:35px;background:linear-gradient(135deg,#58d6c4,#2179ad);transform:rotate(7deg);box-shadow:0 28px 45px rgba(23,106,165,.18)}.gallery{position:absolute;inset:12px;display:flex;gap:8px;overflow:auto;align-items:flex-end}.gallery img{width:100%;max-width:270px;height:260px;object-fit:cover;border-radius:14px;border:1px solid rgba(255,255,255,.7);background:#fff}.gallery.has-images .shape{display:none}.visual:after{content:"PRODUCT";position:absolute;bottom:18px;left:18px;font-size:11px;letter-spacing:.13em;font-weight:900;color:#5d7882}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--brand);font-weight:900}.hero h1{font-size:38px;letter-spacing:-.05em;margin:10px 0}.meta{color:var(--muted);font-size:13px}.desc{color:var(--muted);line-height:1.7;font-size:14px}.tags{display:flex;gap:7px;flex-wrap:wrap;margin:18px 0}.tag{background:#eef7f6;color:#38666d;border-radius:999px;padding:7px 9px;font-size:11px}.info{margin-top:16px;background:#fff;border:1px solid var(--line);border-radius:17px;padding:22px}.info h2{font-size:19px;margin:0 0 10px}.info p{color:var(--muted);line-height:1.65;font-size:14px}.actions{display:flex;gap:8px;margin-top:20px}@media(max-width:700px){.hero{grid-template-columns:1fr}.visual{min-height:230px}.hero h1{font-size:31px}}
-.brand-logo{display:flex;align-items:center;gap:10px;text-decoration:none;min-width:0}.brand-mark{width:43px;height:43px;border-radius:14px;display:grid;place-items:center;color:#fff;background:linear-gradient(145deg,#087f8c,#176aa5);box-shadow:0 9px 22px rgba(8,127,140,.2);flex:0 0 auto}.brand-mark svg{width:31px;height:31px}.brand-word{display:flex;align-items:baseline;gap:0;font-size:23px;line-height:1;font-weight:900;letter-spacing:-.055em;white-space:nowrap;color:#0d2430}.brand-word b{color:#087f8c;font-weight:900}.brand-word small{display:block;position:absolute;margin-top:31px;margin-left:1px;font-size:7px;letter-spacing:.16em;font-weight:900;color:#80939b}.brand-logo:hover .brand-mark{transform:translateY(-1px);box-shadow:0 12px 26px rgba(8,127,140,.26)}.brand-mark{transition:.2s}@media(max-width:560px){.brand-word{font-size:20px}.brand-word small{display:none}.brand-mark{width:39px;height:39px;border-radius:12px}.brand-mark svg{width:28px;height:28px}}</style><style>
-/* SupplyDesk 3D product experience */
-body{background:radial-gradient(circle at 10% 5%,rgba(39,131,255,.07),transparent 22%),linear-gradient(180deg,#eef7fb,#f8fbfd 55%,#edf8f8)}
-nav{background:rgba(5,20,35,.92)!important;border-bottom-color:rgba(255,255,255,.08)!important;box-shadow:0 8px 30px rgba(3,24,40,.14)}
-nav .brand-word,nav .brand-word span{color:#fff!important}nav .brand-word b{color:#45d9ea!important}
-nav .btn{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.14);color:#fff}
-nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!important}
-.back{font-weight:800}.hero{position:relative;overflow:hidden;border:0;border-radius:25px;background:#fff;box-shadow:0 24px 60px rgba(8,54,76,.09)}
-.visual{min-height:390px;border:0;border-radius:21px;background:radial-gradient(circle at 45% 35%,rgba(54,217,224,.22),transparent 24%),linear-gradient(145deg,#061a2e,#0b3a59);box-shadow:inset 0 0 60px rgba(30,161,255,.08);perspective:900px}
-.visual:before{content:"";position:absolute;width:330px;height:330px;border-radius:50%;border:1px solid rgba(74,225,236,.2);box-shadow:0 0 80px rgba(39,132,241,.12);animation:productOrbit 7s linear infinite}
-.visual:after{content:"SUPPLYDESK VERIFIED PRODUCT";color:#79e5e4;bottom:20px;left:20px}
-.shape{width:190px;height:190px;border-radius:42px;background:linear-gradient(145deg,#4be2d1,#2788e8 55%,#10395b);box-shadow:inset -22px -18px 35px rgba(0,0,0,.25),0 35px 65px rgba(0,0,0,.35);transform:rotateX(18deg) rotateY(-20deg) rotateZ(8deg);animation:productFloat 4s ease-in-out infinite}
-.visual .shape:before{content:"";position:absolute;inset:25px;border-radius:28px;border:1px solid rgba(255,255,255,.25);box-shadow:inset 0 0 30px rgba(255,255,255,.08)}
-.gallery{z-index:3}.gallery img{height:290px;max-width:290px;box-shadow:0 18px 40px rgba(0,0,0,.25)}
-.hero h1{font-size:43px}.eyebrow{color:#078f9c;font-weight:900}.meta{font-weight:650}.tags .tag{background:linear-gradient(135deg,#eefaf9,#edf4ff);border:1px solid #dfebef}
-.actions .primary{background:linear-gradient(135deg,#16b9d1,#287bf4);border:0;box-shadow:0 12px 26px rgba(39,132,238,.23)}
-.info{border-radius:20px;box-shadow:0 12px 35px rgba(13,63,84,.05)}
-@keyframes productFloat{0%,100%{transform:rotateX(18deg) rotateY(-20deg) rotateZ(8deg) translateY(0)}50%{transform:rotateX(20deg) rotateY(-15deg) rotateZ(6deg) translateY(-10px)}}
-@keyframes productOrbit{to{transform:rotate(360deg)}}
-@media(max-width:700px){.visual{min-height:290px}.hero h1{font-size:33px}}
-
-.connect-box{display:none;position:fixed;inset:0;z-index:20;background:rgba(3,18,31,.72);backdrop-filter:blur(8px);padding:20px;align-items:center;justify-content:center}
-.connect-box.open{display:flex}.connect-card{width:min(560px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:22px;padding:24px;box-shadow:0 30px 80px rgba(0,0,0,.28)}.connect-card h2{margin:0 0 6px;font-size:25px}.connect-card p{color:var(--muted);font-size:13px}.connect-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.connect-grid .full{grid-column:1/-1}.connect-card label{display:block;font-size:12px;font-weight:800;margin:10px 0 6px}.connect-card input,.connect-card textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font:inherit}.connect-card textarea{min-height:90px;resize:vertical}.connect-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.otp-row{display:flex;gap:8px;align-items:end}.otp-row>div{flex:1}.otp-btn{white-space:nowrap}.verified-mark{display:none;color:#087f6f;font-size:12px;font-weight:900;margin-top:5px}.verified-mark.show{display:block}
-.connect-status{margin-top:12px;font-size:13px}.connect-status.success{color:#087f6f}.connect-status.error{color:#b42318}@media(max-width:600px){.connect-grid{grid-template-columns:1fr}.connect-grid .full{grid-column:auto}}
-</style></head><body><nav><div class="wrap nav"><a class="brand-logo" href="index.html" aria-label="SupplyDesk home"><img src="assets/supplydesk-logo-dark.svg" alt="SupplyDesk" style="width:180px;height:auto;display:block"></a><a class="btn" href="search.html">← Back to Search</a></div></nav><main class="wrap"><div class="back">Product listing</div><section class="hero"><div class="visual" id="visual"><div class="shape"></div><div id="gallery" class="gallery"></div></div><div><div class="eyebrow">Product</div><h1 id="name">Plastic Storage Container</h1><div class="meta" id="meta">📍 Ahmedabad, India · Domestic</div><p class="desc" id="desc">Example product listing. The live version will connect the product to its supplier and full product information.</p><div class="tags"><span class="tag">Plastic</span><span class="tag">Storage</span><span class="tag">Household</span></div><div class="actions"><button class="btn primary" id="connectBtn" type="button" style="display:none" onclick="openConnect()">Connect Now →</button><a class="btn" id="supplier" href="supplier.html?id=india-growth&product=Plastic%20Storage%20Container">View Supplier</a><a class="btn" href="search.html">More Products</a></div></div></section><section class="info"><h2>About this listing</h2><p>SupplyDesk is currently an information and connection platform. Product specifications, availability, pricing and supplier details will be connected to the database in the next stage.</p></section></main>
-<div class="connect-box" id="connectBox" role="dialog" aria-modal="true" aria-labelledby="connectTitle">
-  <div class="connect-card">
-    <h2 id="connectTitle">Connect with Supplier</h2>
-    <p id="connectIntro">Send your requirement directly to the supplier.</p>
-    <form id="connectForm">
-      <div class="connect-grid">
-        <div><label for="connectName">Name *</label><input id="connectName" required maxlength="180" autocomplete="name"></div>
-        <div class="full"><label for="connectEmail">Email *</label><div class="otp-row"><div><input id="connectEmail" type="email" required maxlength="255" autocomplete="email" placeholder="your@email.com"></div><button class="btn otp-btn" id="sendOtpBtn" type="button" onclick="sendEmailOtp()">Send OTP</button></div><div id="otpVerifyRow" class="otp-row" style="display:none;margin-top:8px"><div><input id="connectOtp" inputmode="numeric" maxlength="6" placeholder="Enter 6-digit OTP"></div><button class="btn otp-btn" id="verifyOtpBtn" type="button" onclick="verifyEmailOtp()">Verify</button></div><div class="verified-mark" id="emailVerified">✓ Email verified</div></div>
-        <div><label for="connectCompany">Company</label><input id="connectCompany" maxlength="180" autocomplete="organization"></div>
-        <div><label for="connectCountry">Country</label><input id="connectCountry" maxlength="120" autocomplete="country-name"></div>
-        <div><label for="connectPhone">Phone</label><input id="connectPhone" maxlength="80" autocomplete="tel"></div>
-        <div><label for="connectQuantity">Quantity / Requirement</label><input id="connectQuantity" maxlength="120" placeholder="e.g. 5,000 pcs / monthly"></div>
-        <div class="full"><label for="connectMessage">Message</label><textarea id="connectMessage" maxlength="2000" placeholder="Tell the supplier what you need..."></textarea></div>
-      </div>
-      <div class="connect-status" id="connectStatus"></div>
-      <div class="connect-actions"><a class="btn" id="buyerDashboardLink" href="/buyer-dashboard.html" style="display:none">Buyer Dashboard →</a><button class="btn" type="button" onclick="closeConnect()">Cancel</button><button class="btn primary" id="connectSubmit" type="submit">Send Enquiry →</button></div>
-    </form>
-  </div>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Product | SupplyDesk</title><meta name="description" content="Product listing on SupplyDesk.">
+<meta name="theme-color" content="#14463f">
+<link rel="icon" type="image/svg+xml" href="assets/supplydesk-icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Chivo:wght@400;500;600;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/desk.css">
+</head>
+<body>
+<header class="deskbar"><div class="wrap in"><a class="logo" href="index.html" aria-label="SupplyDesk home"><img src="assets/supplydesk-logo-dark.svg" alt="SupplyDesk" width="185" height="54"></a><nav class="links" aria-label="Main"><a href="search.html?type=product">Products</a><a href="search.html?type=supplier">Suppliers</a><a href="categories.html">Categories</a><a href="services.html">Services</a><a href="requirement.html">Post a requirement</a></nav><a class="btn y sm cta" href="supplier-register.html">List your business</a><details class="menu"><summary>Menu</summary><div class="drop"><a href="search.html?type=product">Products</a><a href="search.html?type=supplier">Suppliers</a><a href="categories.html">Categories</a><a href="services.html">Services</a><a href="requirement.html">Post a requirement</a><a href="buyer-dashboard.html">My enquiries</a><a href="supplier-dashboard.html">Supplier login</a><a href="supplier-register.html"><strong>List your business</strong></a></div></details></div></header>
+<main class="wrap">
+<a class="back" href="search.html?type=product">← Back to search</a>
+<section class="detail" style="margin-top:22px">
+<div class="gallery"><div class="main" id="mainPic" aria-live="polite">·</div><div class="thumbs" id="thumbs"></div></div>
+<div>
+<span class="crumb-hand hand" id="crumb">product listing</span>
+<h1 class="pname" id="name">Loading…</h1>
+<p class="pmeta" id="meta"></p>
+<p class="pdesc" id="desc"></p>
+<div class="tags light" id="tags"></div>
+<div class="facts" id="facts"></div>
+<div class="btnrow" style="margin-top:26px"><button class="btn r" id="connectBtn" type="button" hidden>Send an enquiry</button><a class="btn y" id="supplier" href="search.html?type=supplier" hidden>View supplier</a><a class="btn ghost" href="search.html?type=product">More products</a></div>
 </div>
-<script>
-const liveId=new URLSearchParams(location.search).get("id")||"";
-let liveProduct=null;
-async function loadLiveProduct(){
-  if(!liveId){ document.getElementById("name").textContent="Product not found"; document.getElementById("meta").textContent="Open a product from SupplyDesk search."; document.getElementById("desc").textContent="This page requires a published SupplyDesk product."; return; }
-  try{
-    const r=await fetch("/api/products/"+encodeURIComponent(liveId));
-    if(!r.ok){ document.getElementById("name").textContent="Product not found"; document.getElementById("meta").textContent="This product is not currently published."; document.getElementById("desc").textContent="The requested product could not be found or is still under review."; return; }
-    const d=await r.json(),p=d.product;
-    liveProduct=p;
-    document.title=p.name+" | SupplyDesk";
-    document.getElementById("name").textContent=p.name;
-    document.getElementById("meta").textContent="📍 "+p.city+", "+p.country+" · "+p.market_scope;
-    document.getElementById("desc").textContent=p.description||p.category+" · "+p.subcategory;
-    const gallery=document.getElementById("gallery");
-    if((p.images||[]).length){gallery.classList.add("has-images");gallery.innerHTML=p.images.map(i=>'<img src="'+i.url+'" alt="'+String(p.name).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))+'">').join("");}
-    document.querySelector(".tags").innerHTML=[p.category,p.subcategory,p.market_scope].map(x=>'<span class="tag">'+String(x).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))+'</span>').join("");
-    const supplier=document.getElementById("supplier");
-    supplier.href="supplier.html?id="+encodeURIComponent(p.supplierId)+"&product="+encodeURIComponent(p.name);
-    document.getElementById("connectIntro").textContent="Send your requirement for "+p.name+" directly to the verified supplier.";
-    document.getElementById("connectBtn").style.display="inline-flex";
-  }catch(e){ document.getElementById("name").textContent="Product unavailable"; document.getElementById("desc").textContent="We could not load this product right now. Please try again."; }
-}
-loadLiveProduct();
-</script></body></html>
-<script>
-function openConnect(){
-  if(!liveProduct)return;
-  document.getElementById("connectBox").classList.add("open");
-  document.getElementById("connectName").focus();
-}
-function closeConnect(){
-  document.getElementById("connectBox").classList.remove("open");
-  document.getElementById("connectStatus").textContent="";
-}
-document.getElementById("connectBox").addEventListener("click",e=>{if(e.target.id==="connectBox")closeConnect()});
-let emailVerificationToken="";
-let buyerDashboardToken=localStorage.getItem("supplydesk_buyer_dashboard_token")||"";
-async function restoreBuyerSession(){
-  if(!buyerDashboardToken)return;
-  try{
-    const r=await fetch("/api/buyer-dashboard",{headers:{"x-buyer-dashboard-token":buyerDashboardToken}});
-    if(!r.ok){localStorage.removeItem("supplydesk_buyer_dashboard_token");buyerDashboardToken="";return;}
-    const d=await r.json();
-    if(d.buyer?.email){
-      document.getElementById("connectEmail").value=d.buyer.email;
-      document.getElementById("connectEmail").readOnly=true;
-      document.getElementById("emailVerified").classList.add("show");
-      document.getElementById("otpVerifyRow").style.display="none";
-      document.getElementById("sendOtpBtn").textContent="Verified ✓";
-      document.getElementById("sendOtpBtn").disabled=true;
-    }
-  }catch(e){}
-}
-restoreBuyerSession();
-async function sendEmailOtp(){
-  const email=document.getElementById("connectEmail").value.trim().toLowerCase();
-  const status=document.getElementById("connectStatus"),btn=document.getElementById("sendOtpBtn");
-  if(!/^\S+@\S+\.\S+$/.test(email)){status.className="connect-status error";status.textContent="Enter a valid email address first.";return;}
-  btn.disabled=true;btn.textContent="Sending...";
-  try{
-    const r=await fetch("/api/buyer-email/request-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
-    const d=await r.json().catch(()=>({}));
-    if(!r.ok)throw new Error(d.error||"Could not send OTP.");
-    document.getElementById("otpVerifyRow").style.display="flex";
-    document.getElementById("connectOtp").focus();
-    btn.textContent="OTP Sent";
-    status.className="connect-status";
-    status.textContent="OTP sent to "+email+". Enter it below and click Verify.";
-  }catch(err){
-    status.className="connect-status error";status.textContent=err.message||"Could not send OTP.";
-    btn.disabled=false;btn.textContent="Send OTP";
-  }
-}
-async function verifyEmailOtp(){
-  const email=document.getElementById("connectEmail").value.trim().toLowerCase();
-  const otp=document.getElementById("connectOtp").value.trim();
-  const status=document.getElementById("connectStatus"),btn=document.getElementById("verifyOtpBtn");
-  if(!/^\d{6}$/.test(otp)){status.className="connect-status error";status.textContent="Enter the 6-digit OTP.";return;}
-  btn.disabled=true;btn.textContent="Verifying...";
-  try{
-    const r=await fetch("/api/buyer-email/verify-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,otp})});
-    const d=await r.json().catch(()=>({}));
-    if(!r.ok)throw new Error(d.error||"OTP verification failed.");
-    emailVerificationToken=d.verificationToken||"";
-    buyerDashboardToken=d.dashboardToken||"";
-    if(buyerDashboardToken)localStorage.setItem("supplydesk_buyer_dashboard_token",buyerDashboardToken);
-    document.getElementById("emailVerified").classList.add("show");
-    document.getElementById("connectEmail").readOnly=true;
-    document.getElementById("connectOtp").disabled=true;
-    btn.textContent="Verified ✓";document.getElementById("sendOtpBtn").textContent="Verified ✓";document.getElementById("sendOtpBtn").disabled=true;
-    status.className="connect-status success";status.textContent="Email verified. You can now send your enquiry.";
-  }catch(err){
-    status.className="connect-status error";status.textContent=err.message||"Email verification failed.";
-    btn.disabled=false;btn.textContent="Verify";
-  }
-}
-
-document.getElementById("connectForm").addEventListener("submit",async e=>{
-  e.preventDefault();
-  const btn=document.getElementById("connectSubmit"),status=document.getElementById("connectStatus");
-  btn.disabled=true;btn.textContent="Sending...";
-  status.className="connect-status";status.textContent="";
-  const body={
-    supplierId:liveProduct.supplierId,
-    productId:liveProduct.id,
-    productName:liveProduct.name,
-    customerName:document.getElementById("connectName").value.trim(),
-    customerEmail:document.getElementById("connectEmail").value.trim(),
-    customerCompany:document.getElementById("connectCompany").value.trim(),
-    customerCountry:document.getElementById("connectCountry").value.trim(),
-    customerPhone:document.getElementById("connectPhone").value.trim(),
-    quantity:document.getElementById("connectQuantity").value.trim(),
-    message:document.getElementById("connectMessage").value.trim(),
-    sourceAction:"contact",
-    verificationToken:emailVerificationToken,
-    dashboardToken:buyerDashboardToken
-  };
-  try{
-    const r=await fetch("/api/connect-requests",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    const d=await r.json().catch(()=>({}));
-    if(!r.ok)throw new Error(d.error||"Could not send enquiry.");
-    status.className="connect-status success";
-    status.textContent=d.message||"Enquiry sent successfully.";
-    document.getElementById("buyerDashboardLink").style.display="inline-flex";
-    document.getElementById("connectForm").reset();
-    btn.textContent="Sent ✓";
-  }catch(err){
-    status.className="connect-status error";
-    status.textContent=err.message||"Could not send enquiry.";
-    btn.disabled=false;btn.textContent="Send Enquiry →";
-  }
-});
-</script>
+</section>
+<section class="sheet" style="margin-top:46px"><h2>About this listing</h2>
+<p>Specifications, pricing and availability are shared by the supplier after you send an enquiry. SupplyDesk connects you with the supplier. Orders, payment and shipping are arranged directly between you and the supplier.</p></section>
+</main>
+<footer class="deskfoot"><div class="wrap in"><span>© 2026 SupplyDesk · Information and connection platform</span><div class="fl"><a href="search.html">Search</a><a href="categories.html">Categories</a><a href="services.html">Services</a><a href="supplier-register.html">Register a supplier</a><a href="supplier-dashboard.html">Supplier login</a><a href="buyer-dashboard.html">My enquiries</a></div></div></footer>
+<script src="assets/desk.js"></script>
+<script src="assets/enquiry.js"></script>
+<script src="assets/product.js"></script>
+</body></html>
