@@ -5,7 +5,7 @@ test.describe("Industries & Countries explorer", () => {
     await page.goto("/explore.html");
     await expect(page.locator(".card").first()).toBeVisible();
     await page.fill("#q", "plastic packaging in bharat");
-    await expect(page.locator("#chips")).toContainText("Plastics & Packaging");
+    await expect(page.locator("#chips")).toContainText("Plastics & Polymers");
     await expect(page.locator("#chips")).toContainText("India");
     await expect(page.locator("a.card[href*=\"supplier.html\"]", { hasText: "India Growth" })).toBeVisible();
     await page.fill("#q", "uae");
