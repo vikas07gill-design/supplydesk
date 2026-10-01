@@ -31,7 +31,15 @@ const pool = mysql.createPool({
 });
 
 app.set("trust proxy", 1);
-app.use(helmet({ crossOriginResourcePolicy: { policy: "same-site" } }));
+const cspDirectives = helmet.contentSecurityPolicy.getDefaultDirectives();
+// The static pages use inline <script> blocks and onclick handlers.
+cspDirectives["script-src"] = ["'self'", "'unsafe-inline'"];
+cspDirectives["script-src-attr"] = ["'unsafe-inline'"];
+cspDirectives["img-src"] = ["'self'", "data:", "blob:"];
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "same-site" },
+  contentSecurityPolicy: { useDefaults: false, directives: cspDirectives }
+}));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 app.use((req, res, next) => {
@@ -439,30 +447,65 @@ async function sendAdminInvitation({recipientEmail,recipientName,inviteType,mess
   return await mailer.sendMail({from:process.env.SMTP_FROM,replyTo:process.env.SMTP_FROM,to:recipientEmail,subject:"SupplyDesk | Get More Customers. Limited-Time Launch Offer",text:email.text,html:email.html});
 }
 
+// ---- Potential contacts helpers -------------------------------------------
+// Compare emails with an explicit collation so queries work whatever collation an
+// older production table/column or the connection happens to use.
+const PC_COLLATE = "utf8mb4_unicode_ci";
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function normalizeEmail(v){ return clean(v,255).toLowerCase(); }
+// Canonical mobile key: digits only, international prefix (00) removed, and for
+// numbers of 10+ digits only the last 10 (so +91 98765 43210, 098765-43210 and
+// 9876543210 are the same contact).
+function mobileKey(v){
+  let d=String(v||"").replace(/\D/g,"").replace(/^00/,"");
+  if(d.length>10) d=d.slice(-10);
+  return d.length>=7?d:"";
+}
+const PC_INVITE_BATCH_MAX = 25;
+const PC_IMPORT_BATCH_MAX = 500;
+const DEFAULT_INVITE_MESSAGE = "Looking for more customers and new business opportunities?\n\nSupplyDesk is a global B2B sourcing platform helping businesses connect with buyers and suppliers for international trade. List your business, showcase your products or services, and get discovered by potential customers.\n\nWhy join SupplyDesk?\n• Get discovered by potential buyers\n• Showcase your business and products professionally\n• Receive business enquiries through SupplyDesk\n• Expand your market reach and sales opportunities\n\nExplore SupplyDesk: "+String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"")+"/\n\nCreate your business presence with SupplyDesk while the launch offer is available.";
+async function findPotentialContact(email,key){
+  const [byEmail]=await pool.execute("SELECT id,status,email FROM potential_contacts WHERE email = ? COLLATE "+PC_COLLATE+" LIMIT 1",[email]);
+  if(byEmail.length) return {row:byEmail[0],by:"email"};
+  if(key){
+    const [byMobile]=await pool.execute("SELECT id,status,email FROM potential_contacts WHERE mobile_key = ? LIMIT 1",[key]);
+    if(byMobile.length) return {row:byMobile[0],by:"mobile"};
+  }
+  return null;
+}
+async function logInvitation(name,email,inviteType,ok,info,reason){
+  try{await pool.execute("INSERT INTO admin_invitation_log (id,recipient_name,recipient_email,invite_type,status,message_id,sent_at,error_text) VALUES (?,?,?,?,?,?,"+(ok?"NOW()":"NULL")+",?)",[crypto.randomUUID(),name,email,inviteType,ok?"sent":"failed",ok?(info?.messageId||null):null,ok?null:reason])}catch(e){console.error("Invitation log failed:",e)}
+}
+
 app.post("/api/admin/potential-contacts/import", requireAdmin, async (req,res)=>{
   const inviteType=clean(req.body?.inviteType,30).toLowerCase();
-  const recipients=Array.isArray(req.body?.recipients)?req.body.recipients.slice(0,500):[];
+  const recipients=Array.isArray(req.body?.recipients)?req.body.recipients:[];
   if(!["supplier","buyer"].includes(inviteType)) return res.status(400).json({error:"Contact type must be supplier or buyer."});
   if(!recipients.length) return res.status(400).json({error:"At least one contact is required."});
-  const added=[]; let skipped=0;
+  if(recipients.length>PC_IMPORT_BATCH_MAX) return res.status(400).json({error:"Send at most "+PC_IMPORT_BATCH_MAX+" contacts per request (got "+recipients.length+"). Nothing was imported."});
+  const added=[]; let skipped=0,invalid=0,duplicates=0;
   try{
     const seenEmail=new Set(), seenMobile=new Set();
     for(const raw of recipients){
-      const email=clean(raw?.email,255).toLowerCase();
+      const email=normalizeEmail(raw?.email);
       const name=clean(raw?.name,180);
       const mobile=clean(raw?.phone,40);
       const location=clean(raw?.location,255);
-      const mobileKey=mobile.replace(/\D/g,"");
-      if(!/^\S+@\S+\.\S+$/.test(email)||!name){skipped++;continue}
-      if(seenEmail.has(email)||(mobileKey&&seenMobile.has(mobileKey))){skipped++;continue}
-      seenEmail.add(email);if(mobileKey)seenMobile.add(mobileKey);
-      const [existing]=await pool.execute("SELECT id FROM potential_contacts WHERE LOWER(email)=? OR (?<>'' AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile,'+',''),' ',''),'-',''),'(',''),')','')=?) LIMIT 1",[email,mobileKey,mobileKey]);
-      if(existing.length){skipped++;continue}
+      const key=mobileKey(mobile);
+      if(!EMAIL_RE.test(email)||!name){skipped++;invalid++;continue}
+      if(seenEmail.has(email)||(key&&seenMobile.has(key))){skipped++;duplicates++;continue}
+      seenEmail.add(email);if(key)seenMobile.add(key);
+      if(await findPotentialContact(email,key)){skipped++;duplicates++;continue}
       const id=crypto.randomUUID();
-      await pool.execute("INSERT INTO potential_contacts (id,company_name,email,mobile,location,contact_type,source,status,last_activity_at) VALUES (?,?,?,?,?,?,?,NOW())",[id,name,email,mobile,location,inviteType,"manual_import","new"]);
+      try{
+        await pool.execute("INSERT INTO potential_contacts (id,company_name,email,mobile,mobile_key,location,contact_type,source,status,last_activity_at) VALUES (?,?,?,?,?,?,?,?,?,NOW())",[id,name,email,mobile,key,location,inviteType,"manual_import","new"]);
+      }catch(e){
+        if(e?.code==="ER_DUP_ENTRY"){skipped++;duplicates++;continue}
+        throw e;
+      }
       added.push({id,name,email,phone:mobile});
     }
-    res.json({ok:true,added:added.length,skipped,contacts:added});
+    res.json({ok:true,added:added.length,skipped,invalid,duplicates,contacts:added});
   }catch(error){console.error("Potential contacts import failed:",error);res.status(500).json({error:"Could not import potential contacts."})}
 });
 
@@ -476,14 +519,16 @@ app.get("/api/admin/potential-contacts", requireAdmin, async (req,res)=>{
     if(["supplier","buyer"].includes(type)){where.push("pc.contact_type=?");params.push(type)}
     if(["new","invited","interested","registered","active","unsubscribed"].includes(inviteStatus)){where.push("pc.status=?");params.push(inviteStatus)}
     if(search){where.push("(pc.company_name LIKE ? OR pc.email LIKE ? OR pc.mobile LIKE ? OR pc.location LIKE ?)");const q="%"+search+"%";params.push(q,q,q,q)}
-    const sql="SELECT pc.company_name,pc.email,pc.mobile,pc.location,pc.contact_type,pc.status,pc.source,pc.created_at,pc.last_activity_at,sp.id AS supplier_profile_id,sp.verified AS supplier_verified,sp.published AS supplier_published,b.id AS buyer_id FROM potential_contacts pc LEFT JOIN supplier_profiles sp ON LOWER(sp.business_email)=LOWER(pc.email) LEFT JOIN buyers b ON LOWER(b.email)=LOWER(pc.email) "+(where.length?"WHERE "+where.join(" AND "):"")+" ORDER BY pc.last_activity_at DESC, pc.created_at DESC LIMIT 500";
-    const [contacts]=await pool.execute(sql,params);
+    const sql="SELECT pc.id,pc.company_name,pc.email,pc.mobile,pc.location,pc.contact_type,pc.status,pc.source,pc.created_at,pc.last_activity_at,sp.id AS supplier_profile_id,sp.verified AS supplier_verified,sp.published AS supplier_published,b.id AS buyer_id FROM potential_contacts pc LEFT JOIN supplier_profiles sp ON CONVERT(LOWER(sp.business_email) USING utf8mb4) COLLATE utf8mb4_unicode_ci=CONVERT(LOWER(pc.email) USING utf8mb4) COLLATE utf8mb4_unicode_ci LEFT JOIN buyers b ON CONVERT(LOWER(b.email) USING utf8mb4) COLLATE utf8mb4_unicode_ci=CONVERT(LOWER(pc.email) USING utf8mb4) COLLATE utf8mb4_unicode_ci "+(where.length?"WHERE "+where.join(" AND "):"")+" ORDER BY pc.last_activity_at DESC, pc.created_at DESC LIMIT 5001";
+    const [allContacts]=await pool.execute(sql,params);
+    const truncated=allContacts.length>5000;
+    const contacts=truncated?allContacts.slice(0,5000):allContacts;
     const mapped=contacts.map(c=>({
       ...c,
       onboarded: c.contact_type==="supplier" ? !!c.supplier_profile_id : !!c.buyer_id,
       onboardedStatus: c.contact_type==="supplier" ? (c.supplier_profile_id ? (c.supplier_verified&&c.supplier_published ? "Active" : "Registered") : "Not Onboarded") : (c.buyer_id ? "Registered" : "Not Onboarded")
     })).filter(c=>!onboarding || (onboarding==="not_onboarded" ? !c.onboarded : c.onboardedStatus.toLowerCase()===onboarding));
-    res.json({ok:true,total:mapped.length,contacts:mapped});
+    res.json({ok:true,total:mapped.length,truncated,contacts:mapped});
   }catch(error){console.error("Potential contacts load failed:",error);res.status(500).json({error:"Could not load potential contacts."})}
 });
 
@@ -504,34 +549,80 @@ app.post("/api/admin/invite", requireAdmin, async (req,res)=>{
   }
 });
 
+// Sends invitations in small batches (the admin page loops over batches and shows
+// progress). Two modes:
+//  - recipients: [{name,email,phone}] -> contacts that are not yet invited are
+//    sent; unknown ones are added to the Potential Database as `invited` only after
+//    SMTP succeeds.
+//  - pending:true -> sends to the next batch of Potential Database contacts whose
+//    status is still `new` (excludeIds = ids that failed earlier in this run).
+// A contact is marked `invited` only after SMTP accepts the message, so failed
+// sends stay `new` / unsaved and can simply be retried.
 app.post("/api/admin/bulk-invite", requireAdmin, async (req,res)=>{
   const inviteType=clean(req.body?.inviteType,30).toLowerCase();
   const delayMs=Math.min(Math.max(Number(req.body?.delayMs||2500),1000),10000);
-  const recipients=Array.isArray(req.body?.recipients)?req.body.recipients.slice(0,100):[];
+  const pending=req.body?.pending===true;
   if(!["supplier","buyer"].includes(inviteType)) return res.status(400).json({error:"Invitation type must be supplier or buyer."});
-  if(!recipients.length) return res.status(400).json({error:"At least one recipient is required."});
-  const defaultMessage="Looking for more customers and new business opportunities?\n\nSupplyDesk is a global B2B sourcing platform helping businesses connect with buyers and suppliers for international trade. List your business, showcase your products or services, and get discovered by potential customers.\n\nWhy join SupplyDesk?\n• Get discovered by potential buyers\n• Showcase your business and products professionally\n• Receive business enquiries through SupplyDesk\n• Expand your market reach and sales opportunities\n\nExplore SupplyDesk: "+String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"")+"/\n\nCreate your business presence with SupplyDesk while the launch offer is available.";
+  let recipients=[];
+  let remaining=null;
+  try{
+    if(pending){
+      const limit=Math.min(Math.max(parseInt(req.body?.limit,10)||10,1),PC_INVITE_BATCH_MAX);
+      const exclude=(Array.isArray(req.body?.excludeIds)?req.body.excludeIds:[]).map(x=>String(x)).filter(x=>/^[0-9a-f-]{36}$/i.test(x)).slice(0,5000);
+      const notIn=exclude.length?" AND id NOT IN ("+exclude.map(()=>"?").join(",")+")":"";
+      const [[cnt]]=await pool.query("SELECT COUNT(*) AS n FROM potential_contacts WHERE status='new' AND contact_type=?"+notIn,[inviteType,...exclude]);
+      remaining=Number(cnt.n);
+      const [rows]=await pool.query("SELECT id,company_name,email,mobile FROM potential_contacts WHERE status='new' AND contact_type=?"+notIn+" ORDER BY created_at,id LIMIT ?",[inviteType,...exclude,limit]);
+      recipients=rows.map(r=>({id:r.id,name:r.company_name,email:r.email,phone:r.mobile||""}));
+    }else{
+      recipients=Array.isArray(req.body?.recipients)?req.body.recipients:[];
+      if(recipients.length>PC_INVITE_BATCH_MAX) return res.status(400).json({error:"Send at most "+PC_INVITE_BATCH_MAX+" recipients per request (got "+recipients.length+"). Nothing was sent."});
+    }
+  }catch(error){console.error("Bulk invite lookup failed:",error);return res.status(500).json({error:"Could not load contacts to invite."})}
+  if(!recipients.length&&!pending) return res.status(400).json({error:"At least one recipient is required."});
   const results=[]; let sent=0,skipped=0,failed=0;
   for(let i=0;i<recipients.length;i++){
-    const row=recipients[i]||{}; const email=clean(row.email,255).toLowerCase(); const name=clean(row.name,180); const phone=clean(row.phone,40);
-    if(!/^\S+@\S+\.\S+$/.test(email)){failed++;results.push({name,email,phone,status:"failed",reason:"Invalid email"});continue}
+    const row=recipients[i]||{}; const email=normalizeEmail(row.email); const name=clean(row.name,180); const phone=clean(row.phone,40);
+    const out={id:row.id||null,name,email,phone};
+    if(!EMAIL_RE.test(email)){failed++;results.push({...out,status:"failed",reason:"Invalid email"});continue}
+    let existing=null;
     try{
-      const mobileKey=phone.replace(/\D/g,"");
-      const [existing]=await pool.execute("SELECT company_name,email,mobile FROM potential_contacts WHERE email=? OR (?<>'' AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile,'+',''),' ',''),'-',''),'(',''),')','')=?) LIMIT 1",[email,mobileKey,mobileKey]);
-      if(existing.length){skipped++;results.push({name,email,phone,status:"skipped",reason:"Duplicate email/mobile already in Potential Database"});continue}
-      await pool.execute("INSERT INTO potential_contacts (id,company_name,email,mobile,contact_type,source,status,last_activity_at) VALUES (?,?,?,?,?,?,?,NOW())",[crypto.randomUUID(),name,email,phone,inviteType,"bulk_onboarding","invited"]);
-      const info=await sendAdminInvitation({recipientEmail:email,recipientName:name,inviteType,message:defaultMessage});
-      await pool.execute("INSERT INTO admin_invitation_log (id,recipient_name,recipient_email,invite_type,status,message_id,sent_at,error_text) VALUES (?,?,?,?,?,?,NOW(),NULL)",[crypto.randomUUID(),name,email,inviteType,"sent",info.messageId||null]);
-      sent++;results.push({name,email,phone,status:"sent"});
+      existing=await findPotentialContact(email,mobileKey(phone));
+      if(existing&&existing.row.status!=="new"){
+        skipped++;results.push({...out,id:existing.row.id,status:"skipped",reason:"Already invited / in Potential Database ("+existing.row.status+")"});continue;
+      }
+      if(existing&&existing.by==="mobile"){
+        skipped++;results.push({...out,id:existing.row.id,status:"skipped",reason:"Mobile number already belongs to another contact"});continue;
+      }
+    }catch(error){
+      failed++;results.push({...out,status:"failed",reason:"Database error: "+(error?.code||error?.message||"unknown").slice(0,200)});continue;
+    }
+    let info;
+    try{
+      info=await sendAdminInvitation({recipientEmail:email,recipientName:name,inviteType,message:DEFAULT_INVITE_MESSAGE});
     }catch(error){
       failed++;
       const reason=(error?.message||"Send failed").slice(0,500);
-      try{await pool.execute("INSERT INTO admin_invitation_log (id,recipient_name,recipient_email,invite_type,status,message_id,sent_at,error_text) VALUES (?,?,?,?,?,?,NULL,?)",[crypto.randomUUID(),name,email,inviteType,"failed",null,reason]);}catch(logError){console.error("Invitation log failed:",logError)}
-      results.push({name,email,phone,status:"failed",reason});
+      await logInvitation(name,email,inviteType,false,null,reason);
+      results.push({...out,id:existing?existing.row.id:null,status:"failed",reason});
+      if(delayMs&&i<recipients.length-1) await new Promise(r=>setTimeout(r,delayMs));
+      continue;
     }
-    if(i<recipients.length-1) await new Promise(resolve=>setTimeout(resolve,delayMs));
+    // SMTP accepted the message: only now record the contact as invited.
+    try{
+      if(existing){
+        await pool.execute("UPDATE potential_contacts SET status='invited',last_activity_at=NOW() WHERE id=?",[existing.row.id]);
+      }else{
+        try{
+          await pool.execute("INSERT INTO potential_contacts (id,company_name,email,mobile,mobile_key,contact_type,source,status,last_activity_at) VALUES (?,?,?,?,?,?,?,?,NOW())",[crypto.randomUUID(),name||email,email,phone,mobileKey(phone),inviteType,"bulk_onboarding","invited"]);
+        }catch(e){if(e?.code!=="ER_DUP_ENTRY")throw e}
+      }
+    }catch(error){console.error("Could not mark contact invited after successful send:",email,error)}
+    await logInvitation(name,email,inviteType,true,info,null);
+    sent++;results.push({...out,id:existing?existing.row.id:out.id,status:"sent"});
+    if(delayMs&&i<recipients.length-1) await new Promise(r=>setTimeout(r,delayMs));
   }
-  res.json({ok:true,total:recipients.length,sent,skipped,failed,results});
+  res.json({ok:true,total:recipients.length,sent,skipped,failed,remaining:remaining===null?null:Math.max(remaining-sent-skipped,0),results});
 });
 
 app.get("/api/admin/test-connection-storage", requireAdmin, async (req,res)=>{
@@ -2047,6 +2138,26 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Something went wrong." });
 });
 
+// Idempotent, safe to run on every boot against old or new databases.
+async function ensurePotentialContactsMigration() {
+  // 1) status must allow 'new' (imported, not yet invited).
+  const [[col]] = await pool.query("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='potential_contacts' AND COLUMN_NAME='status'");
+  if (col && !/'new'/.test(col.COLUMN_TYPE)) {
+    await pool.query("ALTER TABLE potential_contacts MODIFY COLUMN status ENUM('new','invited','interested','registered','active','unsubscribed') NOT NULL DEFAULT 'invited'");
+  }
+  // 2) normalized mobile key column + index.
+  try { await pool.query("ALTER TABLE potential_contacts ADD COLUMN mobile_key VARCHAR(20) NOT NULL DEFAULT ''"); }
+  catch (e) { if (!["ER_DUP_FIELDNAME", "ER_DUP_COLUMN"].includes(e?.code)) throw e; }
+  try { await pool.query("ALTER TABLE potential_contacts ADD INDEX idx_potential_contact_mobile_key (mobile_key)"); }
+  catch (e) { if (!["ER_DUP_KEYNAME"].includes(e?.code)) throw e; }
+  // 3) backfill keys for rows that have a mobile but no key yet.
+  const [rows] = await pool.query("SELECT id,mobile FROM potential_contacts WHERE mobile_key='' AND mobile IS NOT NULL AND mobile<>''");
+  for (const r of rows) {
+    const k = mobileKey(r.mobile);
+    if (k) await pool.execute("UPDATE potential_contacts SET mobile_key=? WHERE id=?", [k, r.id]);
+  }
+}
+
 async function ensureDashboardSchema() {
   // Keep the production dashboard self-healing when a deployment is pointed at
   // an existing database that predates the dashboard/product migrations.
@@ -2060,13 +2171,15 @@ async function ensureDashboardSchema() {
       location VARCHAR(255) NULL,
       contact_type ENUM('supplier','buyer') NOT NULL DEFAULT 'supplier',
       source VARCHAR(80) NOT NULL DEFAULT 'bulk_onboarding',
-      status ENUM('invited','interested','registered','active','unsubscribed') NOT NULL DEFAULT 'invited',
+      status ENUM('new','invited','interested','registered','active','unsubscribed') NOT NULL DEFAULT 'invited',
+      mobile_key VARCHAR(20) NOT NULL DEFAULT '',
       last_activity_at DATETIME NULL,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       UNIQUE KEY uq_potential_contact_email (email),
       INDEX idx_potential_contact_type (contact_type, status),
-      INDEX idx_potential_contact_mobile (mobile)
+      INDEX idx_potential_contact_mobile (mobile),
+      INDEX idx_potential_contact_mobile_key (mobile_key)
     ) ENGINE=InnoDB`,
     `CREATE TABLE IF NOT EXISTS admin_invitation_log (
       id CHAR(36) PRIMARY KEY,
@@ -2200,6 +2313,8 @@ async function ensureDashboardSchema() {
   } catch (e) {
     if (!["ER_DUP_FIELDNAME", "ER_DUP_COLUMN"].includes(e?.code)) throw e;
   }
+
+  await ensurePotentialContactsMigration();
 
   await ensureConnectRequestsTable();
   await ensureBuyerSchema();
