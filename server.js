@@ -124,6 +124,18 @@ const catalog = {
 };
 
 const categories = Object.keys(catalog);
+const buyerOtpRequestLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false,
+  message: { error: "Too many verification codes requested. Please wait a while and try again." }
+});
+const buyerOtpVerifyLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, limit: 40, standardHeaders: true, legacyHeaders: false,
+  message: { error: "Too many verification attempts. Please wait a while and try again." }
+});
+const buyerRequirementLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false,
+  message: { error: "Too many requirements submitted from this network. Please try again later." }
+});
 const connectLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   limit: 15,
@@ -220,7 +232,7 @@ function buildProfessionalEmail({preheader="",title="",intro="",bodyHtml="",text
   const safe=(v)=>escapeEmailHtml(v), origin=String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"");
   const cta=ctaUrl?'<p style="margin:28px 0"><a href="'+safe(ctaUrl)+'" style="display:inline-block;background:#087f8c;color:#fff;text-decoration:none;padding:13px 22px;border-radius:8px;font-weight:700">'+safe(ctaText||"Open SupplyDesk")+"</a></p>":"";
   const html='<!doctype html><html><body style="margin:0;background:#f4f8fa;font-family:Arial,Helvetica,sans-serif;color:#173746"><div style="display:none;max-height:0;overflow:hidden">'+safe(preheader)+'</div><div style="max-width:620px;margin:28px auto;padding:0 16px"><div style="background:#06182b;padding:18px 24px;border-radius:14px 14px 0 0;color:#fff;font-size:22px;font-weight:800">Supply<span style="color:#45d9ea">Desk</span></div><div style="background:#fff;padding:30px 28px;border:1px solid #dbe8ed;border-top:0;border-radius:0 0 14px 14px"><h1 style="font-size:22px;margin:0 0 16px;color:#092438">'+safe(title)+'</h1>'+(intro?'<p style="line-height:1.6">'+safe(intro)+'</p>':"")+bodyHtml+cta+'<p style="margin-top:30px;color:#71838b;font-size:12px;line-height:1.5">This is an automated message from SupplyDesk. Please do not share passwords or verification codes with anyone.<br>© '+new Date().getFullYear()+' SupplyDesk</p></div></div></body></html>';
-  const text=[title,intro,...textLines,ctaUrl?((ctaText||"Open SupplyDesk")+": "+origin+ctaUrl):"", "", "SupplyDesk"].filter(Boolean).join("\n");
+  const text=[title,intro,...textLines,ctaUrl?((ctaText||"Open SupplyDesk")+": "+(/^https?:\/\//i.test(ctaUrl)?ctaUrl:origin+ctaUrl)):"", "", "SupplyDesk"].filter(Boolean).join("\n");
   return {html,text};
 }
 
@@ -987,7 +999,7 @@ app.post("/api/buyer-dashboard/logout", requireBuyerDashboard, async(req,res)=>{
   res.json({ok:true});
 });
 
-app.post("/api/buyer-email/request-otp", connectLimiter, async (req,res)=>{
+app.post("/api/buyer-email/request-otp", buyerOtpRequestLimiter, async (req,res)=>{
   const email=clean(req.body?.email,255).toLowerCase();
   if(!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({error:"Please enter a valid email address."});
   const e2eMode=String(process.env.E2E_TEST_MODE||"").toLowerCase()==="true";
@@ -1003,7 +1015,14 @@ app.post("/api/buyer-email/request-otp", connectLimiter, async (req,res)=>{
     if(authorizedE2e){
       return res.json({ok:true,message:"Test verification code created.",expiresInMinutes:10,testOtp:otp});
     }
-    await mailer.sendMail({from:process.env.SMTP_FROM,to:email,subject:"SupplyDesk: Verify your email",text:["Your SupplyDesk email verification code is:","",otp,"","This code is valid for 10 minutes.","","If you did not request this code, you can ignore this email.","","SupplyDesk"].join("\n")});
+    const mail=buildProfessionalEmail({
+      preheader:"Your SupplyDesk email verification code",
+      title:"Verify your email",
+      intro:"Use the verification code below to verify your email and submit your sourcing requirement on SupplyDesk.",
+      bodyHtml:'<div style="margin:24px 0;padding:20px;background:#eef9f8;border:1px solid #c9ebe5;border-radius:12px;text-align:center"><div style="font-size:12px;color:#58717c;text-transform:uppercase;font-weight:700;letter-spacing:1px">Verification Code</div><div style="font-size:34px;letter-spacing:8px;font-weight:800;color:#087f8c;margin-top:8px">'+otp+'</div></div><p style="line-height:1.6">This code expires in <strong>10 minutes</strong>. Do not share it with anyone.</p><p style="color:#71838b;font-size:12px">If you did not request this code, you can safely ignore this email.</p>',
+      textLines:["Verification code: "+otp,"Valid for 10 minutes.","If you did not request this code, you can safely ignore this email."]
+    });
+    await mailer.sendMail({from:process.env.SMTP_FROM,replyTo:process.env.SMTP_FROM,to:email,subject:"SupplyDesk | Buyer Email Verification",text:mail.text,html:mail.html});
     res.json({ok:true,message:"Verification code sent to your email.",expiresInMinutes:10});
   }catch(error){
     console.error("Buyer email OTP failed:",{email,code:error?.code,message:error?.message});
@@ -1011,7 +1030,7 @@ app.post("/api/buyer-email/request-otp", connectLimiter, async (req,res)=>{
   }
 });
 
-app.post("/api/buyer-email/verify-otp", connectLimiter, async (req,res)=>{
+app.post("/api/buyer-email/verify-otp", buyerOtpVerifyLimiter, async (req,res)=>{
   const email=clean(req.body?.email,255).toLowerCase();
   const otp=clean(req.body?.otp,10);
   if(!/^\S+@\S+\.\S+$/.test(email) || !/^\d{6}$/.test(otp)) return res.status(400).json({error:"Enter the 6-digit verification code sent to your email."});
@@ -1239,14 +1258,15 @@ app.patch("/api/supplier-dashboard/connections/:id", requireSupplierDashboard, a
 });
 
 
-app.post("/api/buyer-requirements", connectLimiter, async(req,res)=>{
+app.post("/api/buyer-requirements", buyerRequirementLimiter, async(req,res)=>{
   const buyer=await getBuyerByDashboardToken(clean(req.body?.dashboardToken,256)); if(!buyer)return res.status(401).json({error:"Please verify your email before submitting a requirement."});
   const type=["product","raw_material","machinery","service","custom"].includes(req.body?.requirementType)?req.body.requirementType:"product";
   const buyerName=clean(req.body?.buyerName,180),buyerCompany=clean(req.body?.buyerCompany,180),buyerCountry=clean(req.body?.buyerCountry,120),buyerPhone=clean(req.body?.buyerPhone,80);
   const title=clean(req.body?.title,255),category=clean(req.body?.category,180)||null,subcategory=clean(req.body?.subcategory,180)||null,description=clean(req.body?.description,5000),quantity=clean(req.body?.quantity,120)||null,unit=clean(req.body?.unit,80)||null,currency=clean(req.body?.currency,10).toUpperCase()||"USD",deliveryCountry=clean(req.body?.deliveryCountry,120)||null,deliveryCity=clean(req.body?.deliveryCity,150)||null,requiredBy=clean(req.body?.requiredBy,20)||null,marketScope=["Domestic","International","Both"].includes(req.body?.marketScope)?req.body.marketScope:"Both";
   const targetPrice=req.body?.targetPrice===""||req.body?.targetPrice==null?null:Number(req.body.targetPrice);
   if(!buyerName||!buyerCountry)return res.status(400).json({error:"Name and country are required."}); if(!title||!description)return res.status(400).json({error:"Requirement title and description are required."}); if(targetPrice!==null&&(!Number.isFinite(targetPrice)||targetPrice<0))return res.status(400).json({error:"Enter a valid target price."});
-  try{await pool.execute("UPDATE buyers SET name=COALESCE(NULLIF(?,''),name),company=COALESCE(NULLIF(?,''),company),country=COALESCE(NULLIF(?,''),country),phone=COALESCE(NULLIF(?,''),phone),last_seen=NOW() WHERE id=?",[buyerName,buyerCompany,buyerCountry,buyerPhone,buyer.id]);const id=crypto.randomUUID();await pool.execute("INSERT INTO buyer_requirements (id,buyer_id,requirement_type,title,category,subcategory,description,quantity,unit,target_price,currency,delivery_country,delivery_city,required_by,market_scope) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",[id,buyer.id,type,title,category,subcategory,description,quantity,unit,targetPrice,currency,deliveryCountry,deliveryCity,requiredBy||null,marketScope]);res.status(201).json({ok:true,requirementId:id,message:"Requirement submitted. Matching suppliers can now review it and send quotations."});}catch(error){console.error(error);res.status(500).json({error:"Could not submit the requirement."});}
+  try{await pool.execute("UPDATE buyers SET name=COALESCE(NULLIF(?,''),name),company=COALESCE(NULLIF(?,''),company),country=COALESCE(NULLIF(?,''),country),phone=COALESCE(NULLIF(?,''),phone),last_seen=NOW() WHERE id=?",[buyerName,buyerCompany,buyerCountry,buyerPhone,buyer.id]);const id=crypto.randomUUID();await pool.execute("INSERT INTO buyer_requirements (id,buyer_id,requirement_type,title,category,subcategory,description,quantity,unit,target_price,currency,delivery_country,delivery_city,required_by,market_scope) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",[id,buyer.id,type,title,category,subcategory,description,quantity,unit,targetPrice,currency,deliveryCountry,deliveryCity,requiredBy||null,marketScope]);try{if(buyer.email&&process.env.SMTP_HOST&&process.env.SMTP_USER&&process.env.SMTP_PASSWORD&&process.env.SMTP_FROM){const cm=buildProfessionalEmail({preheader:"We received your sourcing requirement",title:"Requirement received",intro:"Hello "+(buyerName||"Buyer")+", your sourcing requirement has been submitted. Matching SupplyDesk suppliers can now review it and send you quotations.",bodyHtml:'<div style="margin:20px 0;padding:16px;background:#f4f9fc;border:1px solid #dbe8ed;border-radius:12px"><div style="font-size:12px;color:#58717c;text-transform:uppercase;font-weight:700;letter-spacing:1px">Your requirement</div><div style="font-size:16px;font-weight:700;margin-top:6px">'+escapeEmailHtml(title)+'</div></div><p style="line-height:1.6">Your email and phone number stay private. Quotations will appear in your Buyer Dashboard.</p>',textLines:["Hello "+(buyerName||"Buyer")+",","","Your sourcing requirement has been submitted:",title,"","Quotations will appear in your Buyer Dashboard."],ctaText:"Open Buyer Dashboard",ctaUrl:String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"")+"/buyer-dashboard.html"});await mailer.sendMail({from:process.env.SMTP_FROM,replyTo:process.env.SMTP_FROM,to:buyer.email,subject:"SupplyDesk | Requirement received",text:cm.text,html:cm.html});}}catch(mailError){console.error("Requirement confirmation email failed:",mailError);}
+res.status(201).json({ok:true,requirementId:id,message:"Requirement submitted. Matching suppliers can now review it and send quotations."});}catch(error){console.error(error);res.status(500).json({error:"Could not submit the requirement."});}
 });
 app.get("/api/buyer-requirements",requireBuyerDashboard,async(req,res)=>{try{const [requirements]=await pool.execute("SELECT r.*,(SELECT COUNT(*) FROM supplier_quotes q WHERE q.requirement_id=r.id AND q.status='submitted') quote_count FROM buyer_requirements r WHERE r.buyer_id=? ORDER BY r.created_at DESC LIMIT 100",[req.buyer.id]);res.json({requirements});}catch(error){res.status(500).json({error:"Could not load requirements."});}});
 app.get("/api/buyer-requirements/:id/quotes",requireBuyerDashboard,async(req,res)=>{try{const [[requirement]]=await pool.execute("SELECT id,title,status FROM buyer_requirements WHERE id=? AND buyer_id=?",[clean(req.params.id,80),req.buyer.id]);if(!requirement)return res.status(404).json({error:"Requirement not found."});const [quotes]=await pool.execute("SELECT q.id,q.unit_price,q.currency,q.quantity_available,q.moq,q.lead_time,q.payment_terms,q.incoterm,q.quote_valid_until,q.sample_available,q.notes,q.status,q.created_at,s.id supplier_id,s.trade_name,s.legal_name,s.country,s.city FROM supplier_quotes q JOIN supplier_profiles s ON s.id=q.supplier_id WHERE q.requirement_id=? AND q.status='submitted' ORDER BY q.created_at DESC",[requirement.id]);res.json({requirement,quotes});}catch(error){res.status(500).json({error:"Could not load quotations."});}});
@@ -1258,7 +1278,8 @@ app.post("/api/supplier-dashboard/requirements/:id/quote",requireSupplierDashboa
   try{const [[r]]=await pool.execute("SELECT * FROM buyer_requirements WHERE id=? AND status='open'",[id]);if(!r)return res.status(404).json({error:"Requirement is no longer open."});
     await pool.execute("INSERT INTO supplier_quotes (id,requirement_id,supplier_id,unit_price,currency,quantity_available,moq,lead_time,payment_terms,incoterm,quote_valid_until,sample_available,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE unit_price=VALUES(unit_price),currency=VALUES(currency),quantity_available=VALUES(quantity_available),moq=VALUES(moq),lead_time=VALUES(lead_time),payment_terms=VALUES(payment_terms),incoterm=VALUES(incoterm),quote_valid_until=VALUES(quote_valid_until),sample_available=VALUES(sample_available),notes=VALUES(notes),status='submitted',updated_at=NOW()",[crypto.randomUUID(),id,req.supplier.id,unitPrice,currency,quantityAvailable,moq,leadTime,paymentTerms,incoterm,quoteValidUntil||null,sampleAvailable,notes]);
     await pool.execute("INSERT INTO requirement_supplier_matches (id,requirement_id,supplier_id,status,viewed_at) VALUES (?,?,?,'quoted',NOW()) ON DUPLICATE KEY UPDATE status='quoted',viewed_at=COALESCE(viewed_at,NOW())",[crypto.randomUUID(),id,req.supplier.id]);
-    try{const [[buyer]]=await pool.execute("SELECT email,name FROM buyers WHERE id=?",[r.buyer_id]);if(buyer?.email&&process.env.SMTP_HOST&&process.env.SMTP_USER&&process.env.SMTP_PASSWORD&&process.env.SMTP_FROM){await mailer.sendMail({from:process.env.SMTP_FROM,to:buyer.email,subject:"SupplyDesk: New quotation received for "+r.title,text:["Hello "+(buyer.name||"Buyer")+",","","A supplier has submitted a quotation for your requirement:","",r.title,"Supplier: "+(req.supplier.trade_name||req.supplier.legal_name||"Supplier"),"Unit price: "+unitPrice+" "+currency,moq?"MOQ: "+moq:"",leadTime?"Lead time: "+leadTime:"","","Log in to your SupplyDesk Buyer Dashboard to review the quotation.","","SupplyDesk"].filter(Boolean).join("\n")});}}catch(mailError){console.error("Buyer quote notification failed:",mailError);}
+    try{const [[buyer]]=await pool.execute("SELECT email,name FROM buyers WHERE id=?",[r.buyer_id]);if(buyer?.email&&process.env.SMTP_HOST&&process.env.SMTP_USER&&process.env.SMTP_PASSWORD&&process.env.SMTP_FROM){const qm=buildProfessionalEmail({preheader:"A supplier has quoted on your requirement",title:"New quotation received",intro:"Hello "+(buyer.name||"Buyer")+", a supplier has submitted a quotation for your requirement.",bodyHtml:'<table style="width:100%;border-collapse:collapse;margin:18px 0;font-size:14px"><tr><td style="padding:8px 0;color:#58717c">Requirement</td><td style="padding:8px 0;font-weight:700">'+escapeEmailHtml(r.title)+'</td></tr><tr><td style="padding:8px 0;color:#58717c">Supplier</td><td style="padding:8px 0;font-weight:700">'+escapeEmailHtml(req.supplier.trade_name||req.supplier.legal_name||"Supplier")+'</td></tr><tr><td style="padding:8px 0;color:#58717c">Unit price</td><td style="padding:8px 0;font-weight:700">'+escapeEmailHtml(unitPrice+" "+currency)+'</td></tr>'+(moq?'<tr><td style="padding:8px 0;color:#58717c">MOQ</td><td style="padding:8px 0;font-weight:700">'+escapeEmailHtml(moq)+'</td></tr>':"")+(leadTime?'<tr><td style="padding:8px 0;color:#58717c">Lead time</td><td style="padding:8px 0;font-weight:700">'+escapeEmailHtml(leadTime)+'</td></tr>':"")+'</table>',textLines:["Hello "+(buyer.name||"Buyer")+",","","A supplier has submitted a quotation for your requirement:",r.title,"Supplier: "+(req.supplier.trade_name||req.supplier.legal_name||"Supplier"),"Unit price: "+unitPrice+" "+currency,moq?"MOQ: "+moq:"",leadTime?"Lead time: "+leadTime:""].filter(x=>x!==""),ctaText:"Open Buyer Dashboard",ctaUrl:String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"")+"/buyer-dashboard.html"});
+await mailer.sendMail({from:process.env.SMTP_FROM,replyTo:process.env.SMTP_FROM,to:buyer.email,subject:"SupplyDesk | New quotation received",text:qm.text,html:qm.html});}}catch(mailError){console.error("Buyer quote notification failed:",mailError);}
     res.status(201).json({ok:true,message:"Quotation sent to the buyer successfully."});
   }catch(error){console.error("Supplier quote failed:",error);res.status(500).json({error:"Could not submit the quotation."});}
 });
