@@ -7,6 +7,7 @@ const express = require("express");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const multer = require("multer");
+const { optimizeUploads } = require("./upload-optimize");
 const mysql = require("mysql2/promise");
 const nodemailer = require("nodemailer");
 
@@ -748,6 +749,7 @@ app.post("/api/supplier-applications",
     { name: "addressProof", maxCount: 1 },
     { name: "businessPhotos", maxCount: 8 }
   ])(req, res, next),
+  optimizeUploads(),
   async (req, res) => {
     const body = req.body || {};
 
@@ -1330,6 +1332,7 @@ app.post("/api/supplier-update/:token", supplierUpdateLimiter,
     { name: "addressProof", maxCount: 1 },
     { name: "businessPhotos", maxCount: 8 }
   ])(req, res, next),
+  optimizeUploads(),
   async (req, res) => {
     const tokenHash = hashToken(clean(req.params.token, 128));
     try {
@@ -1626,7 +1629,7 @@ app.delete("/api/supplier-dashboard/products/:id", requireSupplierDashboard, asy
   res.json({ok:true});
 });
 
-app.post("/api/supplier-dashboard/products/:id/images", requireSupplierDashboard, (req,res,next)=>productImageUpload.array("productImages",6)(req,res,next), async (req,res)=>{
+app.post("/api/supplier-dashboard/products/:id/images", requireSupplierDashboard, (req,res,next)=>productImageUpload.array("productImages",6)(req,res,next), optimizeUploads({allowPdf:false}), async (req,res)=>{
   const productId=clean(req.params.id,80);
   try{
     const [[product]]=await pool.execute("SELECT id FROM supplier_products WHERE id=? AND supplier_id=? AND status <> 'archived'",[productId,req.supplier.id]);
@@ -1915,9 +1918,9 @@ app.patch("/api/admin/products/:id", requireAdmin, async (req,res)=>{
   const status=clean(req.body?.status,30), notes=clean(req.body?.adminNotes,4000);
   if(!["approved","rejected","pending"].includes(status)) return res.status(400).json({error:"Invalid product status."});
   try{
-    const [result]=await pool.execute("UPDATE supplier_products SET status=?,admin_notes=?,reviewed_at=NOW(),reviewed_by=? WHERE id=?",[status,notes||null,"admin",clean(req.params.id,80)]);
-    if(status==="approved") await pool.execute("UPDATE supplier_product_files SET status='approved',admin_notes=?,reviewed_at=NOW(),reviewed_by='admin' WHERE product_id=? AND status='pending'",[notes||null,clean(req.params.id,80)]);
-    if(status==="rejected") await pool.execute("UPDATE supplier_product_files SET status='rejected',admin_notes=?,reviewed_at=NOW(),reviewed_by='admin' WHERE product_id=? AND status='pending'",[notes||null,clean(req.params.id,80)]);
+    const [result]=await pool.execute("UPDATE supplier_products SET status=?,admin_notes=?,reviewed_at=NOW(),reviewed_by=? WHERE id=?",[status,notes||null,req.admin.admin_id,clean(req.params.id,80)]);
+    if(status==="approved") await pool.execute("UPDATE supplier_product_files SET status='approved',admin_notes=?,reviewed_at=NOW(),reviewed_by=? WHERE product_id=? AND status='pending'",[notes||null,req.admin.admin_id,clean(req.params.id,80)]);
+    if(status==="rejected") await pool.execute("UPDATE supplier_product_files SET status='rejected',admin_notes=?,reviewed_at=NOW(),reviewed_by=? WHERE product_id=? AND status='pending'",[notes||null,req.admin.admin_id,clean(req.params.id,80)]);
     if(!result.affectedRows) return res.status(404).json({error:"Product not found."});
     res.json({ok:true,status});
   }catch(error){console.error(error);res.status(500).json({error:"Could not review product."});}
@@ -1999,7 +2002,7 @@ app.patch("/api/admin/applications/:id/verification", requireAdmin, async (req,r
     const [[app]]=await pool.execute("SELECT id FROM supplier_applications WHERE id=?",[clean(req.params.id,80)]);
     if(!app)return res.status(404).json({error:"Application not found."});
     params.push(clean(req.params.id,80));
-    await pool.execute("UPDATE supplier_verification SET "+updates.join(",")+",verified_at=NOW(),verified_by=? WHERE application_id=?",[...params.slice(0,-1), "admin", params[params.length-1]]);
+    await pool.execute("UPDATE supplier_verification SET "+updates.join(",")+",verified_at=NOW(),verified_by=? WHERE application_id=?",[...params.slice(0,-1), req.admin.admin_id, params[params.length-1]]);
     res.json({ok:true,message:"Verification checklist updated."});
   }catch(error){console.error("Verification checklist update failed:",error);res.status(500).json({error:"Could not update verification checklist."});}
 });
@@ -2039,7 +2042,7 @@ app.patch("/api/admin/applications/:id", requireAdmin, async (req, res) => {
 
     await conn.execute(
       "UPDATE supplier_applications SET status = ?, admin_notes = ?, reviewed_at = NOW(), reviewed_by = ? WHERE id = ?",
-      [status, notes || null, "admin", req.params.id]
+      [status, notes || null, req.admin.admin_id, req.params.id]
     );
 
     if (status === "approved") {
