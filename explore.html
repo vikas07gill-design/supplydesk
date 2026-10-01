@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Industries &amp; Countries | SupplyDesk</title>
+<meta name="description" content="Search verified suppliers and products by industry and country on SupplyDesk.">
+<style>
+:root{--ink:#0d2430;--muted:#647780;--line:#dbe7eb;--bg:#f5fafb;--card:#fff;--brand:#087f8c;--brand-2:#45d9ea;--dark:#092a38;--chip:#e8f4f6}
+*{box-sizing:border-box}
+body{margin:0;background:linear-gradient(180deg,#eef7fb,#f8fbfd 55%,#edf8f8);color:var(--ink);font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.45}
+a{text-decoration:none;color:inherit}
+.wrap{max-width:1180px;margin:auto;padding:0 20px}
+nav{height:70px;background:rgba(5,20,35,.92);border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;position:sticky;top:0;z-index:30;box-shadow:0 8px 30px rgba(3,24,40,.14)}
+.nav{width:100%;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.btn{display:inline-flex;align-items:center;justify-content:center;padding:10px 16px;border-radius:12px;border:1px solid var(--line);background:#fff;font-weight:800;font-size:14px;cursor:pointer;color:var(--ink)}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+nav .btn{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.14);color:#fff}
+.hero{position:relative;background:radial-gradient(circle at 85% 35%,rgba(37,145,255,.22),transparent 25%),linear-gradient(135deg,#06172a,#0a3453);color:#fff;padding:44px 0 74px}
+.eyebrow{font-size:12px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;color:#62e4e5}
+.hero h1{font-size:clamp(28px,4.4vw,46px);line-height:1.08;margin:10px 0 10px;max-width:760px}
+.hero p{color:#b8cad5;max-width:640px;margin:0}
+.searchbox{position:relative;margin-top:24px;max-width:860px}
+.searchbox input{width:100%;height:60px;border-radius:18px;border:2px solid transparent;padding:0 54px 0 52px;font-size:17px;box-shadow:0 18px 40px rgba(3,24,40,.3);outline:none;color:var(--ink);background:#fff}
+.searchbox input:focus{border-color:var(--brand-2)}
+.searchbox .ico{position:absolute;left:18px;top:19px;font-size:20px;color:var(--muted);pointer-events:none}
+.searchbox .clear{position:absolute;right:12px;top:12px;width:36px;height:36px;border-radius:50%;border:0;background:#eef4f6;cursor:pointer;font-size:18px;color:var(--muted);display:none}
+.hint{margin-top:10px;font-size:13px;color:#9db6c4}
+.hint button{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:#e8f6fa;border-radius:999px;padding:5px 11px;margin:4px 6px 0 0;font-size:13px;cursor:pointer}
+.hint button:hover{background:rgba(255,255,255,.18)}
+.suggest{position:absolute;left:0;right:0;top:66px;background:#fff;color:var(--ink);border-radius:16px;box-shadow:0 24px 60px rgba(3,24,40,.35);overflow:hidden;z-index:20;display:none;max-height:420px;overflow-y:auto}
+.suggest.open{display:block}
+.suggest h4{margin:0;padding:10px 16px 4px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.suggest [role=option]{display:flex;gap:10px;align-items:center;padding:10px 16px;cursor:pointer;font-size:15px}
+.suggest [role=option] small{color:var(--muted);margin-left:auto;font-size:12px;white-space:nowrap}
+.suggest [role=option][aria-selected=true],.suggest [role=option]:hover{background:#eaf6f8}
+.suggest mark{background:#cdeff3;color:inherit;border-radius:3px}
+.suggest .none{padding:16px;color:var(--muted)}
+main.wrap{margin-top:-34px;position:relative;z-index:5;padding-bottom:60px}
+.layout{display:grid;grid-template-columns:300px 1fr;gap:22px;align-items:start}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:16px;box-shadow:0 10px 30px rgba(13,63,84,.05)}
+.facets{position:sticky;top:86px;max-height:calc(100vh - 106px);overflow:auto}
+.facets h3{margin:2px 0 8px;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between;align-items:center}
+.facets h3 button{border:0;background:none;color:var(--brand);font-weight:800;cursor:pointer;font-size:12px}
+.fsearch{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;font-size:14px}
+.group-label{font-size:11px;font-weight:900;color:#8aa0aa;letter-spacing:.08em;text-transform:uppercase;margin:12px 0 4px}
+.fitem{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:0;background:none;padding:7px 9px;border-radius:10px;cursor:pointer;font-size:14px;color:var(--ink)}
+.fitem:hover{background:#f0f8f9}
+.fitem[aria-pressed=true]{background:var(--chip);font-weight:800;color:#065863}
+.fitem .n{margin-left:auto;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.fitem.zero{opacity:.45}
+.subs{margin:2px 0 6px 18px;border-left:2px solid var(--line);padding-left:8px}
+.sep{height:1px;background:var(--line);margin:16px 0}
+.topbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;flex:1}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--chip);border:1px solid #bfe3e8;color:#065863;border-radius:999px;padding:6px 8px 6px 12px;font-size:13px;font-weight:800}
+.chip button{border:0;background:#fff;border-radius:50%;width:20px;height:20px;cursor:pointer;color:#065863;line-height:1}
+.chip.soft{background:#fff7e6;border-color:#f3dba5;color:#7a5b00}
+.sortsel{padding:9px 10px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:14px}
+.tabs{display:flex;gap:6px;margin:0 0 12px}
+.tab{padding:8px 14px;border-radius:999px;border:1px solid var(--line);background:#fff;font-weight:800;font-size:14px;cursor:pointer}
+.tab[aria-selected=true]{background:var(--dark);border-color:var(--dark);color:#fff}
+.summary{font-size:14px;color:var(--muted);margin:2px 0 14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px}
+.card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:7px;box-shadow:0 8px 24px rgba(13,63,84,.04);transition:.2s}
+.card:hover{transform:translateY(-3px);box-shadow:0 18px 38px rgba(11,58,80,.09);border-color:#a8dfe2}
+.card .type{font-size:11px;font-weight:900;letter-spacing:.1em;color:var(--brand);text-transform:uppercase}
+.card h3{margin:0;font-size:17px}
+.card .meta{font-size:13px;color:var(--muted)}
+.card .desc{font-size:14px;color:#37525e;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.card .tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{font-size:12px;background:#f1f6f8;border-radius:8px;padding:3px 8px;color:#4b6470}
+.card .go{margin-top:auto;font-weight:800;color:var(--brand);font-size:14px}
+.empty{background:#fff;border:1px dashed #b9d4da;border-radius:20px;padding:34px;text-align:center}
+.empty h3{margin:0 0 6px}
+.empty p{color:var(--muted);margin:0 0 14px}
+.note{background:#fff7e6;border:1px solid #f3dba5;color:#7a5b00;border-radius:12px;padding:10px 14px;font-size:13px;margin-bottom:12px}
+.request{margin-top:26px;background:linear-gradient(135deg,#06192c,#0a3857);color:#fff;border-radius:22px;padding:22px 26px;display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.request h2{margin:0 0 4px;font-size:20px}.request p{margin:0;color:#b8ccd7}
+.filter-toggle{display:none}
+.skel{height:150px;border-radius:18px;background:linear-gradient(90deg,#eef4f6,#f8fbfc,#eef4f6);background-size:200% 100%;animation:sk 1.2s infinite}
+@keyframes sk{to{background-position:-200% 0}}
+@media(max-width:860px){
+ .layout{grid-template-columns:1fr}
+ .facets{position:static;max-height:none;display:none}
+ .facets.open{display:block}
+ .filter-toggle{display:inline-flex}
+ .hero{padding-bottom:64px}
+}
+:focus-visible{outline:3px solid var(--brand-2);outline-offset:2px}
+</style></head><body>
+<nav><div class="wrap nav"><a class="brand-logo" href="index.html" aria-label="SupplyDesk home"><img src="assets/supplydesk-logo-dark.svg" alt="SupplyDesk" style="width:180px;height:auto;display:block"></a><a class="btn primary" href="supplier-register.html">Register as Supplier</a></div></nav>
+
+<section class="hero"><div class="wrap">
+  <div class="eyebrow">Industries &amp; Countries</div>
+  <h1>Find the right supplier by industry and country.</h1>
+  <p>Type naturally — an industry, a product, a country or a city. Try “plastic machinery in India” or “textile Dubai”.</p>
+  <div class="searchbox">
+    <span class="ico" aria-hidden="true">⌕</span>
+    <input id="q" type="text" role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Search industry, product, country, city or supplier…" aria-label="Search industries and countries">
+    <button class="clear" id="clearQ" type="button" aria-label="Clear search">×</button>
+    <div class="suggest" id="suggest" role="listbox" aria-label="Suggestions"></div>
+  </div>
+  <div class="hint" id="hint"></div>
+</div></section>
+
+<main class="wrap">
+  <div class="layout">
+    <aside class="panel facets" id="facets" aria-label="Filters"></aside>
+    <section aria-live="polite">
+      <div class="topbar">
+        <button class="btn filter-toggle" id="ftoggle" type="button">☰ Filters</button>
+        <div class="chips" id="chips"></div>
+        <label class="sr" style="font-size:13px;color:var(--muted)">Sort
+          <select class="sortsel" id="sort"><option value="relevance">Best match</option><option value="newest">Newest</option><option value="name">Name A–Z</option></select>
+        </label>
+      </div>
+      <div class="tabs" role="tablist" id="tabs">
+        <button class="tab" role="tab" data-t="all" aria-selected="true">All</button>
+        <button class="tab" role="tab" data-t="supplier" aria-selected="false">Suppliers</button>
+        <button class="tab" role="tab" data-t="product" aria-selected="false">Products</button>
+      </div>
+      <div class="summary" id="summary">Loading…</div>
+      <div id="results"><div class="grid"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div></div>
+      <div class="request"><div><h2>Can’t find your industry or country?</h2><p>Request a category, or register your business to appear here.</p></div><a class="btn" href="supplier-register.html#category-request">Request a Category →</a></div>
+    </section>
+  </div>
+</main>
+
+<script>
+/* ---------- reference data ---------- */
+const GROUPS={Products:['Raw Materials','Plastics & Packaging','Machinery','Electronics & Components','Automotive','Textiles & Apparel','Food & Agriculture','Chemicals','Consumer Products','Construction Materials'],Services:['Logistics & Freight','Warehousing & Fulfilment','Customs & Trade','Inspection & Verification','Insurance','Trade Finance','Sourcing Services','Professional Services'],Industrial:['Industrial Equipment','Electrical Equipment','Tools & Hardware','Metal Products','Industrial Components','Manufacturing Services']};
+let SUBS={"Raw Materials":["Metals","Minerals","Polymers","Industrial Raw Materials"],"Plastics & Packaging":["Plastic Containers","Plastic Bottles","Packaging Films","Plastic Components"],"Machinery":["Injection Moulding Machines","CNC Machines","Packaging Machines","Industrial Machinery"],"Electronics & Components":["Electronic Components","PCB","Power Supplies","Sensors"],"Automotive":["Auto Components","Accessories","Aftermarket Parts"],"Textiles & Apparel":["Fabrics","Garments","Home Textiles"],"Food & Agriculture":["Food Ingredients","Agri Products","Processed Food"],"Chemicals":["Industrial Chemicals","Specialty Chemicals","Cleaning Chemicals"],"Consumer Products":["Household Products","Kitchenware","Personal Care"],"Construction Materials":["Building Materials","Tiles & Surfaces","Plumbing Products"],"Logistics & Freight":["Sea Freight","Air Freight","Road Transport","Freight Forwarding"],"Warehousing & Fulfilment":["Warehousing","Consolidation","Fulfilment"],"Customs & Trade":["Customs Clearance","Trade Documentation","Import Export Support"],"Inspection & Verification":["Factory Inspection","Pre-shipment Inspection","Quality Inspection"],"Insurance":["Cargo Insurance","Transit Insurance","Trade Insurance"],"Trade Finance":["Trade Finance","Letter of Credit","Working Capital"],"Sourcing Services":["Product Sourcing","Supplier Discovery","Procurement Support"],"Professional Services":["Consulting","Accounting & Tax","Legal Services"],"Industrial Equipment":["Process Equipment","Material Handling","Plant Equipment"],"Electrical Equipment":["Electrical Components","Switchgear","Industrial Controls"],"Tools & Hardware":["Hand Tools","Power Tools","Hardware"],"Metal Products":["Steel Products","Aluminium Products","Fabricated Parts"],"Industrial Components":["Bearings","Fasteners","Seals"],"Manufacturing Services":["Contract Manufacturing","Assembly","Fabrication"]};
+/* everyday words -> industry (and optional sub-industry) */
+const SYN={plastic:['Plastics & Packaging'],plastics:['Plastics & Packaging'],packaging:['Plastics & Packaging'],packing:['Plastics & Packaging'],bottle:['Plastics & Packaging','Plastic Bottles'],bottles:['Plastics & Packaging','Plastic Bottles'],film:['Plastics & Packaging','Packaging Films'],polymer:['Raw Materials','Polymers'],steel:['Metal Products','Steel Products'],aluminium:['Metal Products','Aluminium Products'],aluminum:['Metal Products','Aluminium Products'],metal:['Raw Materials','Metals'],metals:['Raw Materials','Metals'],machine:['Machinery'],machines:['Machinery'],machinery:['Machinery'],cnc:['Machinery','CNC Machines'],moulding:['Machinery','Injection Moulding Machines'],molding:['Machinery','Injection Moulding Machines'],electronics:['Electronics & Components'],electronic:['Electronics & Components'],pcb:['Electronics & Components','PCB'],sensor:['Electronics & Components','Sensors'],sensors:['Electronics & Components','Sensors'],electrical:['Electrical Equipment'],switchgear:['Electrical Equipment','Switchgear'],car:['Automotive'],cars:['Automotive'],auto:['Automotive'],automobile:['Automotive'],spare:['Automotive','Auto Components'],textile:['Textiles & Apparel'],textiles:['Textiles & Apparel'],apparel:['Textiles & Apparel'],garment:['Textiles & Apparel','Garments'],garments:['Textiles & Apparel','Garments'],clothing:['Textiles & Apparel','Garments'],fabric:['Textiles & Apparel','Fabrics'],fabrics:['Textiles & Apparel','Fabrics'],food:['Food & Agriculture'],agri:['Food & Agriculture','Agri Products'],agriculture:['Food & Agriculture'],spices:['Food & Agriculture','Food Ingredients'],rice:['Food & Agriculture','Agri Products'],chemical:['Chemicals'],chemicals:['Chemicals'],tiles:['Construction Materials','Tiles & Surfaces'],cement:['Construction Materials','Building Materials'],construction:['Construction Materials'],plumbing:['Construction Materials','Plumbing Products'],shipping:['Logistics & Freight'],freight:['Logistics & Freight'],cargo:['Logistics & Freight'],logistics:['Logistics & Freight'],forwarder:['Logistics & Freight','Freight Forwarding'],transport:['Logistics & Freight','Road Transport'],warehouse:['Warehousing & Fulfilment','Warehousing'],warehousing:['Warehousing & Fulfilment','Warehousing'],customs:['Customs & Trade','Customs Clearance'],clearance:['Customs & Trade','Customs Clearance'],inspection:['Inspection & Verification'],qc:['Inspection & Verification','Quality Inspection'],insurance:['Insurance'],finance:['Trade Finance'],lc:['Trade Finance','Letter of Credit'],sourcing:['Sourcing Services'],procurement:['Sourcing Services','Procurement Support'],consulting:['Professional Services','Consulting'],legal:['Professional Services','Legal Services'],tax:['Professional Services','Accounting & Tax'],tools:['Tools & Hardware'],hardware:['Tools & Hardware','Hardware'],bearing:['Industrial Components','Bearings'],bearings:['Industrial Components','Bearings'],fasteners:['Industrial Components','Fasteners'],bolts:['Industrial Components','Fasteners'],contract:['Manufacturing Services','Contract Manufacturing'],oem:['Manufacturing Services','Contract Manufacturing'],household:['Consumer Products','Household Products'],kitchenware:['Consumer Products','Kitchenware']};
+/* [name, ISO2, aliases] */
+const COUNTRY_DEF=[['India','IN',['bharat','ind','republic of india']],['China','CN',['prc','pr china','peoples republic of china','mainland china','cn']],['United Arab Emirates','AE',['uae','u.a.e','emirates','dubai uae']],['United States','US',['usa','u.s.a','us','america','united states of america']],['United Kingdom','GB',['uk','u.k','england','britain','great britain','scotland','wales']],['Germany','DE',['deutschland']],['France','FR',[]],['Italy','IT',['italia']],['Spain','ES',['espana']],['Netherlands','NL',['holland','the netherlands']],['Belgium','BE',[]],['Switzerland','CH',[]],['Sweden','SE',[]],['Poland','PL',[]],['Turkey','TR',['turkiye','türkiye']],['Saudi Arabia','SA',['ksa','kingdom of saudi arabia']],['Qatar','QA',[]],['Oman','OM',[]],['Kuwait','KW',[]],['Bahrain','BH',[]],['Israel','IL',[]],['Egypt','EG',[]],['South Africa','ZA',['rsa']],['Kenya','KE',[]],['Nigeria','NG',[]],['Ethiopia','ET',[]],['Ghana','GH',[]],['Tanzania','TZ',[]],['Morocco','MA',[]],['Singapore','SG',[]],['Malaysia','MY',[]],['Thailand','TH',[]],['Vietnam','VN',['viet nam']],['Indonesia','ID',[]],['Philippines','PH',[]],['Bangladesh','BD',[]],['Sri Lanka','LK',['srilanka']],['Pakistan','PK',[]],['Nepal','NP',[]],['Japan','JP',[]],['South Korea','KR',['korea','republic of korea','s korea']],['Taiwan','TW',[]],['Hong Kong','HK',['hk']],['Australia','AU',[]],['New Zealand','NZ',['nz']],['Canada','CA',[]],['Mexico','MX',[]],['Brazil','BR',[]],['Russia','RU',['russian federation']]];
+const CITY_COUNTRY={dubai:'United Arab Emirates','abu dhabi':'United Arab Emirates',sharjah:'United Arab Emirates',shenzhen:'China',guangzhou:'China',yiwu:'China',shanghai:'China',ningbo:'China',beijing:'China',foshan:'China',mumbai:'India',delhi:'India','new delhi':'India',ahmedabad:'India',pune:'India',chennai:'India',surat:'India',bengaluru:'India',bangalore:'India',kolkata:'India',jaipur:'India',hyderabad:'India',ludhiana:'India',houston:'United States','new york':'United States',chicago:'United States',london:'United Kingdom',hamburg:'Germany',singapore:'Singapore'};
+const STOP=new Set(['in','from','for','of','and','the','a','an','at','to','near','suppliers','supplier','manufacturers','manufacturer','exporters','exporter','company','companies','best','top','verified']);
+
+/* ---------- helpers ---------- */
+const $=id=>document.getElementById(id);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const norm=s=>String(s??'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/&/g,' and ').replace(/[^a-z0-9. ]+/g,' ').replace(/\s+/g,' ').trim();
+const flag=iso=>iso&&iso.length===2?String.fromCodePoint(...[...iso.toUpperCase()].map(c=>127397+c.charCodeAt(0))):'🌐';
+function lev(a,b){ /* edit distance with adjacent transpositions (frieght ~ freight = 1) */
+  if(a===b)return 0;if(Math.abs(a.length-b.length)>1)return 2;
+  const m=a.length,n=b.length,d=Array.from({length:m+1},()=>new Array(n+1).fill(0));
+  for(let i=0;i<=m;i++)d[i][0]=i;for(let j=0;j<=n;j++)d[0][j]=j;
+  for(let i=1;i<=m;i++)for(let j=1;j<=n;j++){
+    const c=a[i-1]===b[j-1]?0:1;
+    d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+c);
+    if(i>1&&j>1&&a[i-1]===b[j-2]&&a[i-2]===b[j-1])d[i][j]=Math.min(d[i][j],d[i-2][j-2]+1);
+  }
+  return d[m][n];
+}
+function hl(text,q){const t=String(text);const w=norm(q).split(' ').filter(Boolean);if(!w.length)return esc(t);let out=esc(t);w.forEach(x=>{try{out=out.replace(new RegExp('(?![^<]*>)('+x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','ig'),'<mark>$1</mark>')}catch(_){}});return out}
+
+/* country normaliser: free text -> canonical name */
+const COUNTRY_BY_KEY=new Map();
+COUNTRY_DEF.forEach(([name,iso,al])=>{[name,...al].forEach(a=>COUNTRY_BY_KEY.set(norm(a),{name,iso}))});
+const ISO_BY_NAME=new Map(COUNTRY_DEF.map(c=>[c[0],c[1]]));
+function canonCountry(raw){
+  const k=norm(raw);if(!k)return '';
+  const hit=COUNTRY_BY_KEY.get(k);if(hit)return hit.name;
+  const city=CITY_COUNTRY[k];if(city)return city;
+  if(k.length>=5){for(const [key,v] of COUNTRY_BY_KEY){if(key.length>=5&&lev(k,key)<=1)return v.name}}
+  return String(raw).trim().replace(/\b\w/g,c=>c.toUpperCase());
+}
+
+/* ---------- state ---------- */
+let DATA=[];            // normalised records
+let state={q:'',industry:'',sub:'',country:'',type:'all',sort:'relevance'};
+let loaded=false;
+
+function industryOf(r){return r.category||''}
+function prep(x){
+  const country=canonCountry(x.country);
+  const cat=x.category||'';
+  const sub=(x.subcategories&&x.subcategories[0])||'';
+  const hay=norm([x.name,x.desc,(x.tags||[]).join(' '),cat,sub,country,x.country,x.city,x.supplierName].join(' '));
+  return {...x,country,category:cat,sub,hay,nameN:norm(x.name),_i:0};
+}
+
+/* ---------- entity recognition in free text ---------- */
+function allIndustries(){return Object.values(GROUPS).flat()}
+function parseQuery(q){
+  const tokens=norm(q).split(' ').filter(Boolean);
+  const res={industry:'',sub:'',country:'',rest:[],alts:[],inds:[]};
+  const used=new Array(tokens.length).fill(false);
+  const lookup=(phrase)=>{
+    const c=COUNTRY_BY_KEY.get(phrase);if(c)return {country:c.name};
+    if(CITY_COUNTRY[phrase])return {country:CITY_COUNTRY[phrase],city:phrase};
+    for(const ind of allIndustries()){if(norm(ind)===phrase)return {industry:ind}}
+    for(const [ind,subs] of Object.entries(SUBS)){for(const s of subs){if(norm(s)===phrase)return {industry:ind,sub:s}}}
+    if(SYN[phrase])return {industry:SYN[phrase][0],sub:SYN[phrase][1]||''};
+    return null;
+  };
+  for(let n=3;n>=1;n--){
+    for(let i=0;i+n<=tokens.length;i++){
+      if(used.slice(i,i+n).some(Boolean))continue;
+      const hit=lookup(tokens.slice(i,i+n).join(' '));
+      if(!hit)continue;
+      if(hit.country&&!res.country){res.country=hit.country}
+      else if(hit.industry&&!res.industry){res.industry=hit.industry;res.sub=hit.sub||''}
+      else if(hit.industry&&hit.industry!==res.industry){res.alts.push({industry:hit.industry,sub:hit.sub||''})}
+      else continue;
+      for(let k=i;k<i+n;k++)used[k]=true;
+    }
+  }
+  tokens.forEach((t,i)=>{if(!used[i]&&!STOP.has(t))res.rest.push(t)});
+  res.inds=[res.industry,...res.alts.map(a=>a.industry)].filter((v,i,a)=>v&&a.indexOf(v)===i);
+  return res;
+}
+
+/* ---------- filtering & scoring ---------- */
+function effective(){
+  /* words typed in the box win over a previously ticked facet, so a new search always behaves as typed */
+  const p=parseQuery(state.q);
+  const industry=p.industry||state.industry;
+  const inds=p.inds.length>1?p.inds:(industry?[industry]:[]);
+  const sub=p.industry?p.sub:state.sub;
+  return {industry,inds,sub:inds.length>1?'':sub,country:p.country||state.country,rest:p.rest,parsed:p};
+}
+function textScore(r,tokens){
+  if(!tokens.length)return 1;
+  let s=0;
+  for(const t of tokens){
+    let ok=false;
+    if(r.nameN.startsWith(t)){s+=6;ok=true}
+    else if((' '+r.nameN).includes(' '+t)){s+=4;ok=true}
+    else if(r.hay.includes(t)){s+=2;ok=true}
+    else if(t.length>=5){for(const w of r.hay.split(' ')){if(w.length>=4&&lev(t,w)<=1){s+=1;ok=true;break}}}
+    if(!ok)return 0;
+  }
+  return s;
+}
+function matches(r,e,skip){
+  if(skip!=='industry'&&e.inds.length&&!e.inds.includes(r.category))return false;
+  if(skip!=='sub'&&e.sub&&r.sub!==e.sub)return false;
+  if(skip!=='country'&&e.country&&r.country!==e.country)return false;
+  return true;
+}
+function results(){
+  const e=effective();
+  let rows=DATA.filter(r=>matches(r,e)&&(state.type==='all'||r.type===state.type));
+  rows=rows.map(r=>({r,s:textScore(r,e.rest)})).filter(x=>x.s>0);
+  if(state.sort==='name')rows.sort((a,b)=>a.r.name.localeCompare(b.r.name));
+  else if(state.sort==='newest')rows.sort((a,b)=>a.r._i-b.r._i);
+  else rows.sort((a,b)=>(b.s-a.s)||(a.r._i-b.r._i));
+  return {rows:rows.map(x=>x.r),e};
+}
+
+/* ---------- suggestions ---------- */
+function suggestions(q){
+  const nq=norm(q);if(!nq)return [];
+  const out=[];
+  const score=(label,extra=[])=>{
+    const n=norm(label);let s=0;
+    if(n===nq)s=100;else if(n.startsWith(nq))s=85;else if(n.split(' ').some(w=>w.startsWith(nq)))s=65;else if(n.includes(nq))s=45;
+    for(const a of extra){const an=norm(a);if(an===nq)s=Math.max(s,90);else if(an.startsWith(nq))s=Math.max(s,70);else if(nq.length>=5&&lev(nq,an)<=1)s=Math.max(s,35)}
+    if(!s&&nq.length>=5&&n.split(' ').some(w=>w.length>=4&&lev(nq,w)<=1))s=30;
+    return s;
+  };
+  const counts=facetCounts();
+  allIndustries().forEach(i=>{const syn=Object.keys(SYN).filter(k=>SYN[k][0]===i&&!SYN[k][1]);const s=score(i,syn);if(s)out.push({k:'industry',label:i,s,sub:(counts.industry[i]||0)+' listings',v:i})});
+  Object.entries(SUBS).forEach(([i,subs])=>subs.forEach(sb=>{const syn=Object.keys(SYN).filter(k=>SYN[k][1]===sb);const s=score(sb,syn);if(s)out.push({k:'sub',label:sb,s:s-5,sub:i,v:sb,parent:i})}));
+  COUNTRY_DEF.forEach(([n,iso,al])=>{const s=score(n,al);if(s)out.push({k:'country',label:n,s:s+4,sub:(counts.country[n]||0)+' listings',v:n,iso})});
+  Object.entries(CITY_COUNTRY).forEach(([c,cn])=>{const s=score(c);if(s)out.push({k:'country',label:c.replace(/\b\w/g,x=>x.toUpperCase())+' → '+cn,s:s-8,sub:'city',v:cn,iso:ISO_BY_NAME.get(cn)})});
+  const seen=new Set();
+  DATA.forEach(r=>{const key=r.type+r.name;if(seen.has(key))return;const s=score(r.name);if(s>=45){seen.add(key);out.push({k:r.type,label:r.name,s:s-15,sub:(r.city?r.city+', ':'')+r.country,v:r,id:r.id})}});
+  out.sort((a,b)=>b.s-a.s);
+  const per={};return out.filter(o=>{per[o.k]=(per[o.k]||0)+1;return per[o.k]<=4}).slice(0,10);
+}
+let sugItems=[],sugIdx=-1;
+const KIND={industry:'Industries',sub:'Sub-industries',country:'Countries & cities',supplier:'Suppliers',product:'Products'};
+const ICON={industry:'◈',sub:'◇',supplier:'🏭',product:'📦'};
+function renderSuggest(){
+  const box=$('suggest'),q=$('q').value;
+  sugItems=suggestions(q);sugIdx=sugItems.length?0:-1;
+  if(!q.trim()){box.classList.remove('open');$('q').setAttribute('aria-expanded','false');return}
+  if(!sugItems.length){box.innerHTML='<div class="none">No matching industry, country or supplier. Press Enter to search listings for “'+esc(q)+'”.</div>';box.classList.add('open');return}
+  let html='',last='';
+  sugItems.forEach((s,i)=>{
+    if(s.k!==last){html+='<h4>'+KIND[s.k]+'</h4>';last=s.k}
+    const icon=s.k==='country'?flag(s.iso):ICON[s.k];
+    html+='<div role="option" id="sg'+i+'" data-i="'+i+'" aria-selected="'+(i===0)+'"><span aria-hidden="true">'+icon+'</span><span>'+hl(s.label,q)+'</span><small>'+esc(s.sub||'')+'</small></div>';
+  });
+  box.innerHTML=html;box.classList.add('open');$('q').setAttribute('aria-expanded','true');
+}
+function moveSug(d){
+  if(!sugItems.length)return;
+  sugIdx=(sugIdx+d+sugItems.length)%sugItems.length;
+  document.querySelectorAll('#suggest [role=option]').forEach(el=>el.setAttribute('aria-selected',Number(el.dataset.i)===sugIdx));
+  const el=$('sg'+sugIdx);if(el){el.scrollIntoView({block:'nearest'});$('q').setAttribute('aria-activedescendant','sg'+sugIdx)}
+}
+function pick(i){
+  const s=sugItems[i];if(!s)return;
+  if(s.k==='industry'){state.industry=s.v;state.sub=''}
+  else if(s.k==='sub'){state.industry=s.parent;state.sub=s.v}
+  else if(s.k==='country'){state.country=s.v}
+  else{location.href=(s.k==='supplier'?'supplier.html?id=':'product.html?id=')+encodeURIComponent(s.id);return}
+  /* remove the words that picked the entity, keep the rest as free text */
+  state.q='';$('q').value='';closeSuggest();sync();
+}
+function closeSuggest(){$('suggest').classList.remove('open');$('q').setAttribute('aria-expanded','false')}
+/* Enter without a highlighted pick: turn recognised words into filters, keep the remainder as text */
+function commit(){
+  const e=parseQuery(state.q);
+  if(e.industry&&!state.industry){state.industry=e.industry;state.sub=e.sub||''}
+  if(e.country&&!state.country)state.country=e.country;
+  state.q=e.rest.join(' ');$('q').value=state.q;closeSuggest();sync();
+}
+
+/* ---------- facets ---------- */
+function facetCounts(){
+  const e=effective();const c={industry:{},sub:{},country:{}};
+  DATA.forEach(r=>{
+    if(state.type!=='all'&&r.type!==state.type)return;
+    if(textScore(r,e.rest)===0)return;
+    if(!e.country||r.country===e.country)c.industry[r.category]=(c.industry[r.category]||0)+1;
+    if((!e.industry||r.category===e.industry)&&(!e.country||r.country===e.country))c.sub[r.sub]=(c.sub[r.sub]||0)+1;
+    if((!e.industry||r.category===e.industry)&&(!e.sub||r.sub===e.sub))c.country[r.country]=(c.country[r.country]||0)+1;
+  });
+  return c;
+}
+let fIndQ='',fCtyQ='';
+function renderFacets(){
+  const e=effective(),c=facetCounts();
+  let h='<h3>Industry '+(e.industry?'<button data-clear="industry">Clear</button>':'')+'</h3><input class="fsearch" id="fInd" placeholder="Filter industries…" aria-label="Filter industries" value="'+esc(fIndQ)+'">';
+  const nq=norm(fIndQ);
+  Object.entries(GROUPS).forEach(([g,items])=>{
+    const vis=items.filter(i=>!nq||norm(i).includes(nq)||(SUBS[i]||[]).some(s=>norm(s).includes(nq)));
+    if(!vis.length)return;
+    h+='<div class="group-label">'+g+'</div>';
+    vis.forEach(i=>{
+      const sel=e.industry===i;
+      h+='<button class="fitem'+(c.industry[i]?'':' zero')+'" data-ind="'+esc(i)+'" aria-pressed="'+sel+'"><span>'+esc(i)+'</span><span class="n">'+(c.industry[i]||0)+'</span></button>';
+      if(sel)h+='<div class="subs">'+(SUBS[i]||[]).map(s=>'<button class="fitem'+(c.sub[s]?'':' zero')+'" data-sub="'+esc(s)+'" aria-pressed="'+(e.sub===s)+'"><span>'+esc(s)+'</span><span class="n">'+(c.sub[s]||0)+'</span></button>').join('')+'</div>';
+    });
+  });
+  h+='<div class="sep"></div><h3>Country '+(e.country?'<button data-clear="country">Clear</button>':'')+'</h3><input class="fsearch" id="fCty" placeholder="Filter countries…" aria-label="Filter countries" value="'+esc(fCtyQ)+'">';
+  const cq=norm(fCtyQ);
+  const present=Object.keys(c.country).filter(Boolean);
+  const names=[...new Set([...present,...(e.country?[e.country]:[]),...(cq?COUNTRY_DEF.map(x=>x[0]):[])])]
+    .filter(n=>!cq||norm(n).includes(cq)||[...COUNTRY_BY_KEY].some(([k,v])=>v.name===n&&k.includes(cq)))
+    .sort((a,b)=>(c.country[b]||0)-(c.country[a]||0)||a.localeCompare(b));
+  if(!names.length)h+='<div class="group-label" style="text-transform:none;letter-spacing:0">No countries match.</div>';
+  names.forEach(n=>{h+='<button class="fitem'+(c.country[n]?'':' zero')+'" data-cty="'+esc(n)+'" aria-pressed="'+(e.country===n)+'"><span aria-hidden="true">'+flag(ISO_BY_NAME.get(n))+'</span><span>'+esc(n)+'</span><span class="n">'+(c.country[n]||0)+'</span></button>'});
+  const keepFocus=document.activeElement&&document.activeElement.id;
+  $('facets').innerHTML=h;
+  if(keepFocus==='fInd'||keepFocus==='fCty'){const el=$(keepFocus);el.focus();el.setSelectionRange(el.value.length,el.value.length)}
+}
+
+/* ---------- chips, results ---------- */
+function renderChips(){
+  const e=effective(),p=e.parsed;
+  const chip=(label,key,soft)=>'<span class="chip'+(soft?' soft':'')+'">'+label+'<button data-rm="'+key+'" aria-label="Remove '+esc(label)+'">×</button></span>';
+  let h='';
+  if(e.inds.length)h+=chip('Industry: '+esc(e.inds.join(' + ')),'industry',!!p.industry);
+  if(e.sub)h+=chip('Sub: '+esc(e.sub),'sub',!!p.sub);
+  if(e.country)h+=chip(flag(ISO_BY_NAME.get(e.country))+' '+esc(e.country),'country',!!p.country);
+  if(e.rest.length)h+=chip('“'+esc(e.rest.join(' '))+'”','text',false);
+  $('chips').innerHTML=h;
+}
+function card(r){
+  const href=(r.type==='supplier'?'supplier.html?id=':'product.html?id=')+encodeURIComponent(r.id);
+  return '<a class="card" href="'+href+'"><div class="type">'+esc(r.type)+(r.verified?' · ✓ Verified':'')+'</div><h3>'+esc(r.name)+'</h3>'+
+    '<div class="meta">'+flag(ISO_BY_NAME.get(r.country))+' '+esc([r.city,r.country].filter(Boolean).join(', '))+(r.type==='product'&&r.supplierName?' · by '+esc(r.supplierName):'')+'</div>'+
+    '<div class="desc">'+esc(r.desc||'')+'</div>'+
+    '<div class="tags">'+[r.category,r.sub].filter(Boolean).map(t=>'<span class="tag">'+esc(t)+'</span>').join('')+(r.moq?'<span class="tag">MOQ '+esc(r.moq)+' '+esc(r.unit||'')+'</span>':'')+'</div>'+
+    '<span class="go">View '+(r.type==='supplier'?'supplier':'product')+' →</span></a>';
+}
+function renderResults(){
+  if(!loaded)return;
+  const {rows,e}=results();
+  const bits=[e.industry,e.sub,e.country].filter(Boolean);
+  $('summary').textContent=rows.length+' result'+(rows.length===1?'':'s')+(bits.length?' for '+bits.join(' · '):'')+' · verified suppliers & products';
+  const capped=(window.__capSuppliers||window.__capProducts)?'<div class="note">Showing the most recent 200 suppliers/products from the directory. Narrow by industry or country to see more relevant listings.</div>':'';
+  if(!rows.length){
+    const hasFilters=e.industry||e.sub||e.country||e.rest.length;
+    window.__alts=e.inds.length>1?[]:e.parsed.alts.filter(a=>a.industry!==e.industry).slice(0,3);const alts=window.__alts;
+    $('results').innerHTML='<div class="empty"><h3>No listings match yet</h3><p>'+(e.country&&e.industry?'There are no '+esc(e.industry)+' listings in '+esc(e.country)+' yet.':'Try a broader term, another country, or clear the filters.')+'</p>'+alts.map((a,i)=>'<button class="btn" type="button" data-alt="'+i+'" style="margin:0 6px 8px 0">Try '+esc(a.sub||a.industry)+(e.country?' in '+esc(e.country):'')+'</button>').join('')+(hasFilters?'<button class="btn primary" id="resetAll" type="button">Clear all filters</button>':'')+'</div>';
+    return;
+  }
+  $('results').innerHTML=capped+'<div class="grid">'+rows.map(card).join('')+'</div>';
+}
+
+/* ---------- sync + URL ---------- */
+function sync(push){
+  const u=new URLSearchParams();
+  ['q','industry','sub','country'].forEach(k=>{if(state[k])u.set(k,state[k])});
+  if(state.type!=='all')u.set('type',state.type);
+  if(state.sort!=='relevance')u.set('sort',state.sort);
+  history.replaceState(null,'',location.pathname+(u.toString()?'?'+u:''));
+  $('clearQ').style.display=$('q').value?'block':'none';
+  document.querySelectorAll('#tabs .tab').forEach(t=>t.setAttribute('aria-selected',t.dataset.t===state.type));
+  $('sort').value=state.sort;
+  renderChips();renderFacets();renderResults();
+}
+function loadFromUrl(){
+  const u=new URLSearchParams(location.search);
+  state.q=u.get('q')||'';state.industry=u.get('industry')||u.get('category')||'';state.sub=u.get('sub')||'';
+  state.country=canonCountry(u.get('country')||'');state.type=['supplier','product'].includes(u.get('type'))?u.get('type'):'all';
+  state.sort=['name','newest'].includes(u.get('sort'))?u.get('sort'):'relevance';
+  $('q').value=state.q;
+}
+
+/* ---------- events ---------- */
+let t;
+$('q').addEventListener('input',()=>{state.q=$('q').value;clearTimeout(t);renderSuggest();t=setTimeout(sync,120)});
+$('q').addEventListener('keydown',ev=>{
+  if(ev.key==='ArrowDown'){ev.preventDefault();if(!$('suggest').classList.contains('open'))renderSuggest();else moveSug(1)}
+  else if(ev.key==='ArrowUp'){ev.preventDefault();moveSug(-1)}
+  else if(ev.key==='Escape'){closeSuggest()}
+  else if(ev.key==='Enter'){ev.preventDefault();if($('suggest').classList.contains('open')&&sugIdx>=0&&sugItems[sugIdx]&&sugItems[sugIdx].s>=60)pick(sugIdx);else commit()}
+});
+$('q').addEventListener('focus',()=>{if($('q').value)renderSuggest()});
+$('suggest').addEventListener('mousedown',ev=>{const o=ev.target.closest('[role=option]');if(o){ev.preventDefault();pick(Number(o.dataset.i))}});
+document.addEventListener('click',ev=>{if(!ev.target.closest('.searchbox'))closeSuggest()});
+$('clearQ').onclick=()=>{state.q='';$('q').value='';closeSuggest();sync();$('q').focus()};
+$('sort').onchange=ev=>{state.sort=ev.target.value;sync()};
+$('tabs').addEventListener('click',ev=>{const b=ev.target.closest('.tab');if(b){state.type=b.dataset.t;sync()}});
+$('ftoggle').onclick=()=>$('facets').classList.toggle('open');
+$('facets').addEventListener('input',ev=>{if(ev.target.id==='fInd'){fIndQ=ev.target.value;renderFacets()}if(ev.target.id==='fCty'){fCtyQ=ev.target.value;renderFacets()}});
+$('facets').addEventListener('click',ev=>{
+  const b=ev.target.closest('button');if(!b)return;
+  if(b.dataset.ind!==undefined){const e=effective();const off=e.industry===b.dataset.ind;state.q=stripEntity('industry');$('q').value=state.q;state.industry=off?'':b.dataset.ind;state.sub=''}
+  else if(b.dataset.sub!==undefined){const e=effective();const off=e.sub===b.dataset.sub;state.industry=e.industry;state.q=stripEntity('industry');$('q').value=state.q;state.sub=off?'':b.dataset.sub}
+  else if(b.dataset.cty!==undefined){const e=effective();state.q=stripEntity('country');$('q').value=state.q;state.country=e.country===b.dataset.cty?'':b.dataset.cty}
+  else if(b.dataset.clear){clearKey(b.dataset.clear)}
+  else return;
+  sync();
+});
+function stripEntity(kind){ /* drop recognised words of this kind from the query text */
+  const toks=norm(state.q).split(' ');const keep=[];
+  toks.forEach(w=>{const isC=COUNTRY_BY_KEY.has(w)||CITY_COUNTRY[w];const isI=SYN[w];if((kind==='country'&&isC)||(kind==='industry'&&isI))return;keep.push(w)});
+  return keep.join(' ');
+}
+function clearKey(k){
+  if(k==='industry'){state.industry='';state.sub='';state.q=stripEntity('industry')}
+  else if(k==='sub'){state.sub='';if(!state.industry){const e=parseQuery(state.q);if(e.sub)state.q=stripEntity('industry')}}
+  else if(k==='country'){state.country='';state.q=stripEntity('country')}
+  else if(k==='text'){state.q=''}
+  $('q').value=state.q;
+}
+$('chips').addEventListener('click',ev=>{const b=ev.target.closest('[data-rm]');if(b){clearKey(b.dataset.rm);sync()}});
+$('results').addEventListener('click',ev=>{const al=ev.target.closest('[data-alt]');if(al){const a=window.__alts[Number(al.dataset.alt)];state.industry=a.industry;state.sub=a.sub;state.q=parseQuery(state.q).rest.filter(w=>!SYN[w]).join(' ');$('q').value=state.q;sync();return}if(ev.target.id==='resetAll'){state={...state,q:'',industry:'',sub:'',country:''};$('q').value='';sync()}});
+window.addEventListener('popstate',()=>{loadFromUrl();sync()});
+
+/* ---------- data ---------- */
+function hints(){
+  const ex=[['Plastics & Packaging','industry'],['India','country'],['Machinery in China','q'],['Textile Dubai','q'],['Logistics','industry']];
+  $('hint').innerHTML='Try: '+ex.map(([l])=>'<button type="button" data-h="'+esc(l)+'">'+esc(l)+'</button>').join('');
+}
+$('hint').addEventListener('click',ev=>{const b=ev.target.closest('[data-h]');if(b){state.q=b.dataset.h;$('q').value=state.q;commit();$('q').focus()}});
+async function init(){
+  hints();loadFromUrl();sync();
+  try{const r=await fetch('/api/categories');if(r.ok){const j=await r.json();if(j.subcategories)SUBS={...SUBS,...j.subcategories}}}catch(_){}
+  try{
+    const [sr,pr]=await Promise.all([fetch('/api/suppliers'),fetch('/api/products')]);
+    const sj=sr.ok?await sr.json():{},pj=pr.ok?await pr.json():{};
+    const sup=sj.suppliers||[],prod=pj.products||[];
+    window.__capSuppliers=sup.length>=200;window.__capProducts=prod.length>=200;
+    DATA=[...sup,...prod].map(prep);DATA.forEach((r,i)=>r._i=i);
+  }catch(_){}
+  loaded=true;sync();
+}
+init();
+</script></body></html>
