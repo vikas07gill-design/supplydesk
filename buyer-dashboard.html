@@ -61,11 +61,14 @@ async function load(){
  }catch(e){localStorage.removeItem("supplydesk_buyer_dashboard_token");location.href="index.html";}
 }
 
+const REQ_LABELS={pending_review:"Under SupplyDesk review",open:"Shared with suppliers",fulfilling:"SupplyDesk is handling it",rejected:"Not accepted",closed:"Closed",cancelled:"Cancelled"};
+function reqLabel(s){return REQ_LABELS[s]||s}
+function reqStep(x){if(x.status==="pending_review")return "Step 1 of 3 · Our team is reviewing your requirement. You will get an email when it is shared.";if(x.status==="open")return "Step 2 of 3 · Sent to <b>"+esc(x.sent_count||0)+"</b> matching supplier(s) · <b>"+esc(x.quote_count||0)+"</b> quotation(s) received";if(x.status==="fulfilling")return "SupplyDesk will supply this directly and contact you with the next steps.";if(x.status==="rejected")return "We could not take this requirement forward.";return "<b>"+esc(x.quote_count||0)+"</b> quotation(s) received"}
 async function loadRequirements(){
  const el=document.getElementById("requirements");if(!el)return;
  try{const r=await fetch("/api/buyer-requirements",{headers:{"x-buyer-dashboard-token":token}});if(!r.ok)throw new Error();const d=await r.json(),items=d.requirements||[];
  if(!items.length){el.innerHTML='<div class="empty">No requirements posted yet.</div>';return;}
- el.innerHTML=items.map(x=>'<div style="border:1px solid var(--line);border-radius:13px;padding:14px;margin-top:10px"><div style="display:flex;justify-content:space-between;gap:10px"><strong>'+esc(x.title)+'</strong><span class="pill">'+esc(x.status)+'</span></div><div style="font-size:12px;color:var(--muted);margin-top:6px">Qty: '+esc(x.quantity||"Not specified")+(x.unit?" "+esc(x.unit):"")+' · '+esc(x.category||"Custom")+' · '+esc(x.delivery_country||"")+'</div><div style="font-size:12px;margin-top:5px"><b>'+esc(x.quote_count||0)+'</b> quotation(s) received</div><button class="btn primary" style="margin-top:10px" onclick="viewQuotes(\''+esc(x.id)+'\')">View Quotations</button></div>').join("");
+ el.innerHTML=items.map(x=>'<div style="border:1px solid var(--line);border-radius:13px;padding:14px;margin-top:10px"><div style="display:flex;justify-content:space-between;gap:10px"><strong>'+esc(x.title)+'</strong><span class="pill">'+esc(reqLabel(x.status))+'</span></div><div style="font-size:12px;color:var(--muted);margin-top:6px">Qty: '+esc(x.quantity||"Not specified")+(x.unit?" "+esc(x.unit):"")+' · '+esc(x.category||"Custom")+' · '+esc(x.delivery_country||"")+'</div><div style="font-size:12px;margin-top:5px">'+reqStep(x)+'</div>'+(x.buyer_note?'<div style="font-size:12px;margin-top:6px;padding:8px 10px;background:#f4f9fc;border-radius:9px"><b>SupplyDesk:</b> '+esc(x.buyer_note)+'</div>':'')+'<button class="btn primary" style="margin-top:10px" onclick="viewQuotes(\''+esc(x.id)+'\')">View Quotations</button></div>').join("");
  }catch{el.innerHTML='<div class="empty">Could not load requirements.</div>';}
 }
 async function viewQuotes(id){
