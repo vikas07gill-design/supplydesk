@@ -1,0 +1,84 @@
+/* SupplyDesk depth layer: subtle 3D (layered shadows, bevels, press and lift).
+   Visual only: no layout, size or colour changes. Linked last in every page. */
+:root{
+  --d-edge:rgba(8,60,80,.10);
+  --d-soft:0 1px 1px rgba(8,40,58,.05),0 3px 6px rgba(8,40,58,.05),0 10px 22px rgba(8,40,58,.06);
+  --d-hover:0 2px 2px rgba(8,40,58,.06),0 8px 14px rgba(8,40,58,.08),0 22px 40px rgba(8,40,58,.10);
+}
+
+/* ---------- blocks / cards ---------- */
+.card,.panel,.result,.feature,.box,.network-card,.connect-card,.modal-card,.metric,.product,.profile,.step,.market,.invite-modal,.quick-action{
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.75),0 2px 0 var(--d-edge),var(--d-soft);
+  transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease;
+}
+a.card:hover,.feature:hover,.result:hover,.network-card:hover,.market:hover,.quick-action:hover,.metric:hover,.step:hover{
+  transform:translateY(-3px);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.8),0 3px 0 var(--d-edge),var(--d-hover);
+}
+.network-card{box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 12px 28px rgba(3,24,40,.28)}
+.modal-card,.invite-modal{box-shadow:inset 0 1px 0 rgba(255,255,255,.8),0 30px 80px rgba(3,24,40,.35),0 8px 20px rgba(3,24,40,.18)}
+
+/* ---------- buttons ---------- */
+.btn,.tab,.tab-btn,.search-tab,.toolbar button,.invite-modal button:not(.primary),.section-toolbar button,.cta,.wa-btn{
+  background-image:linear-gradient(180deg,rgba(255,255,255,.95),rgba(236,244,247,.95));
+  box-shadow:inset 0 1px 0 #fff,inset 0 -2px 0 rgba(8,60,80,.06),0 2px 0 rgba(8,60,80,.13),0 6px 12px rgba(8,60,80,.09);
+  transition:transform .12s ease,box-shadow .12s ease,filter .12s ease;
+}
+.btn:hover,.tab:hover,.tab-btn:hover,.search-tab:hover,.toolbar button:hover,.invite-modal button:not(.primary):hover,.section-toolbar button:hover,.cta:hover,.wa-btn:hover{
+  transform:translateY(-1px);
+  box-shadow:inset 0 1px 0 #fff,inset 0 -2px 0 rgba(8,60,80,.06),0 3px 0 rgba(8,60,80,.13),0 10px 18px rgba(8,60,80,.13);
+}
+.btn:active,.tab:active,.tab-btn:active,.search-tab:active,.toolbar button:active,.invite-modal button:not(.primary):active,.section-toolbar button:active,.cta:active,.wa-btn:active{
+  transform:translateY(2px);
+  box-shadow:inset 0 2px 4px rgba(8,60,80,.15),0 0 0 rgba(0,0,0,0);
+}
+.primary,.btn.primary,button.primary,.toolbar button.primary{
+  background-image:linear-gradient(180deg,#13a0af 0%,#087f8c 55%,#067080 100%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.32),inset 0 -2px 0 rgba(0,0,0,.16),0 3px 0 #055a66,0 8px 16px rgba(8,127,140,.30);
+}
+.primary:hover,.btn.primary:hover,button.primary:hover{
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.36),inset 0 -2px 0 rgba(0,0,0,.16),0 4px 0 #055a66,0 12px 22px rgba(8,127,140,.36);
+  filter:brightness(1.05);
+}
+.primary:active,.btn.primary:active,button.primary:active{
+  box-shadow:inset 0 2px 5px rgba(0,0,0,.28),0 0 0 rgba(0,0,0,0);
+  filter:none;
+}
+button.primary:not(:disabled){color:#fff;text-shadow:0 1px 0 rgba(0,0,0,.25)} /* admin primary buttons had dark text on teal */
+/* translucent buttons on the dark nav bar */
+nav .btn{background-image:none;box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 2px 0 rgba(0,0,0,.25),0 6px 12px rgba(0,0,0,.2)}
+nav .btn.primary{background-image:linear-gradient(180deg,#13a0af,#087f8c 60%,#067080)}
+/* selected tabs read as pressed in */
+.tab[aria-selected=true],.tab.active,.tab-btn.active,.search-tab.active{
+  box-shadow:inset 0 2px 5px rgba(0,0,0,.35),0 1px 0 rgba(255,255,255,.4);
+  background-image:none;
+}
+button:disabled,.btn:disabled{transform:none!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.5)!important;filter:none!important}
+
+/* ---------- pills, tags, badges ---------- */
+.tag,.badge,.pill,.status-pill,.status-chip,.chip,.verified-badge{
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.65),0 1px 2px rgba(8,60,80,.14);
+}
+
+/* ---------- form fields (recessed) ---------- */
+select,.toolbar input,.field input,.field select,.field textarea,.fsearch{
+  box-shadow:inset 0 2px 4px rgba(8,60,80,.08),0 1px 0 rgba(255,255,255,.9);
+}
+select:focus,.toolbar input:focus,.field input:focus,.field select:focus,.field textarea:focus,.fsearch:focus{
+  box-shadow:inset 0 2px 4px rgba(8,60,80,.08),0 0 0 3px rgba(69,217,234,.35);
+}
+
+/* ---------- tables ---------- */
+table{box-shadow:0 2px 0 var(--d-edge),0 10px 24px rgba(8,40,58,.07)}
+table th{background-image:linear-gradient(180deg,rgba(255,255,255,.9),rgba(232,243,246,.9));box-shadow:inset 0 -2px 0 rgba(8,60,80,.08)}
+table tbody tr,table tr+tr{transition:background-color .12s ease,box-shadow .12s ease}
+table tr:hover td{background-color:rgba(8,127,140,.045);box-shadow:inset 0 1px 0 rgba(255,255,255,.8)}
+.table-wrap{border-radius:14px}
+
+/* ---------- tilt (set by depth.js on pointer devices) ---------- */
+[data-depth-tilt]{transform-style:preserve-3d;will-change:transform}
+
+@media (prefers-reduced-motion:reduce){
+  *{transition:none!important}
+  .btn:hover,.btn:active,.primary:hover,.primary:active,a.card:hover,.feature:hover,.result:hover,.network-card:hover{transform:none!important}
+}
