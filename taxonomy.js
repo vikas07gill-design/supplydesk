@@ -93,6 +93,87 @@ const aliases = {
 };
 
 /**
+ * Plain-language descriptions used by the smart search (buyers rarely type our category names).
+ * Key = "Category" or "Category/Sub-category"; value = words and phrases a buyer might use for it.
+ */
+const keywords = {
+  "Electrical & Electronics": "electrical power distribution wiring electricity voltage control panel breaker mcb mccb relay contactor",
+  "Electrical & Electronics/Switchgear": "switch breaker mcb mccb isolator fuse distribution board circuit protection",
+  "Electrical & Electronics/Panels": "control panel distribution board mcc pcc electrical cabinet",
+  "Electrical & Electronics/Transformers": "transformer step up step down voltage power supply stabilizer",
+  "Electrical & Electronics/Motors": "motor induction motor ac dc motor gear motor rotate drive fan pump motor",
+  "Electrical & Electronics/Cables & Wires": "cable wire wiring copper cable power cable flexible wire",
+  "Electrical & Electronics/Lighting": "light lamp bulb led tube street light flood light lighting fixture",
+  "Electronic Components": "electronic parts circuit components chip semiconductor board",
+  "Electronic Components/PCB": "pcb printed circuit board circuit board assembly smt",
+  "Electronic Components/Sensors": "sensor detect proximity temperature pressure level flow measure",
+  "Electronic Components/Displays": "display screen lcd led oled touch screen monitor panel",
+  "Electronic Components/Connectors": "connector plug socket terminal header jack",
+  "Machinery & Industrial Equipment": "machine machinery equipment manufacturing plant factory production industrial",
+  "Machinery & Industrial Equipment/CNC Machines": "cnc machining center vmc hmc turning milling precision machining metal parts",
+  "Machinery & Industrial Equipment/Cutting Machines": "cut cutting machine cutter laser plasma shearing sheet metal cut steel cut",
+  "Machinery & Industrial Equipment/Press Machines": "press hydraulic press power press punching stamping forming",
+  "Machinery & Industrial Equipment/Lathe Machines": "lathe turning machine metal turning",
+  "Machinery & Industrial Equipment/Milling Machines": "milling machine mill vertical milling",
+  "Machinery & Industrial Equipment/Injection Moulding Machines": "injection moulding machine plastic moulding make plastic parts",
+  "Machinery & Industrial Equipment/Packaging Machines": "packaging machine packing pouch filling sealing wrapping carton",
+  "Automation & Robotics": "automation automatic control programmable controller robot industrial automation",
+  "Automotive & Auto Components": "vehicle car truck bike two wheeler spare parts auto parts automobile",
+  "Automotive & Auto Components/Filters": "air filter oil filter fuel filter cabin filter",
+  "EV & Electric Mobility": "electric vehicle ev scooter e rickshaw charging battery pack bike",
+  "Plastics & Polymers": "plastic polymer pvc pp pe hdpe ldpe abs pet nylon resin material",
+  "Plastics & Polymers/Containers": "plastic container box jar bucket tub storage bin",
+  "Plastics & Polymers/Moulded Parts": "plastic moulded part injection moulded component custom plastic part",
+  "Rubber Products": "rubber natural rubber silicone epdm nitrile neoprene",
+  "Rubber Products/Seals": "seal oil seal gasket sealing ring leak",
+  "Chemicals": "chemical industrial chemical raw chemical acid alkali solvent lab chemical",
+  "Chemicals/Adhesives": "glue adhesive bonding sealant epoxy",
+  "Metals & Alloys": "metal steel iron raw metal bar rod sheet plate coil ingot scrap",
+  "Metals & Alloys/Steel": "ms steel mild steel carbon steel tmt rebar iron",
+  "Metals & Alloys/Sheets & Plates": "metal sheet plate coil gi sheet cr sheet hr sheet",
+  "Fabrication & Sheet Metal": "fabrication sheet metal job work custom metal work cutting bending welding",
+  "Fabrication & Sheet Metal/Laser Cutting": "laser cutting cut sheet metal profile cutting job work",
+  "Fabrication & Sheet Metal/Welding": "weld welding fabrication structure",
+  "Moulds, Dies & Tooling": "mould mold die tool tooling make mould custom tool",
+  "Packaging & Printing": "packaging packing box carton pouch bag label print printed",
+  "Packaging & Printing/Bottles": "bottle pet bottle glass bottle jar water bottle",
+  "Packaging & Printing/Boxes & Cartons": "box carton corrugated shipping box gift box",
+  "Construction & Building Materials": "construction building house civil flooring wall roof",
+  "Construction & Building Materials/Tiles": "tile floor tile wall tile ceramic vitrified",
+  "Pipes, Tubes & Valves": "pipe tube piping plumbing water pipe fluid flow valve fittings",
+  "Pumps, Hydraulics & Pneumatics": "pump water pump motor pump hydraulic air compressor pneumatic fluid",
+  "Pumps, Hydraulics & Pneumatics/Pumps": "water pump submersible centrifugal pump pumping water lift",
+  "Agriculture & Farm Equipment": "farm farmer farming agriculture crop field tractor irrigation",
+  "Food & Beverage": "food edible eat drink grocery ingredient snack",
+  "Food & Beverage/Spices": "spice masala turmeric chilli pepper cumin",
+  "Food & Beverage/Grains": "rice wheat grain pulses dal cereal flour",
+  "Food Processing Machinery": "food machine processing plant bakery dairy flour mill spice grinder filling",
+  "Textile & Apparel": "cloth clothing garment fabric textile yarn apparel dress shirt wear",
+  "Textile & Apparel/Garments": "garment clothing shirt t shirt dress kurta innerwear lingerie intimates underwear women men kids apparel wear",
+  "Textile & Apparel/Fabrics": "fabric cloth cotton silk polyester denim woven knitted",
+  "Home Appliances": "home kitchen appliance household domestic mixer fan cooking",
+  "Home Appliances/Mixer Grinders": "mixer grinder blender juicer grind",
+  "Consumer Electronics": "consumer gadget tv audio speaker headphone camera smart device",
+  "Renewable Energy": "solar wind green energy renewable power plant rooftop",
+  "Renewable Energy/Solar Panels": "solar panel photovoltaic pv module solar power",
+  "Batteries & Power Solutions": "battery power backup inverter ups charger storage lithium lead acid",
+  "Medical & Healthcare": "medical health hospital clinic patient surgical diagnostic doctor",
+  "Laboratory & Testing": "lab laboratory testing test measure calibrate quality instrument",
+  "Safety & Security": "safety security protect ppe helmet gloves fire cctv camera surveillance guard",
+  "Material Handling": "lift carry move load warehouse crane hoist conveyor forklift trolley pallet",
+  "Tools & Industrial Supplies": "tool hardware industrial supplies bearing belt fastener bolt nut screw consumable mro",
+  "IT, Telecom & Services": "it computer laptop software network telecom internet server app website services outsourcing",
+  "Logistics & Freight": "ship shipping freight cargo courier transport delivery forwarder import export logistics",
+  "Warehousing & Fulfilment": "warehouse storage godown fulfilment 3pl",
+  "Customs & Trade": "customs duty clearance import export documentation iec licence",
+  "Inspection & Verification": "inspect inspection audit quality check pre shipment verify factory audit",
+  "Insurance": "insurance cover cargo insurance risk",
+  "Trade Finance": "finance loan credit letter of credit lc working capital payment",
+  "Sourcing Services": "sourcing procurement find supplier buying agent",
+  "Professional Services": "consulting consultant legal lawyer tax accounting audit advisory"
+};
+
+/**
  * Old catalogue -> new catalogue. Applied once at start-up (idempotent) so existing suppliers,
  * products and requirements keep matching after the rename. [oldCategory, oldSub] -> [newCategory, newSub].
  */
@@ -122,4 +203,4 @@ const legacyCategoryFallback = {
   "Tools & Hardware":"Tools & Industrial Supplies","Metal Products":"Metals & Alloys","Industrial Components":"Tools & Industrial Supplies","Manufacturing Services":"IT, Telecom & Services"
 };
 
-module.exports = { catalog, groups, aliases, legacyMap, legacyCategoryFallback };
+module.exports = { catalog, groups, aliases, keywords, legacyMap, legacyCategoryFallback };

@@ -804,7 +804,7 @@ app.get("/api/categories", (req, res) => {
 // Shared by every page so categories are defined in exactly one place (taxonomy.js).
 app.get("/assets/taxonomy.js", (req, res) => {
   res.type("application/javascript").set("Cache-Control", "public, max-age=300");
-  res.send("window.SD_TAX=" + JSON.stringify({ groups: TAXONOMY.groups, subs: TAXONOMY.catalog, aliases: TAXONOMY.aliases }) + ";");
+  res.send("window.SD_TAX=" + JSON.stringify({ groups: TAXONOMY.groups, subs: TAXONOMY.catalog, aliases: TAXONOMY.aliases, keywords: TAXONOMY.keywords }) + ";");
 });
 
 app.post("/api/supplier-applications",
