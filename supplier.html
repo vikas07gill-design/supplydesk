@@ -159,7 +159,7 @@ form.addEventListener("submit",async e=>{
   const button=document.getElementById("submitConnect");
   button.disabled=true;
   button.textContent="Sending...";
-  statusEl.textContent="";
+  statusEl.textContent="";statusEl.className="connect-status";
   try{
     const response=await fetch("/api/connect-requests",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
       supplierId:currentSupplier?.id||id,
@@ -179,9 +179,9 @@ form.addEventListener("submit",async e=>{
       const detail=data.error||("Server returned HTTP "+response.status+".");
       throw new Error(detail+(data.requestId?" [Request ID: "+data.requestId+"]":""));
     }
+    statusEl.className="connect-status success";
     statusEl.textContent="✓ Request sent. The supplier has been notified by SupplyDesk.";
     document.getElementById("buyerDashboardLink").style.display="inline-flex";
-    button.textContent="Sent ✓";
   }catch(error){
     statusEl.textContent=error.message;
     statusEl.className="connect-status error";

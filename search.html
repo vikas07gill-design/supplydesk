@@ -73,7 +73,7 @@ function render(){
         sort=document.getElementById('sort')?.value||'newest';
 
   let rows=data.filter(x=>
-    (active==='all'||active==='category'||x.type===active) &&
+    (active==='all'||active==='category'||(active==='service'?(x.type==='supplier'&&SERVICE_CATS.includes(x.category)):x.type===active)) &&
     (!cat||x.category===cat) &&
     (!sub||x.subcategories?.includes(sub)) &&
     (!country||x.country===country) &&
@@ -128,30 +128,48 @@ function clearFilters(){
   render();
 }
 
-document.getElementById('category').onchange=()=>{
-  const map={
-    'Plastics & Packaging':['Plastic Containers','Plastic Bottles','Packaging Films','Plastic Components'],
-    'Machinery':['Injection Moulding Machines','CNC Machines','Packaging Machines'],
-    'Electronics & Components':['Electronic Components','PCB','Power Supplies'],
-    'Logistics & Freight':['Sea Freight','Air Freight','Road Transport','Freight Forwarding'],
-    'Construction Materials':['Building Materials','Tiles & Surfaces','Plumbing Products'],
-    'Raw Materials':['Metals','Minerals','Polymers'],
-    'Automotive':['Auto Components','Accessories','Aftermarket Parts'],
-    'Textiles & Apparel':['Fabrics','Garments','Home Textiles'],
-    'Food & Agriculture':['Food Ingredients','Agri Products','Processed Food'],
-    'Chemicals':['Industrial Chemicals','Specialty Chemicals'],
-    'Inspection & Verification':['Factory Inspection','Pre-shipment Inspection'],
-    'Insurance':['Cargo Insurance','Transit Insurance'],
-    'Trade Finance':['Trade Finance','Letter of Credit'],
-    'Warehousing & Fulfilment':['Warehousing','Consolidation'],
-    'Customs & Trade':['Customs Clearance','Trade Documentation'],
-    'Sourcing Services':['Product Sourcing','Supplier Discovery'],
-    'Professional Services':['Consulting','Accounting & Tax']
-  };
-  document.getElementById('subcategory').innerHTML='<option value="">Any sub-category</option>'+(map[this.value]||[]).map(x=>'<option>'+esc(x)+'</option>').join('');
+const SERVICE_CATS=['Logistics & Freight','Warehousing & Fulfilment','Customs & Trade','Inspection & Verification','Insurance','Trade Finance','Sourcing Services','Professional Services'];
+let subMap={};
+function fillCategories(list){
+  const c=document.getElementById('category'),cur=c.value;
+  c.innerHTML='<option value="">Any category</option>'+list.map(x=>'<option>'+esc(x)+'</option>').join('');
+  c.value=cur;
+}
+function fillSubs(){
+  const cat=document.getElementById('category').value;
+  document.getElementById('subcategory').innerHTML='<option value="">Any sub-category</option>'+(subMap[cat]||[]).map(x=>'<option>'+esc(x)+'</option>').join('');
+}
+document.getElementById('category').onchange=function(){
+  fillSubs();
   render();
 };
+async function loadCatalog(){
+  try{
+    const r=await fetch('/api/categories');
+    if(!r.ok)return;
+    const d=await r.json();
+    subMap=d.subcategories||{};
+    fillCategories(d.categories||Object.keys(subMap));
+    fillSubs();
+  }catch(e){}
+}
 
+function uniq(k){return [...new Set(data.map(x=>x[k]).filter(Boolean))].sort()}
+function fillPlaces(){
+  [['country','Any country'],['city','Any city']].forEach(([id,label])=>{
+    const el=document.getElementById(id),cur=el.value,vals=uniq(id);
+    if(vals.length){el.innerHTML='<option value="">'+label+'</option>'+vals.map(v=>'<option>'+esc(v)+'</option>').join('');el.value=cur;}
+  });
+}
+function applyParams(){
+  const set=(id,v)=>{const el=document.getElementById(id);if(v&&[...el.options].some(o=>o.value===v||o.text===v))el.value=v;};
+  set('category',params.get('category'));
+  fillSubs();
+  set('subcategory',params.get('subcategory'));
+  set('country',params.get('country'));
+  set('city',params.get('city'));
+  set('market',params.get('market'));
+}
 async function loadLiveData(){
   try{
     const [supplierResponse,productResponse]=await Promise.all([fetch('/api/suppliers'),fetch('/api/products')]);
@@ -159,8 +177,10 @@ async function loadLiveData(){
     const products=productResponse.ok?(await productResponse.json()).products||[]:[];
     data=[...suppliers.map(x=>({...x,market:x.market||'All markets'})),...products.map(x=>({...x,market:x.market||'All markets'}))];
   }catch(e){}
+  fillPlaces();
+  applyParams();
   render();
 }
 
 render();
-loadLiveData();</script></body></html>
+loadCatalog().then(loadLiveData);</script></body></html>

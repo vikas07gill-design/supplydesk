@@ -170,8 +170,9 @@ document.getElementById("connectForm").addEventListener("submit",async e=>{
     status.className="connect-status success";
     status.textContent=d.message||"Enquiry sent successfully.";
     document.getElementById("buyerDashboardLink").style.display="inline-flex";
-    document.getElementById("connectForm").reset();
-    btn.textContent="Sent ✓";
+    // keep the verified email so the buyer can send another enquiry without re-verifying
+    ["connectMessage","connectQuantity"].forEach(id=>{document.getElementById(id).value="";});
+    btn.disabled=false;btn.textContent="Send another enquiry →";
   }catch(err){
     status.className="connect-status error";
     status.textContent=err.message||"Could not send enquiry.";

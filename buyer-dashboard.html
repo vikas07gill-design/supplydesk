@@ -47,7 +47,8 @@ if(!token)location.href="index.html";
 async function load(){
  try{
   const r=await fetch("/api/buyer-dashboard",{headers:{"x-buyer-dashboard-token":token}});
-  if(!r.ok)throw new Error();
+  if(r.status===401){localStorage.removeItem("supplydesk_buyer_dashboard_token");location.href="index.html";return;}
+  if(!r.ok)throw new Error("load");
   const d=await r.json(),b=d.buyer||{},e=d.enquiries||[];
   await loadRequirements();
   document.getElementById("email").textContent=b.email||"";
@@ -58,7 +59,7 @@ async function load(){
   const rows=document.getElementById("rows"),empty=document.getElementById("empty");
   rows.innerHTML=e.map(x=>'<tr><td><strong>'+esc(x.productName)+'</strong></td><td>'+esc(x.supplierName)+'</td><td>'+esc((x.supplierCity||"")+" "+(x.supplierCountry||""))+'</td><td>'+esc(x.quantity||"—")+'</td><td><span class="pill '+esc(x.status)+'">'+esc(x.status.replaceAll("_"," "))+'</span></td><td>'+new Date(x.createdAt).toLocaleDateString()+'</td></tr>').join("");
   empty.style.display=e.length?"none":"block";
- }catch(e){localStorage.removeItem("supplydesk_buyer_dashboard_token");location.href="index.html";}
+ }catch(e){document.getElementById("status").textContent="We could not load your dashboard right now. Please refresh and try again.";document.getElementById("status").className="status error";}
 }
 
 async function loadRequirements(){

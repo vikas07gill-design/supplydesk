@@ -31,7 +31,20 @@ const pool = mysql.createPool({
 });
 
 app.set("trust proxy", 1);
-app.use(helmet({ crossOriginResourcePolicy: { policy: "same-site" } }));
+// The pages ship their JavaScript inline (and use inline on* handlers), and the
+// dashboards show images via blob: URLs. Helmet's default policy blocks all of
+// that, which leaves every page without working scripts, so allow it explicitly.
+// Everything else stays at Helmet's defaults. Moving the scripts into external
+// files would let 'unsafe-inline' be dropped later.
+const cspDirectives = Object.assign({}, helmet.contentSecurityPolicy.getDefaultDirectives(), {
+  "script-src": ["'self'", "'unsafe-inline'"],
+  "script-src-attr": ["'unsafe-inline'"],
+  "img-src": ["'self'", "data:", "blob:"]
+});
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "same-site" },
+  contentSecurityPolicy: { useDefaults: false, directives: cspDirectives }
+}));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 app.use((req, res, next) => {
