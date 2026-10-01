@@ -2,7 +2,7 @@
 (function(){
   if(!window.matchMedia||!matchMedia('(hover:hover) and (pointer:fine)').matches||matchMedia('(prefers-reduced-motion:reduce)').matches)return;
   var MAX=3.5; /* degrees */
-  var SEL='a.card,.feature,.network-card,.result';
+  var SEL='a.card,.feature,.network-card,.result,.step,.market';
   function bind(el){
     if(el.__depth)return;el.__depth=1;el.setAttribute('data-depth-tilt','');
     el.addEventListener('pointermove',function(e){
