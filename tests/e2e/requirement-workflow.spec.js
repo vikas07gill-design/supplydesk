@@ -8,7 +8,7 @@ test("requirement is held for admin review, then shared, tracked by buyer, and c
   const otp = await (await request.post("/api/buyer-email/request-otp", { headers: { "x-e2e-key": KEY }, data: { email } })).json();
   const v = await (await request.post("/api/buyer-email/verify-otp", { data: { email, otp: otp.testOtp } })).json();
   const bh = { "x-buyer-dashboard-token": v.dashboardToken };
-  const sub = await request.post("/api/buyer-requirements", { data: { dashboardToken: v.dashboardToken, buyerName: "T", buyerCountry: "India", title: "WF " + Date.now(), description: "d", category: "Plastics & Packaging", subcategory: "Plastic Containers" } });
+  const sub = await request.post("/api/buyer-requirements", { data: { dashboardToken: v.dashboardToken, buyerName: "T", buyerCountry: "India", title: "WF " + Date.now(), description: "d", category: "Plastics & Polymers", subcategory: "Containers" } });
   expect(sub.status()).toBe(201);
   const { requirementId } = await sub.json();
   let mine = (await (await request.get("/api/buyer-requirements", { headers: bh })).json()).requirements;

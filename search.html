@@ -25,11 +25,11 @@ nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!i
 .summary{font-weight:700;color:#607985}
 .empty{box-shadow:0 12px 30px rgba(11,58,80,.05)}
 @media(max-width:650px){.top{padding:30px 22px;border-radius:20px}.top h1{font-size:35px}}
-</style><link rel="stylesheet" href="assets/depth.css"><script src="assets/depth.js" defer></script></head>
+</style><script src="/assets/taxonomy.js"></script><link rel="stylesheet" href="assets/depth.css"><script src="assets/depth.js" defer></script></head>
 <body><nav><div class="wrap nav"><a class="brand-logo" href="index.html" aria-label="SupplyDesk home"><img src="assets/supplydesk-logo-dark.svg" alt="SupplyDesk" style="width:180px;height:auto;display:block"></a><div style="display:flex;gap:8px"><a class="btn" href="explore.html">Categories</a><a class="btn primary" href="supplier-register.html">Register Supplier</a></div></div></nav>
 <main class="wrap"><section class="top"><div class="eyebrow">Supply discovery</div><h1 id="title">Explore SupplyDesk</h1><p>Find products, suppliers and supply services.</p><div class="search"><input id="q" placeholder="Product, material, supplier or service"><button class="btn primary" onclick="run()">Search</button></div></section>
 <div class="tabs"><button class="tab active" data-type="all">All</button><button class="tab" data-type="product">Products</button><button class="tab" data-type="supplier">Suppliers</button><button class="tab" data-type="service">Services</button></div>
-<div class="filters"><select id="category" onchange="render()"><option value="">Any category</option><option>Raw Materials</option><option>Plastics & Packaging</option><option>Machinery</option><option>Electronics & Components</option><option>Automotive</option><option>Textiles & Apparel</option><option>Food & Agriculture</option><option>Chemicals</option><option>Consumer Products</option><option>Construction Materials</option><option>Logistics & Freight</option><option>Warehousing & Fulfilment</option><option>Customs & Trade</option><option>Inspection & Verification</option><option>Insurance</option><option>Trade Finance</option><option>Sourcing Services</option><option>Professional Services</option></select><select id="subcategory" onchange="render()"><option value="">Any sub-category</option></select><select id="country" onchange="render()"><option value="">Any country</option><option>India</option><option>China</option><option>UAE</option><option>USA</option></select><select id="city" onchange="render()"><option value="">Any city</option><option>Delhi</option><option>Mumbai</option><option>Ahmedabad</option><option>Yiwu</option><option>Dubai</option><option>Shenzhen</option></select><select id="market" onchange="render()"><option value="">Any market</option><option>Domestic</option><option>International</option><option>Both</option></select><div class="sort-wrap"><span>Sort</span><select id="sort" onchange="render()"><option value="newest">Newest</option><option value="name">Name A–Z</option></select></div></div>
+<div class="filters"><select id="category" onchange="render()"><option value="">Any category</option></select><select id="subcategory" onchange="render()"><option value="">Any sub-category</option></select><select id="country" onchange="render()"><option value="">Any country</option><option>India</option><option>China</option><option>UAE</option><option>USA</option></select><select id="city" onchange="render()"><option value="">Any city</option><option>Delhi</option><option>Mumbai</option><option>Ahmedabad</option><option>Yiwu</option><option>Dubai</option><option>Shenzhen</option></select><select id="market" onchange="render()"><option value="">Any market</option><option>Domestic</option><option>International</option><option>Both</option></select><div class="sort-wrap"><span>Sort</span><select id="sort" onchange="render()"><option value="newest">Newest</option><option value="name">Name A–Z</option></select></div><script>(function(){var c=document.getElementById('category');if(!c||!window.SD_TAX)return;Object.entries(SD_TAX.groups).forEach(function(g){var o=document.createElement('optgroup');o.label=g[0];g[1].forEach(function(x){var op=document.createElement('option');op.textContent=x;o.appendChild(op)});c.appendChild(o)})})();</script></div>
 <div class="summary" id="summary"></div><section id="results"></section><div class="footer">SupplyDesk is an information and connection platform. Listings and business details are shown for discovery.</div></main>
 <script>
 let data=[];
@@ -129,26 +129,8 @@ function clearFilters(){
 }
 
 document.getElementById('category').onchange=()=>{
-  const map={
-    'Plastics & Packaging':['Plastic Containers','Plastic Bottles','Packaging Films','Plastic Components'],
-    'Machinery':['Injection Moulding Machines','CNC Machines','Packaging Machines'],
-    'Electronics & Components':['Electronic Components','PCB','Power Supplies'],
-    'Logistics & Freight':['Sea Freight','Air Freight','Road Transport','Freight Forwarding'],
-    'Construction Materials':['Building Materials','Tiles & Surfaces','Plumbing Products'],
-    'Raw Materials':['Metals','Minerals','Polymers'],
-    'Automotive':['Auto Components','Accessories','Aftermarket Parts'],
-    'Textiles & Apparel':['Fabrics','Garments','Home Textiles'],
-    'Food & Agriculture':['Food Ingredients','Agri Products','Processed Food'],
-    'Chemicals':['Industrial Chemicals','Specialty Chemicals'],
-    'Inspection & Verification':['Factory Inspection','Pre-shipment Inspection'],
-    'Insurance':['Cargo Insurance','Transit Insurance'],
-    'Trade Finance':['Trade Finance','Letter of Credit'],
-    'Warehousing & Fulfilment':['Warehousing','Consolidation'],
-    'Customs & Trade':['Customs Clearance','Trade Documentation'],
-    'Sourcing Services':['Product Sourcing','Supplier Discovery'],
-    'Professional Services':['Consulting','Accounting & Tax']
-  };
-  document.getElementById('subcategory').innerHTML='<option value="">Any sub-category</option>'+(map[this.value]||[]).map(x=>'<option>'+esc(x)+'</option>').join('');
+  const map=SD_TAX.subs;
+  document.getElementById('subcategory').innerHTML='<option value="">Any sub-category</option>'+(map[document.getElementById('category').value]||[]).map(x=>'<option>'+esc(x)+'</option>').join('');
   render();
 };
 

@@ -302,35 +302,11 @@ header{background:rgba(5,20,35,.92);color:#fff;border-bottom:1px solid rgba(255,
 </div>
 </div>
 
+<script src="/assets/taxonomy.js"></script>
 <script>
 const dashboardKey="supplydesk_supplier_dashboard_token";
 const dashboardStorage=sessionStorage;
-const catalog={
-"Raw Materials":["Metals","Minerals","Polymers","Industrial Raw Materials"],
-"Plastics & Packaging":["Plastic Containers","Plastic Bottles","Packaging Films","Plastic Components"],
-"Machinery":["Injection Moulding Machines","CNC Machines","Packaging Machines","Industrial Machinery"],
-"Electronics & Components":["Electronic Components","PCB","Power Supplies","Sensors"],
-"Automotive":["Auto Components","Accessories","Aftermarket Parts"],
-"Textiles & Apparel":["Fabrics","Garments","Home Textiles"],
-"Food & Agriculture":["Food Ingredients","Agri Products","Processed Food"],
-"Chemicals":["Industrial Chemicals","Specialty Chemicals","Cleaning Chemicals"],
-"Consumer Products":["Household Products","Kitchenware","Personal Care"],
-"Construction Materials":["Building Materials","Tiles & Surfaces","Plumbing Products"],
-"Logistics & Freight":["Sea Freight","Air Freight","Road Transport","Freight Forwarding"],
-"Warehousing & Fulfilment":["Warehousing","Consolidation","Fulfilment"],
-"Customs & Trade":["Customs Clearance","Trade Documentation","Import Export Support"],
-"Inspection & Verification":["Factory Inspection","Pre-shipment Inspection","Quality Inspection"],
-"Insurance":["Cargo Insurance","Transit Insurance","Trade Insurance"],
-"Trade Finance":["Trade Finance","Letter of Credit","Working Capital"],
-"Sourcing Services":["Product Sourcing","Supplier Discovery","Procurement Support"],
-"Professional Services":["Consulting","Accounting & Tax","Legal Services"],
-"Industrial Equipment":["Process Equipment","Material Handling","Plant Equipment"],
-"Electrical Equipment":["Electrical Components","Switchgear","Industrial Controls"],
-"Tools & Hardware":["Hand Tools","Power Tools","Hardware"],
-"Metal Products":["Steel Products","Aluminium Products","Fabricated Parts"],
-"Industrial Components":["Bearings","Fasteners","Seals"],
-"Manufacturing Services":["Contract Manufacturing","Assembly","Fabrication"]
-};
+const catalog=SD_TAX.subs;
 let dashboardData=null;
 
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}

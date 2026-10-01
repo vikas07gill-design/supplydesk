@@ -96,32 +96,8 @@ const upload = multer({
   }
 });
 
-const catalog = {
-  "Raw Materials": ["Metals","Minerals","Polymers","Industrial Raw Materials"],
-  "Plastics & Packaging": ["Plastic Containers","Plastic Bottles","Packaging Films","Plastic Components"],
-  "Machinery": ["Injection Moulding Machines","CNC Machines","Packaging Machines","Industrial Machinery"],
-  "Electronics & Components": ["Electronic Components","PCB","Power Supplies","Sensors"],
-  "Automotive": ["Auto Components","Accessories","Aftermarket Parts"],
-  "Textiles & Apparel": ["Fabrics","Garments","Home Textiles"],
-  "Food & Agriculture": ["Food Ingredients","Agri Products","Processed Food"],
-  "Chemicals": ["Industrial Chemicals","Specialty Chemicals","Cleaning Chemicals"],
-  "Consumer Products": ["Household Products","Kitchenware","Personal Care"],
-  "Construction Materials": ["Building Materials","Tiles & Surfaces","Plumbing Products"],
-  "Logistics & Freight": ["Sea Freight","Air Freight","Road Transport","Freight Forwarding"],
-  "Warehousing & Fulfilment": ["Warehousing","Consolidation","Fulfilment"],
-  "Customs & Trade": ["Customs Clearance","Trade Documentation","Import Export Support"],
-  "Inspection & Verification": ["Factory Inspection","Pre-shipment Inspection","Quality Inspection"],
-  "Insurance": ["Cargo Insurance","Transit Insurance","Trade Insurance"],
-  "Trade Finance": ["Trade Finance","Letter of Credit","Working Capital"],
-  "Sourcing Services": ["Product Sourcing","Supplier Discovery","Procurement Support"],
-  "Professional Services": ["Consulting","Accounting & Tax","Legal Services"],
-  "Industrial Equipment": ["Process Equipment","Material Handling","Plant Equipment"],
-  "Electrical Equipment": ["Electrical Components","Switchgear","Industrial Controls"],
-  "Tools & Hardware": ["Hand Tools","Power Tools","Hardware"],
-  "Metal Products": ["Steel Products","Aluminium Products","Fabricated Parts"],
-  "Industrial Components": ["Bearings","Fasteners","Seals"],
-  "Manufacturing Services": ["Contract Manufacturing","Assembly","Fabrication"]
-};
+const TAXONOMY = require("./taxonomy");
+const catalog = TAXONOMY.catalog;
 
 const categories = Object.keys(catalog);
 const buyerOtpRequestLimiter = rateLimit({
@@ -822,7 +798,13 @@ app.get("/api/version", (req, res) => {
 });
 
 app.get("/api/categories", (req, res) => {
-  res.json({ categories, subcategories: catalog });
+  res.json({ categories, subcategories: catalog, groups: TAXONOMY.groups });
+});
+
+// Shared by every page so categories are defined in exactly one place (taxonomy.js).
+app.get("/assets/taxonomy.js", (req, res) => {
+  res.type("application/javascript").set("Cache-Control", "public, max-age=300");
+  res.send("window.SD_TAX=" + JSON.stringify({ groups: TAXONOMY.groups, subs: TAXONOMY.catalog, aliases: TAXONOMY.aliases }) + ";");
 });
 
 app.post("/api/supplier-applications",
@@ -2506,6 +2488,7 @@ async function ensureDashboardSchema() {
   await ensureBuyerSchema();
   await ensureRequirementSchema();
   await ensureAdminAuthSchema();
+  await migrateLegacyCategories();
 
   // Bring older production databases up to the current launch schema.
   try { await pool.query("ALTER TABLE supplier_profiles ADD COLUMN profile_details_json TEXT NULL"); }
@@ -2519,6 +2502,30 @@ async function ensureDashboardSchema() {
   }
 }
 
+
+// Moves data from the old category names to the current taxonomy (idempotent, cheap when nothing to move).
+async function migrateLegacyCategories() {
+  const oldNames = Object.keys(TAXONOMY.legacyCategoryFallback);
+  const tables = ["supplier_applications","supplier_profiles","supplier_products","buyer_requirements"];
+  for (const table of tables) {
+    try {
+      const [[hit]] = await pool.query("SELECT COUNT(*) AS n FROM `"+table+"` WHERE category IN (?)", [oldNames]);
+      const [[chem]] = await pool.query("SELECT COUNT(*) AS n FROM `"+table+"` WHERE category='Chemicals' AND subcategory IS NOT NULL AND subcategory NOT IN (?)", [TAXONOMY.catalog["Chemicals"]]);
+      if (!hit.n && !chem.n) continue;
+      for (const [oc, os, nc, ns] of TAXONOMY.legacyMap) {
+        if (oc === nc && os === ns) continue;
+        await pool.query("UPDATE `"+table+"` SET category=?, subcategory=? WHERE category=? AND subcategory=?", [nc, ns, oc, os]);
+      }
+      for (const [oc, nc] of Object.entries(TAXONOMY.legacyCategoryFallback)) {
+        await pool.query("UPDATE `"+table+"` SET category=?, subcategory='Other' WHERE category=?", [nc, oc]);
+      }
+      await pool.query("UPDATE `"+table+"` SET subcategory='Other' WHERE category='Chemicals' AND subcategory IS NOT NULL AND subcategory NOT IN (?)", [TAXONOMY.catalog["Chemicals"]]);
+      console.log("Category taxonomy migrated:", table);
+    } catch (e) {
+      if (!["ER_NO_SUCH_TABLE","ER_BAD_FIELD_ERROR"].includes(e?.code)) throw e;
+    }
+  }
+}
 
 async function ensureAdminAuthSchema() {
   await pool.query("CREATE TABLE IF NOT EXISTS admin_sessions (id CHAR(36) PRIMARY KEY, token_hash CHAR(64) NOT NULL UNIQUE, role ENUM('admin','super_admin','tester') NOT NULL, admin_id VARCHAR(120) NOT NULL, expires_at DATETIME NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, last_used_at DATETIME NULL, INDEX idx_admin_session_expiry (expires_at), INDEX idx_admin_session_role (role)) ENGINE=InnoDB");
