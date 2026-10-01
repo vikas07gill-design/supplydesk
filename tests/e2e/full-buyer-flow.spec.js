@@ -20,7 +20,15 @@ test.describe("SupplyDesk full buyer enquiry flow", () => {
     const productId = seededProduct.id;
     expect(productId).toBeTruthy();
 
-    await page.goto("/product.html?id=" + encodeURIComponent(productId), { waitUntil: "domcontentloaded" });
+    const seededProductResponse = await page.request.get("/api/products/" + encodeURIComponent(productId), {
+      headers: { "Cache-Control": "no-cache" }
+    });
+    expect(seededProductResponse.status()).toBe(200);
+    const seededProductBody = await seededProductResponse.json();
+    expect(seededProductBody.product?.id).toBe(productId);
+    expect(seededProductBody.product?.name).toBe("E2E Test Product");
+
+    await page.goto("/product.html?id=" + encodeURIComponent(productId) + "&e2e=" + Date.now(), { waitUntil: "domcontentloaded" });
     await expect(page.locator("#name")).toHaveText("E2E Test Product");
 
     await page.locator("#connectBtn").click();

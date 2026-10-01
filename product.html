@@ -46,27 +46,55 @@ nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!i
   </div>
 </div>
 <script>
-const liveId=new URLSearchParams(location.search).get("id")||"";
-let liveProduct=null;
-async function loadLiveProduct(){
-  if(!liveId){ document.getElementById("name").textContent="Product not found"; document.getElementById("meta").textContent="Open a product from SupplyDesk search."; document.getElementById("desc").textContent="This page requires a published SupplyDesk product."; return; }
-  try{
-    const r=await fetch("/api/products/"+encodeURIComponent(liveId));
-    if(!r.ok){ document.getElementById("name").textContent="Product not found"; document.getElementById("meta").textContent="This product is not currently published."; document.getElementById("desc").textContent="The requested product could not be found or is still under review."; return; }
-    const d=await r.json(),p=d.product;
-    liveProduct=p;
-    document.title=p.name+" | SupplyDesk";
-    document.getElementById("name").textContent=p.name;
-    document.getElementById("meta").textContent="📍 "+p.city+", "+p.country+" · "+p.market_scope;
-    document.getElementById("desc").textContent=p.description||p.category+" · "+p.subcategory;
-    const gallery=document.getElementById("gallery");
-    if((p.images||[]).length){gallery.classList.add("has-images");gallery.innerHTML=p.images.map(i=>'<img src="'+i.url+'" alt="'+String(p.name).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))+'">').join("");}
-    document.querySelector(".tags").innerHTML=[p.category,p.subcategory,p.market_scope].map(x=>'<span class="tag">'+String(x).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))+'</span>').join("");
-    const supplier=document.getElementById("supplier");
-    supplier.href="supplier.html?id="+encodeURIComponent(p.supplierId)+"&product="+encodeURIComponent(p.name);
-    document.getElementById("connectIntro").textContent="Send your requirement for "+p.name+" directly to the verified supplier.";
-    document.getElementById("connectBtn").style.display="inline-flex";
-  }catch(e){ document.getElementById("name").textContent="Product unavailable"; document.getElementById("desc").textContent="We could not load this product right now. Please try again."; }
+const liveId = new URLSearchParams(location.search).get("id") || "";
+let liveProduct = null;
+function escapeHtml(value) {
+  return String(value == null ? "" : value).replace(/[&<>"']/g, function(ch) {
+    return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch];
+  });
+}
+async function loadLiveProduct() {
+  if (!liveId) {
+    document.getElementById("name").textContent = "Product not found";
+    document.getElementById("meta").textContent = "Open a product from SupplyDesk search.";
+    document.getElementById("desc").textContent = "This page requires a published SupplyDesk product.";
+    return;
+  }
+  try {
+    const response = await fetch("/api/products/" + encodeURIComponent(liveId), {
+      cache: "no-store",
+      headers: {"Cache-Control":"no-cache"}
+    });
+    if (!response.ok) throw new Error("Product request failed: " + response.status);
+    const data = await response.json();
+    const product = data.product;
+    if (!product || product.id !== liveId) throw new Error("Product response did not match requested ID.");
+    liveProduct = product;
+    document.title = product.name + " | SupplyDesk";
+    document.getElementById("name").textContent = product.name;
+    document.getElementById("meta").textContent = "📍 " + (product.city || "") + ", " + (product.country || "") + " · " + (product.market_scope || "");
+    document.getElementById("desc").textContent = product.description || ((product.category || "") + " · " + (product.subcategory || ""));
+    const gallery = document.getElementById("gallery");
+    if ((product.images || []).length) {
+      gallery.classList.add("has-images");
+      gallery.innerHTML = product.images.map(function(image) {
+        return '<img src="' + escapeHtml(image.url) + '" alt="' + escapeHtml(product.name) + '">';
+      }).join("");
+    }
+    document.querySelector(".tags").innerHTML = [product.category, product.subcategory, product.market_scope]
+      .filter(Boolean)
+      .map(function(tag) { return '<span class="tag">' + escapeHtml(tag) + '</span>'; })
+      .join("");
+    document.getElementById("supplier").href =
+      "supplier.html?id=" + encodeURIComponent(product.supplierId) + "&product=" + encodeURIComponent(product.name);
+    document.getElementById("connectIntro").textContent =
+      "Send your requirement for " + product.name + " directly to the verified supplier.";
+    document.getElementById("connectBtn").style.display = "inline-flex";
+  } catch (error) {
+    console.error("Product load failed:", error);
+    document.getElementById("name").textContent = "Product unavailable";
+    document.getElementById("desc").textContent = "We could not load this product right now. Please try again.";
+  }
 }
 loadLiveProduct();
 </script></body></html>
