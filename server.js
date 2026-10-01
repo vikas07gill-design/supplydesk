@@ -472,7 +472,7 @@ app.post("/api/admin/potential-contacts/import", requireAdmin, async (req,res)=>
       const [existing]=await pool.execute("SELECT id FROM potential_contacts WHERE LOWER(email)=? OR (?<>'' AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile,'+',''),' ',''),'-',''),'(',''),')','')=?) LIMIT 1",[email,mobileKey,mobileKey]);
       if(existing.length){skipped++;continue}
       const id=crypto.randomUUID();
-      await pool.execute("INSERT INTO potential_contacts (id,company_name,email,mobile,location,contact_type,source,status,last_activity_at) VALUES (?,?,?,?,?,?,?,NOW())",[id,name,email,mobile,location,inviteType,"manual_import","new"]);
+      await pool.execute("INSERT INTO potential_contacts (id,company_name,email,mobile,location,contact_type,source,status,last_activity_at) VALUES (?,?,?,?,?,?,?,?,NOW())",[id,name,email,mobile,location,inviteType,"manual_import","new"]);
       added.push({id,name,email,phone:mobile});
     }
     res.json({ok:true,added:added.length,skipped,contacts:added});
@@ -528,12 +528,18 @@ app.post("/api/admin/bulk-invite", requireAdmin, async (req,res)=>{
   for(let i=0;i<recipients.length;i++){
     const row=recipients[i]||{}; const email=clean(row.email,255).toLowerCase(); const name=clean(row.name,180); const phone=clean(row.phone,40);
     if(!/^\S+@\S+\.\S+$/.test(email)){failed++;results.push({name,email,phone,status:"failed",reason:"Invalid email"});continue}
+    let existingId=null;
     try{
       const mobileKey=phone.replace(/\D/g,"");
-      const [existing]=await pool.execute("SELECT company_name,email,mobile FROM potential_contacts WHERE email=? OR (?<>'' AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile,'+',''),' ',''),'-',''),'(',''),')','')=?) LIMIT 1",[email,mobileKey,mobileKey]);
-      if(existing.length){skipped++;results.push({name,email,phone,status:"skipped",reason:"Duplicate email/mobile already in Potential Database"});continue}
-      await pool.execute("INSERT INTO potential_contacts (id,company_name,email,mobile,contact_type,source,status,last_activity_at) VALUES (?,?,?,?,?,?,?,NOW())",[crypto.randomUUID(),name,email,phone,inviteType,"bulk_onboarding","invited"]);
+      const [existing]=await pool.execute("SELECT id,status FROM potential_contacts WHERE email=? OR (?<>'' AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile,'+',''),' ',''),'-',''),'(',''),')','')=?) LIMIT 1",[email,mobileKey,mobileKey]);
+      // Contacts imported earlier have status 'new' and still need their first email, so only skip
+      // contacts that were already invited (or have since registered / unsubscribed).
+      if(existing.length && existing[0].status!=="new"){skipped++;results.push({name,email,phone,status:"skipped",reason:"Already in Potential Database (status: "+existing[0].status+")"});continue}
+      if(existing.length) existingId=existing[0].id;
       const info=await sendAdminInvitation({recipientEmail:email,recipientName:name,inviteType,message:defaultMessage});
+      // mark the contact as invited only after the email was really sent
+      if(existingId) await pool.execute("UPDATE potential_contacts SET status='invited',last_activity_at=NOW() WHERE id=?",[existingId]);
+      else await pool.execute("INSERT INTO potential_contacts (id,company_name,email,mobile,contact_type,source,status,last_activity_at) VALUES (?,?,?,?,?,?,?,NOW())",[crypto.randomUUID(),name,email,phone,inviteType,"bulk_onboarding","invited"]);
       await pool.execute("INSERT INTO admin_invitation_log (id,recipient_name,recipient_email,invite_type,status,message_id,sent_at,error_text) VALUES (?,?,?,?,?,?,NOW(),NULL)",[crypto.randomUUID(),name,email,inviteType,"sent",info.messageId||null]);
       sent++;results.push({name,email,phone,status:"sent"});
     }catch(error){
@@ -2083,7 +2089,7 @@ async function ensureDashboardSchema() {
       location VARCHAR(255) NULL,
       contact_type ENUM('supplier','buyer') NOT NULL DEFAULT 'supplier',
       source VARCHAR(80) NOT NULL DEFAULT 'bulk_onboarding',
-      status ENUM('invited','interested','registered','active','unsubscribed') NOT NULL DEFAULT 'invited',
+      status ENUM('new','invited','interested','registered','active','unsubscribed') NOT NULL DEFAULT 'invited',
       last_activity_at DATETIME NULL,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -2223,6 +2229,15 @@ async function ensureDashboardSchema() {
   } catch (e) {
     if (!["ER_DUP_FIELDNAME", "ER_DUP_COLUMN"].includes(e?.code)) throw e;
   }
+
+  // Imported contacts start as 'new' (not yet emailed). Older tables only allow 'invited' and later,
+  // so every list import failed with "Data truncated for column 'status'".
+  try {
+    const [[col]] = await pool.query("SELECT COLUMN_TYPE AS t FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='potential_contacts' AND COLUMN_NAME='status'");
+    if (col && !/'new'/.test(col.t)) {
+      await pool.query("ALTER TABLE potential_contacts MODIFY COLUMN status ENUM('new','invited','interested','registered','active','unsubscribed') NOT NULL DEFAULT 'invited'");
+    }
+  } catch (e) { console.error("potential_contacts status migration failed:", e); }
 
   await ensureConnectRequestsTable();
   await ensureBuyerSchema();

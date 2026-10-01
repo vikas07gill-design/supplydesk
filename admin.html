@@ -47,7 +47,7 @@
     <div class="muted" style="margin-bottom:16px">Upload the company list with company name and business email. SupplyDesk will validate, remove duplicates and send invitations sequentially.</div>
     <div class="invite-grid">
       <label class="full">Manufacturer list (.csv, .txt or .md)
-        <input id="bulkInviteFile" type="file" accept=".csv,.txt,.md,text/csv,text/plain,text/markdown">
+        <input id="bulkInviteFile" type="file" accept=".csv,.tsv,.txt,.md,text/csv,text/tab-separated-values,text/plain,text/markdown">
       </label>
       <label>Invitation type
         <select id="bulkInviteType"><option value="supplier">Supplier</option><option value="buyer">Buyer</option></select>
@@ -86,7 +86,7 @@
       <div class="muted" style="margin-bottom:14px">Import contacts first. Send invitation emails separately when you are ready.</div>
       <div style="display:grid;grid-template-columns:minmax(260px,1fr) 150px 120px;gap:10px;align-items:end">
         <label style="font-weight:800;font-size:13px">Company list
-          <input id="potentialBulkFile" type="file" accept=".csv,.txt,.md,text/csv,text/plain,text/markdown" style="display:block;width:100%;margin-top:6px">
+          <input id="potentialBulkFile" type="file" accept=".csv,.tsv,.txt,.md,text/csv,text/tab-separated-values,text/plain,text/markdown" style="display:block;width:100%;margin-top:6px">
         </label>
         <label style="font-weight:800;font-size:13px">Type
           <select id="potentialBulkType" style="display:block;width:100%;margin-top:6px;padding:9px"><option value="supplier">Supplier</option><option value="buyer">Buyer</option></select>
@@ -240,20 +240,24 @@ document.getElementById("bulkInviteFile").addEventListener("change",async e=>{
 });
 function parseBulkInviteFile(text){
   const rows=[]; const seenEmails=new Set(); const seenMobiles=new Set();
-  const lines=String(text||"").split(/\r?\n/);
+  const lines=String(text||"").replace(/^\uFEFF/,"").split(/\r?\n/);
   let headerMap=null;
+  // Excel/Sheets exports use commas, semicolons (many locales) or tabs (copy-paste); markdown tables use pipes.
+  const sample=lines.find(l=>l.trim()&&!/^#/.test(l.trim()))||"";
+  const count=ch=>sample.split(ch).length-1;
+  const delim=sample.includes("|")?"|":count("\t")>0?"\t":(count(";")>count(",")?";":",");
 
   const cleanCell=v=>String(v??"").replace(/^\s+|\s+$/g,"").replace(/^["']|["']$/g,"").replace(/^\*+|\*+$/g,"").trim();
   const headerKey=v=>cleanCell(v).toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ");
 
   for(const raw of lines){
-    let line=raw.trim();
+    let line=delim==="\t"?raw.replace(/\r$/,""):raw.trim();
     if(!line)continue;
     if(/^#/.test(line))continue;
     if(/^\|?\s*:?-{2,}/.test(line))continue;
 
     let cells;
-    if(line.includes("|")){
+    if(delim==="|"){
       cells=line.split("|").map(cleanCell);
       if(cells[0]==="")cells.shift();
       if(cells[cells.length-1]==="")cells.pop();
@@ -266,7 +270,7 @@ function parseBulkInviteFile(text){
           if(quoted && line[i+1]==='"'){cur+='"';i++;continue}
           quoted=!quoted; continue;
         }
-        if(ch===','&&!quoted){cells.push(cleanCell(cur));cur="";continue}
+        if(ch===delim&&!quoted){cells.push(cleanCell(cur));cur="";continue}
         cur+=ch;
       }
       cells.push(cleanCell(cur));
@@ -334,12 +338,24 @@ function renderBulkInviteResults(){
 }
 document.getElementById("bulkInviteResultSearch").addEventListener("input",renderBulkInviteResults);
 document.getElementById("bulkInviteResultFilter").addEventListener("change",renderBulkInviteResults);
+async function sendInviteChunks(type,delayMs,rows,onProgress){
+  // The server waits delayMs between emails, so one request for a long list runs for minutes and gets
+  // cut off by the web host. Send small batches and combine the results.
+  const total={ok:true,total:rows.length,sent:0,skipped:0,failed:0,results:[]};
+  const size=10;
+  for(let i=0;i<rows.length;i+=size){
+    if(onProgress)onProgress("Sending invitations… "+Math.min(i+size,rows.length)+" of "+rows.length);
+    const part=await api("/api/admin/bulk-invite",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({inviteType:type,delayMs:delayMs,recipients:rows.slice(i,i+size)})});
+    total.sent+=part.sent||0;total.skipped+=part.skipped||0;total.failed+=part.failed||0;total.results.push(...(part.results||[]));
+  }
+  return total;
+}
 async function sendBulkInvites(){
   if(!bulkInviteRows.length){document.getElementById("bulkInviteStatus").textContent="Upload a valid manufacturer list first.";return}
   const btn=document.getElementById("bulkInviteSendBtn"); btn.disabled=true;
   const status=document.getElementById("bulkInviteStatus"); status.textContent="Sending invitations...";
   try{
-    const data=await api("/api/admin/bulk-invite",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({inviteType:document.getElementById("bulkInviteType").value,delayMs:Number(document.getElementById("bulkInviteDelay").value),recipients:bulkInviteRows})});
+    const data=await sendInviteChunks(document.getElementById("bulkInviteType").value,Number(document.getElementById("bulkInviteDelay").value),bulkInviteRows,m=>{status.textContent=m});
     status.innerHTML="<strong>Completed:</strong> "+data.sent+" sent, "+data.skipped+" skipped, "+data.failed+" failed.";
     document.getElementById("message").textContent="Bulk onboarding completed: "+data.sent+" sent, "+data.skipped+" skipped, "+data.failed+" failed.";
     if(data.results?.length){
@@ -364,8 +380,14 @@ async function importPotentialContacts(){
   if(!rows.length){status.textContent="Please select a valid Company + Email list first.";return}
   btn.disabled=true; status.textContent="Importing contacts into Potential Database...";
   try{
-    const data=await api("/api/admin/potential-contacts/import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({inviteType:document.getElementById("potentialBulkType").value,recipients:rows})});
-    window.potentialBulkSendRows=data.contacts||[]; send.disabled=!window.potentialBulkSendRows.length; document.getElementById("potentialBulkWhatsAppBtn").disabled=!window.potentialBulkSendRows.some(r=>String(r.phone||"").replace(/\\D/g,"").length>=8);
+    const data={added:0,skipped:0,contacts:[]};
+    // the server accepts at most 500 rows per request, so a longer list is sent in pieces
+    for(let i=0;i<rows.length;i+=200){
+      status.textContent="Importing contacts into Potential Database… "+Math.min(i+200,rows.length)+" of "+rows.length;
+      const part=await api("/api/admin/potential-contacts/import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({inviteType:document.getElementById("potentialBulkType").value,recipients:rows.slice(i,i+200)})});
+      data.added+=part.added||0;data.skipped+=part.skipped||0;data.contacts.push(...(part.contacts||[]));
+    }
+    window.potentialBulkSendRows=data.contacts||[]; send.disabled=!window.potentialBulkSendRows.length; document.getElementById("potentialBulkWhatsAppBtn").disabled=!window.potentialBulkSendRows.some(r=>String(r.phone||"").replace(/\D/g,"").length>=8);
     status.innerHTML="<strong>Import complete:</strong> "+data.added+" new contacts saved, "+data.skipped+" skipped.";
     document.getElementById("potentialBulkPreview").textContent=data.added+" new contacts saved. Click “2. Send Invitation Emails” when you are ready.";
     await loadPotentialDb();
@@ -378,7 +400,7 @@ async function sendPotentialBulkInvites(){
   if(!confirm("Send SupplyDesk invitation emails to "+rows.length+" newly imported contacts?"))return;
   btn.disabled=true; status.textContent="Sending invitation emails...";
   try{
-    const data=await api("/api/admin/bulk-invite",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({inviteType:document.getElementById("potentialBulkType").value,delayMs:Number(document.getElementById("potentialBulkDelay").value),recipients:rows})});
+    const data=await sendInviteChunks(document.getElementById("potentialBulkType").value,Number(document.getElementById("potentialBulkDelay").value),rows,m=>{status.textContent=m});
     status.innerHTML="<strong>Email outreach complete:</strong> "+data.sent+" sent, "+data.skipped+" skipped, "+data.failed+" failed.";
     window.potentialBulkSendRows=[]; document.getElementById("potentialBulkWhatsAppBtn").disabled=true; await loadPotentialDb();
   }catch(e){status.textContent=e.message}
@@ -388,13 +410,13 @@ function preparePotentialBulkWhatsApp(){
   const rows=window.potentialBulkSendRows||[];
   const status=document.getElementById("potentialBulkStatus");
   if(!rows.length){status.textContent="Import new contacts first.";return}
-  const withMobile=rows.filter(r=>String(r.phone||"").replace(/\\D/g,"").length>=8);
+  const withMobile=rows.filter(r=>String(r.phone||"").replace(/\D/g,"").length>=8);
   if(!withMobile.length){status.textContent="No valid mobile numbers found for WhatsApp.";return}
   if(!confirm("Prepare WhatsApp outreach for "+withMobile.length+" contacts? WhatsApp requires the final Send action inside WhatsApp."))return;
   const textMsg="Hello, we invited you to join SupplyDesk, a global B2B sourcing platform. Explore: https://supplydesk.in/";
   let opened=0;
   withMobile.forEach((r,i)=>{
-    const digits=String(r.phone||"").replace(/\\D/g,"");
+    const digits=String(r.phone||"").replace(/\D/g,"");
     setTimeout(()=>{
       const w=window.open("https://wa.me/"+encodeURIComponent(digits)+"?text="+encodeURIComponent(textMsg),"_blank","noopener");
       if(w)opened++;
@@ -426,7 +448,7 @@ async function loadPotentialDb(){
     const data=await api("/api/admin/potential-contacts?"+q.toString());
     status.textContent=data.total+" contacts";
     box.innerHTML='<table class="bulk-table"><tr><th>Company</th><th>Email</th><th>Mobile</th><th>Location</th><th>Type</th><th>Onboarding</th><th>Invite Status</th><th>WhatsApp</th></tr>'+data.contacts.map(c=>{
-  const digits=String(c.mobile||"").replace(/\\D/g,"");
+  const digits=String(c.mobile||"").replace(/\D/g,"");
   const wa=digits.length>=8 ? '<a href="https://wa.me/'+encodeURIComponent(digits)+'?text='+encodeURIComponent("Hello "+(c.company_name||"")+", we invited you to join SupplyDesk. Explore: https://supplydesk.in/")+'" target="_blank" rel="noopener" class="wa-btn">WhatsApp</a>' : '<span class="muted">No mobile</span>';
   const badge=c.onboarded ? '<span class="status-pill onboarded">✓ '+esc(c.onboardedStatus)+'</span>' : '<span class="status-pill pending">○ Not Onboarded</span>';
   return '<tr><td><strong>'+esc(c.company_name)+'</strong></td><td>'+esc(c.email)+'</td><td>'+esc(c.mobile||"Not available")+'</td><td>'+esc(c.location||"Not available")+'</td><td>'+esc(c.contact_type)+'</td><td>'+badge+'</td><td>'+esc(c.status)+'</td><td>'+wa+'</td></tr>';
