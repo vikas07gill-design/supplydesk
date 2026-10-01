@@ -25,11 +25,11 @@ nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!i
 .summary{font-weight:700;color:#607985}
 .empty{box-shadow:0 12px 30px rgba(11,58,80,.05)}
 @media(max-width:650px){.top{padding:30px 22px;border-radius:20px}.top h1{font-size:35px}}
-</style><script src="/assets/taxonomy.js"></script><link rel="stylesheet" href="assets/depth.css"><script src="assets/depth.js" defer></script></head>
+</style><script src="/assets/taxonomy.js"></script><script src="/assets/smartsearch.js"></script><link rel="stylesheet" href="assets/depth.css"><script src="assets/depth.js" defer></script><style>.best-badge{background:#fff4d6;color:#8a5a00;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:900;margin-left:6px;letter-spacing:0}.why{font-size:11px;color:#087f8c;font-weight:800;margin:6px 0 2px}.understood{margin-top:8px;font-size:12px;color:#506770}.u-chip{border:1px solid #bfe3e0;background:#eefaf9;color:#087f8c;border-radius:999px;padding:4px 10px;margin:0 6px 4px 0;font-weight:800;font-size:12px;cursor:pointer}.req-cta{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 18px;padding:14px 18px;border:1px dashed #9fd3cf;border-radius:14px;background:#f2fbfa;font-size:13px}.req-cta span{color:#647780}</style></head>
 <body><nav><div class="wrap nav"><a class="brand-logo" href="index.html" aria-label="SupplyDesk home"><img src="assets/supplydesk-logo-dark.svg" alt="SupplyDesk" style="width:180px;height:auto;display:block"></a><div style="display:flex;gap:8px"><a class="btn" href="explore.html">Categories</a><a class="btn primary" href="supplier-register.html">Register Supplier</a></div></div></nav>
-<main class="wrap"><section class="top"><div class="eyebrow">Supply discovery</div><h1 id="title">Explore SupplyDesk</h1><p>Find products, suppliers and supply services.</p><div class="search"><input id="q" placeholder="Product, material, supplier or service"><button class="btn primary" onclick="run()">Search</button></div></section>
+<main class="wrap"><section class="top"><div class="eyebrow">Supply discovery</div><h1 id="title">Explore SupplyDesk</h1><p>Type what you need in your own words. We find the best matching products and suppliers.</p><div class="search"><input id="q" placeholder="Describe what you need, e.g. machine to cut metal sheets" autocomplete="off" onkeydown="if(event.key==='Enter')run()"><button class="btn primary" onclick="run()">Search</button></div></section>
 <div class="tabs"><button class="tab active" data-type="all">All</button><button class="tab" data-type="product">Products</button><button class="tab" data-type="supplier">Suppliers</button><button class="tab" data-type="service">Services</button></div>
-<div class="filters"><select id="category" onchange="render()"><option value="">Any category</option></select><select id="subcategory" onchange="render()"><option value="">Any sub-category</option></select><select id="country" onchange="render()"><option value="">Any country</option><option>India</option><option>China</option><option>UAE</option><option>USA</option></select><select id="city" onchange="render()"><option value="">Any city</option><option>Delhi</option><option>Mumbai</option><option>Ahmedabad</option><option>Yiwu</option><option>Dubai</option><option>Shenzhen</option></select><select id="market" onchange="render()"><option value="">Any market</option><option>Domestic</option><option>International</option><option>Both</option></select><div class="sort-wrap"><span>Sort</span><select id="sort" onchange="render()"><option value="newest">Newest</option><option value="name">Name A–Z</option></select></div><script>(function(){var c=document.getElementById('category');if(!c||!window.SD_TAX)return;Object.entries(SD_TAX.groups).forEach(function(g){var o=document.createElement('optgroup');o.label=g[0];g[1].forEach(function(x){var op=document.createElement('option');op.textContent=x;o.appendChild(op)});c.appendChild(o)})})();</script></div>
+<div class="filters"><select id="category" onchange="render()"><option value="">Any category</option></select><select id="subcategory" onchange="render()"><option value="">Any sub-category</option></select><select id="country" onchange="render()"><option value="">Any country</option><option>India</option><option>China</option><option>UAE</option><option>USA</option></select><select id="city" onchange="render()"><option value="">Any city</option><option>Delhi</option><option>Mumbai</option><option>Ahmedabad</option><option>Yiwu</option><option>Dubai</option><option>Shenzhen</option></select><select id="market" onchange="render()"><option value="">Any market</option><option>Domestic</option><option>International</option><option>Both</option></select><div class="sort-wrap"><span>Sort</span><select id="sort" onchange="render()"><option value="relevance">Best match</option><option value="newest">Newest</option><option value="name">Name A–Z</option></select></div><script>(function(){var c=document.getElementById('category');if(!c||!window.SD_TAX)return;Object.entries(SD_TAX.groups).forEach(function(g){var o=document.createElement('optgroup');o.label=g[0];g[1].forEach(function(x){var op=document.createElement('option');op.textContent=x;o.appendChild(op)});c.appendChild(o)})})();</script></div>
 <div class="summary" id="summary"></div><section id="results"></section><div class="footer">SupplyDesk is an information and connection platform. Listings and business details are shown for discovery.</div></main>
 <script>
 let data=[];
@@ -70,7 +70,7 @@ function render(){
         country=document.getElementById('country').value,
         city=document.getElementById('city').value,
         market=document.getElementById('market').value,
-        sort=document.getElementById('sort')?.value||'newest';
+        sort=document.getElementById('sort')?.value||'relevance';
 
   let rows=data.filter(x=>
     (active==='all'||active==='category'||x.type===active) &&
@@ -78,17 +78,23 @@ function render(){
     (!sub||x.subcategories?.includes(sub)) &&
     (!country||x.country===country) &&
     (!city||x.city===city) &&
-    (!market||x.market===market||x.market==='All markets'||x.market==='Both') &&
-    match(x,q)
+    (!market||x.market===market||x.market==='All markets'||x.market==='Both')
   );
 
-  rows.sort((a,b)=>sort==='name'?String(a.name).localeCompare(String(b.name)):0);
+  let info=null; const meta=new Map();
+  if(q){
+    info=SmartSearch.rank(rows,q);
+    info.results.forEach((r,i)=>meta.set(r.item,{r,i}));
+    rows=info.results.map(r=>r.item);
+    if(sort==='newest') rows=rows.slice();            // keep relevance order unless the user picks another sort
+    if(sort==='name') rows.sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+  } else if(sort==='name') rows.sort((a,b)=>String(a.name).localeCompare(String(b.name)));
 
   document.getElementById('title').textContent=q?'Results for “'+q+'”':'Explore SupplyDesk';
-  document.getElementById('summary').textContent=rows.length+' result'+(rows.length===1?'':'s')+' · Products, suppliers and services';
+  document.getElementById('summary').innerHTML=rows.length+' result'+(rows.length===1?'':'s')+(q?' · best matches first':' · Products, suppliers and services')+understoodHtml(info,q);
 
   if(!rows.length){
-    document.getElementById('results').innerHTML='<div class="empty"><h3>No exact matches yet</h3><p>Try a broader term, another market, or clear the filters.</p><button class="btn" onclick="clearFilters()">Clear filters</button></div>';
+    document.getElementById('results').innerHTML='<div class="empty"><h3>No listings match “'+esc(q||'')+'” yet</h3><p>Suppliers are joining every day. Tell us what you need and SupplyDesk will find suppliers for you.</p>'+postReqBtn(q,info)+' <button class="btn" onclick="clearFilters()">Clear filters</button></div>';
     return;
   }
 
@@ -101,20 +107,34 @@ function render(){
       :'<div class="product-card-image placeholder"></div>';
     return '<article class="result">'+
       image+
-      '<div class="product-card-body"><div class="type">PRODUCT</div>'+
+      '<div class="product-card-body"><div class="type">PRODUCT'+bestBadge(x,meta)+'</div>'+
       '<h3>'+esc(x.name)+'</h3>'+
       '<div><span class="verified-badge">✓ SupplyDesk Verified</span></div>'+
       '<div class="meta">📍 '+esc(x.city)+', '+esc(x.country)+' · '+esc(x.market)+'</div>'+
       (x.moq?'<div class="moq">MOQ: '+esc(x.moq)+(x.unit?' '+esc(x.unit):'')+'</div>':'')+
-      '<div class="desc">'+esc(x.desc)+'</div>'+
+      '<div class="desc">'+esc(x.desc)+'</div>'+why(x,meta)+
       '<div class="tags">'+x.tags.map(t=>'<span class="tag">'+esc(t)+'</span>').join('')+'</div>'+
       '<div class="result-actions"><a class="btn primary view" href="'+target(x)+'">View Product →</a></div></div></article>';
   }).join('');
 
   const otherHtml=otherRows.map(x=>'<article class="result"><div class="result-main"><div class="type">'+esc(x.type)+(x.verified?' · ✓ Verified':'')+'</div><h3>'+esc(x.name)+'</h3><div class="meta">📍 '+esc(x.city)+', '+esc(x.country)+' · '+esc(x.market)+'</div><div class="desc">'+esc(x.desc)+'</div><div class="tags">'+x.tags.map(t=>'<span class="tag">'+esc(t)+'</span>').join('')+'</div></div><div class="result-actions"><a class="btn primary view" href="'+target(x)+'">View '+(x.type==='service'?'Service':'Supplier')+' →</a></div></article>').join('');
 
-  document.getElementById('results').innerHTML=(productHtml?'<div class="product-grid">'+productHtml+'</div>':'')+(otherHtml?(productHtml?'<div style="margin:30px 0 12px;font-size:13px;font-weight:900;color:#607985">SUPPLIERS & SERVICES</div>':'')+otherHtml:'');
+  const cta=q?'<div class="req-cta"><div><strong>Not exactly what you need?</strong><br><span>Post your requirement once. SupplyDesk reviews it and shares it with matching suppliers.</span></div>'+postReqBtn(q,info)+'</div>':'';
+  document.getElementById('results').innerHTML=cta+(productHtml?'<div class="product-grid">'+productHtml+'</div>':'')+(otherHtml?(productHtml?'<div style="margin:30px 0 12px;font-size:13px;font-weight:900;color:#607985">SUPPLIERS & SERVICES</div>':'')+otherHtml:'');
 }
+
+
+function bestBadge(x,meta){const m=meta.get(x);return m&&m.i<3?' <span class="best-badge">★ Best match</span>':''}
+function why(x,meta){const m=meta.get(x);if(!m||!m.r.concept)return '';const c=m.r.concept;return '<div class="why">Matches your need: '+esc(c.sub||c.cat)+'</div>'}
+function reqUrl(q,info){let u='requirement.html?title='+encodeURIComponent(q||'');const c=info&&info.concepts&&info.concepts[0];if(c){u+='&category='+encodeURIComponent(c.cat);if(c.sub)u+='&sub='+encodeURIComponent(c.sub)}return u}
+function postReqBtn(q,info){return '<a class="btn primary" href="'+esc(reqUrl(q,info))+'">Post your requirement →</a>'}
+function understoodHtml(info,q){
+  if(!q||!info||!info.results.length)return '';
+  const seen=new Set(),chips=[];
+  info.results.slice(0,6).forEach(r=>{const c=r.concept;if(!c)return;const k=c.cat+'|'+c.sub;if(seen.has(k))return;seen.add(k);chips.push('<button type="button" class="u-chip" onclick="applyConcept(\''+esc(c.cat).replace(/'/g,"\\'")+'\',\''+esc(c.sub||'').replace(/'/g,"\\'")+'\')">'+esc(c.sub?c.cat+' › '+c.sub:c.cat)+'</button>')});
+  return chips.length?'<div class="understood">Understood as: '+chips.slice(0,4).join('')+'</div>':'';
+}
+function applyConcept(cat,sub){const c=document.getElementById('category');c.value=cat;c.dispatchEvent(new Event('change'));if(sub)setTimeout(()=>{document.getElementById('subcategory').value=sub;render()},0)}
 
 function clearFilters(){
   document.getElementById('category').value='';
