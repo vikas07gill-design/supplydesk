@@ -435,6 +435,16 @@ async function requireSuperAdmin(req,res,next){
 // Normal admins/testers get an alias and capacity band so they can still work the queue.
 const isSuper=(req)=>req.admin?.role==="super_admin";
 const supplierAlias=(id)=>"Supplier "+crypto.createHash("sha1").update(String(id||"")).digest("hex").slice(0,6).toUpperCase();
+// Buyer identity (name, company, email, phone) is Super Admin only. Admin works with an alias + RFQ/PO numbers.
+const buyerAlias=(id)=>"Buyer "+crypto.createHash("sha1").update(String(id||"").toLowerCase()).digest("hex").slice(0,6).toUpperCase();
+function maskBuyerRow(req,row){
+  if(isSuper(req)||!row)return row;
+  const o={...row},alias=buyerAlias(row.buyer_id||row.customer_email||row.buyer_email);
+  for(const k of ["buyer_name","customer_name"])if(k in o)o[k]=alias;
+  for(const k of ["buyer_email","buyer_phone","buyer_company","customer_email","customer_phone","customer_company"])if(k in o)o[k]="";
+  if("buyer_id" in o)o.buyer_id=null;
+  return o;
+}
 function maskSupplierRow(req,row){
   if(isSuper(req)||!row)return row;
   const o={...row},alias=supplierAlias(row.supplier_id);
@@ -1363,7 +1373,7 @@ app.get("/api/admin/connect-requests", requireAdmin, async (req,res)=>{
   const allowed=["new","contacted","in_discussion","closed"];
   const params=[];
   let sql=`SELECT c.id,c.supplier_id,c.customer_name,c.customer_email,c.customer_phone,c.product_name,c.source_action,c.message,c.status,c.created_at,c.updated_at,c.enquiry_id,
-                   b.company AS customer_company,b.country AS customer_country,e.quantity,
+                   b.company AS customer_company,b.country AS customer_country,b.id AS buyer_id,e.quantity,
                    e.decision,e.approved_quantity,e.buyer_remark,e.decided_at,e.decided_by,
                    p.id AS product_id,p.capability_code,p.monthly_capacity,p.available_capacity,p.capacity_unit,p.lead_time_days,p.capacity_updated_at,
                    s.legal_name,s.trade_name,s.country,s.city
@@ -1376,7 +1386,7 @@ app.get("/api/admin/connect-requests", requireAdmin, async (req,res)=>{
   sql+=" ORDER BY c.created_at DESC LIMIT 300";
   try{
     const [rows]=await pool.execute(sql,params);
-    res.json({requests:rows.map(r=>maskSupplierRow(req,r)),detailsRestricted:!isSuper(req)});
+    res.json({requests:rows.map(r=>maskBuyerRow(req,maskSupplierRow(req,r))),detailsRestricted:!isSuper(req)});
   }catch(error){
     console.error("Admin connection requests failed:",error);
     res.status(500).json({error:"Could not load connection requests."});
@@ -1490,7 +1500,7 @@ await mailer.sendMail({from:process.env.SMTP_FROM,replyTo:process.env.SMTP_FROM,
   }catch(error){console.error("Supplier quote failed:",error);res.status(500).json({error:"Could not submit the quotation."});}
 });
 app.patch("/api/buyer-requirements/:id",requireBuyerDashboard,async(req,res)=>{const status=clean(req.body?.status,20);if(!["closed","cancelled"].includes(status))return res.status(400).json({error:"Invalid requirement status."});const rid=clean(req.params.id,80);const conn=await pool.getConnection();try{await conn.beginTransaction();const [[own]]=await conn.execute("SELECT id FROM buyer_requirements WHERE id=? AND buyer_id=?",[rid,req.buyer.id]);if(!own){await conn.rollback();return res.status(404).json({error:"Requirement not found."});}await moveRfq(conn,req,rid,status==="cancelled"?"cancelled":"closed","buyer request");await conn.execute("UPDATE buyer_requirements SET status=?,updated_at=NOW() WHERE id=?",[status,rid]);await conn.commit();res.json({ok:true,status});}catch(error){await conn.rollback();if(error instanceof RfqError)return res.status(error.status).json({error:error.message});console.error("Buyer requirement update failed:",error);res.status(500).json({error:"Could not update requirement."});}finally{conn.release();}});
-app.get("/api/admin/requirements",requireAdmin,async(req,res)=>{try{const [requirements]=await pool.execute("SELECT r.*,b.email buyer_email,b.name buyer_name,b.company buyer_company,b.phone buyer_phone,(SELECT COUNT(*) FROM supplier_quotes q WHERE q.requirement_id=r.id AND q.status='submitted') quote_count FROM buyer_requirements r JOIN buyers b ON b.id=r.buyer_id ORDER BY r.created_at DESC LIMIT 300");res.json({requirements});}catch(error){res.status(500).json({error:"Could not load buyer requirements."});}});
+app.get("/api/admin/requirements",requireAdmin,async(req,res)=>{try{const [requirements]=await pool.execute("SELECT r.*,b.email buyer_email,b.name buyer_name,b.company buyer_company,b.phone buyer_phone,(SELECT COUNT(*) FROM supplier_quotes q WHERE q.requirement_id=r.id AND q.status='submitted') quote_count FROM buyer_requirements r JOIN buyers b ON b.id=r.buyer_id ORDER BY r.created_at DESC LIMIT 300");res.json({requirements:requirements.map(r=>maskBuyerRow(req,r)),detailsRestricted:!isSuper(req)});}catch(error){res.status(500).json({error:"Could not load buyer requirements."});}});
 
 async function sendBrandedMail(to,subject,opts){
   if(!to||!process.env.SMTP_HOST||!process.env.SMTP_USER||!process.env.SMTP_PASSWORD||!process.env.SMTP_FROM)return false;
@@ -1746,14 +1756,14 @@ app.post("/api/admin/requirements/:id/message",requireAdmin,async(req,res)=>{
 app.post("/api/admin/requirements/:id/buyer-quote",requireAdmin,async(req,res)=>{
   const id=clean(req.params.id,80),b=req.body||{};
   const costUnit=b.costUnitPrice===""||b.costUnitPrice==null?null:Number(b.costUnitPrice);
-  const markupPct=b.markupPct===""||b.markupPct==null?null:Number(b.markupPct);
+  const markupPct=b.marginPct===""||b.marginPct==null?null:Number(b.marginPct);   // margin % on selling price (stored in markup_pct)
   if(costUnit!=null&&(!Number.isFinite(costUnit)||costUnit<=0))return res.status(400).json({error:"Enter a valid supplier cost."});
   if(markupPct!=null){
     if(!isSuper(req))return res.status(403).json({error:"Only Super Admin can price by margin."});
     if(costUnit==null)return res.status(400).json({error:"Supplier cost is required to apply a margin."});
-    if(!Number.isFinite(markupPct)||markupPct<0||markupPct>300)return res.status(400).json({error:"Margin must be between 0 and 300 percent."});
+    if(!Number.isFinite(markupPct)||markupPct<0||markupPct>90)return res.status(400).json({error:"Margin must be between 0 and 90 percent of the selling price."});
   }
-  const unitPrice=markupPct!=null?RFQ.priceFromMarkup(costUnit,markupPct):Number(b.unitPrice),currency=(clean(b.currency,10)||"INR").toUpperCase(),quantity=clean(b.quantity,60);
+  const unitPrice=markupPct!=null?RFQ.priceFromMargin(costUnit,markupPct):Number(b.unitPrice),currency=(clean(b.currency,10)||"INR").toUpperCase(),quantity=clean(b.quantity,60);
   const leadTime=b.leadTimeDays===""||b.leadTimeDays==null?null:Number(b.leadTimeDays),validUntil=clean(b.validUntil,10)||null;
   const terms=clean(b.terms,2000)||null,note=clean(b.note,1000)||null;
   if(!Number.isFinite(unitPrice)||unitPrice<=0)return res.status(400).json({error:"Enter a valid unit price."});
@@ -1827,8 +1837,8 @@ app.get("/api/buyer-orders",requireBuyerDashboard,async(req,res)=>{
 });
 
 app.get("/api/admin/orders",requireAdmin,async(req,res)=>{
-  try{const [rows]=await pool.execute("SELECT o.id,o.po_number,o.rfq_id,o.title,o.quantity,o.unit_price,o.currency,o.total_price,o.status,o.status_changed_at,o.notes,o.created_at,b.name buyer_name,b.company buyer_company,r.rfq_code FROM orders o JOIN buyers b ON b.id=o.buyer_id JOIN buyer_requirements r ON r.id=o.rfq_id ORDER BY o.created_at DESC LIMIT 300");
-    res.json({orders:rows.map(o=>({...o,statusLabel:(RFQ.ORDER_STATES[o.status]||{}).label||o.status,allowedNext:RFQ.ORDER_TRANSITIONS[o.status]||[]})),states:Object.fromEntries(Object.entries(RFQ.ORDER_STATES).map(([k,v])=>[k,v.label]))});}
+  try{const [rows]=await pool.execute("SELECT o.id,o.po_number,o.rfq_id,o.title,o.quantity,o.unit_price,o.currency,o.total_price,o.status,o.status_changed_at,o.notes,o.created_at,b.name buyer_name,b.company buyer_company,o.buyer_id,r.rfq_code FROM orders o JOIN buyers b ON b.id=o.buyer_id JOIN buyer_requirements r ON r.id=o.rfq_id ORDER BY o.created_at DESC LIMIT 300");
+    res.json({orders:rows.map(o=>maskBuyerRow(req,{...o,statusLabel:(RFQ.ORDER_STATES[o.status]||{}).label||o.status,allowedNext:RFQ.ORDER_TRANSITIONS[o.status]||[]})),states:Object.fromEntries(Object.entries(RFQ.ORDER_STATES).map(([k,v])=>[k,v.label]))});}
   catch(error){console.error(error);res.status(500).json({error:"Could not load orders."});}
 });
 
@@ -1858,7 +1868,7 @@ app.get("/api/admin/procurement/queue",requireAdmin,async(req,res)=>{
   try{
     const [rows]=await pool.execute(
       `SELECT r.id,r.rfq_code,r.rfq_state,r.state_changed_at,r.created_at,r.title,r.category,r.subcategory,r.quantity,r.unit,r.required_by,r.delivery_country,r.status,
-              b.name buyer_name,b.company buyer_company,
+              b.name buyer_name,b.company buyer_company,r.buyer_id,
               (SELECT COUNT(*) FROM requirement_supplier_matches m WHERE m.requirement_id=r.id) shared_count,
               (SELECT COUNT(*) FROM supplier_quotes q WHERE q.requirement_id=r.id AND q.status='submitted') quote_count
        FROM buyer_requirements r JOIN buyers b ON b.id=r.buyer_id ORDER BY r.created_at DESC LIMIT 500`);
@@ -1871,7 +1881,7 @@ app.get("/api/admin/procurement/queue",requireAdmin,async(req,res)=>{
       const terminal=RFQ.isTerminal(state);
       let flag="";
       if(!terminal){ if(daysLeft!=null&&daysLeft<0)flag="overdue"; else if(state==="submitted"&&waitingHours>24)flag="needs_review"; else if(daysLeft!=null&&daysLeft<=7)flag="urgent"; else if(["sourcing","quotes_received"].includes(state)&&waitingHours>72)flag="stalled"; }
-      return {...r,rfq_state:state,stateLabel:RFQ.STATES[state].label,waitingHours,daysLeft,flag,allowedNext:RFQ.TRANSITIONS[state]};
+      return maskBuyerRow(req,{...r,rfq_state:state,stateLabel:RFQ.STATES[state].label,waitingHours,daysLeft,flag,allowedNext:RFQ.TRANSITIONS[state]});
     });
     res.json({counts,states:Object.fromEntries(Object.entries(RFQ.STATES).map(([k,v])=>[k,v.label])),items});
   }catch(error){console.error("Procurement queue failed:",error);res.status(500).json({error:"Could not load the procurement queue."});}
@@ -1919,7 +1929,7 @@ app.get("/api/admin/audit",requireAdmin,async(req,res)=>{
     const [rows]=entity&&entityId
       ?await pool.execute("SELECT id,actor,actor_role,action,entity,entity_id,old_value,new_value,created_at FROM audit_log WHERE entity=? AND entity_id=? ORDER BY id DESC LIMIT 200",[entity,entityId])
       :await pool.execute("SELECT id,actor,actor_role,action,entity,entity_id,old_value,new_value,created_at FROM audit_log ORDER BY id DESC LIMIT 200");
-    res.json({entries:rows});
+    res.json({entries:isSuper(req)?rows:rows.map(e=>{const o=/^buyer:/.test(e.actor||"")?{...e,actor:"buyer"}:{...e};if(o.entity==="supplier"){o.old_value=null;o.new_value=null;}return o;})});
   }catch(error){console.error("Audit read failed:",error);res.status(500).json({error:"Could not load the audit trail."});}
 });
 

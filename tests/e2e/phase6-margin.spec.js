@@ -3,7 +3,11 @@ const RFQ = require("../../rfq");
 const KEY = process.env.E2E_TEST_KEY, AID = process.env.E2E_ADMIN_ID, APW = process.env.E2E_ADMIN_PASSWORD;
 const SID = process.env.E2E_SUPER_ID, SPW = process.env.E2E_SUPER_PASSWORD;
 
-test("markup maths", () => {
+test("margin maths (margin is on selling price)", () => {
+  expect(RFQ.priceFromMargin(100, 20)).toBe(125);
+  expect(RFQ.priceFromMargin(80, 20)).toBe(100);
+  expect(RFQ.priceFromMargin(100, 95)).toBeNull();
+  expect(RFQ.priceFromMargin(0, 20)).toBeNull();
   expect(RFQ.priceFromMarkup(100, 25)).toBe(125);
   expect(RFQ.priceFromMarkup(0, 25)).toBeNull();
   expect(RFQ.priceFromMarkup(100, 400)).toBeNull();
@@ -25,7 +29,7 @@ test.describe("margin is Super Admin only", () => {
     const ah = await login(request, AID, APW);
     const { requirementId, bh } = await newRfq(request);
     const base = { quantity: "1000 pcs", costUnitPrice: 100 };
-    expect((await request.post(`/api/admin/requirements/${requirementId}/buyer-quote`, { headers: ah, data: { ...base, markupPct: 25 } })).status()).toBe(403);
+    expect((await request.post(`/api/admin/requirements/${requirementId}/buyer-quote`, { headers: ah, data: { ...base, marginPct: 20 } })).status()).toBe(403);
     expect((await request.get("/api/super-admin/margin-report", { headers: ah })).status()).toBe(403);
     expect((await request.get("/api/super-admin/margin-report", { headers: bh })).status()).toBeGreaterThanOrEqual(401);
     // admin may still record cost + type a final price
@@ -34,13 +38,13 @@ test.describe("margin is Super Admin only", () => {
     expect(view).not.toMatch(/cost_unit_price|markup/);
   });
 
-  test("super admin prices by markup and sees revenue, cost and margin", async ({ request }) => {
+  test("super admin prices by margin on price and sees revenue, cost and margin", async ({ request }) => {
     test.skip(!SID || !SPW, "needs E2E_SUPER_ID/E2E_SUPER_PASSWORD");
     const sa = await login(request, SID, SPW), ah = await login(request, AID, APW);
     const { requirementId, bh } = await newRfq(request);
-    const bad = await request.post(`/api/admin/requirements/${requirementId}/buyer-quote`, { headers: sa, data: { quantity: "1000 pcs", markupPct: 20 } });
+    const bad = await request.post(`/api/admin/requirements/${requirementId}/buyer-quote`, { headers: sa, data: { quantity: "1000 pcs", marginPct: 20 } });
     expect(bad.status()).toBe(400);   // cost required
-    const q = await request.post(`/api/admin/requirements/${requirementId}/buyer-quote`, { headers: sa, data: { quantity: "1000 pcs", costUnitPrice: 100, markupPct: 25, unitPrice: 1 } });   // client price ignored
+    const q = await request.post(`/api/admin/requirements/${requirementId}/buyer-quote`, { headers: sa, data: { quantity: "1000 pcs", costUnitPrice: 100, marginPct: 20, unitPrice: 1 } });   // client price ignored
     expect(q.status()).toBe(201);
     expect((await q.json()).total).toBe(125000);
     const { orderId, poNumber } = await (await request.post(`/api/buyer-requirements/${requirementId}/quote/respond`, { headers: bh, data: { decision: "accept" } })).json().then(async j => ({ orderId: j.orderId, poNumber: j.poNumber }));
