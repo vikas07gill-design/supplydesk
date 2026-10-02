@@ -52,7 +52,7 @@ test.describe("SupplyDesk decides a quote request against capacity", () => {
     const reqs = (await (await request.get("/api/admin/connect-requests", { headers: ah })).json()).requests;
     const mine = reqs.find(r => r.enquiry_id === enquiryId);
     expect(mine.capability_code).toBe(p.capabilityCode);
-    expect(Number(mine.available_capacity)).toBe(80000);   // admin sees exact capacity
+    expect(mine.capacity_band).toBe("50,000 - 100,000");   // normal admin sees the band only; exact capacity is Super Admin only
 
     // permissions + validation
     expect((await request.post(`/api/admin/connect-requests/${mine.id}/decision`, { headers: bh, data: { decision: "accepted" } })).status()).toBeGreaterThanOrEqual(401);

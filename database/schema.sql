@@ -264,6 +264,15 @@ ALTER TABLE connect_requests ADD CONSTRAINT fk_connect_enquiry
 
 -- Buyer requirement / RFQ and supplier quotation workflow
 CREATE TABLE IF NOT EXISTS buyer_requirements (
+  rfq_code VARCHAR(24) NULL UNIQUE,
+  rfq_state VARCHAR(30) NULL,
+  state_changed_at DATETIME NULL,
+  specification TEXT NULL,
+  quality_standards TEXT NULL,
+  certifications VARCHAR(255) NULL,
+  packaging TEXT NULL,
+  payment_terms VARCHAR(255) NULL,
+  incoterm VARCHAR(40) NULL,
   id CHAR(36) PRIMARY KEY,
   buyer_id CHAR(36) NOT NULL,
   requirement_type ENUM('product','raw_material','machinery','service','custom') NOT NULL DEFAULT 'product',
@@ -285,6 +294,21 @@ CREATE TABLE IF NOT EXISTS buyer_requirements (
   CONSTRAINT fk_requirement_buyer FOREIGN KEY (buyer_id) REFERENCES buyers(id) ON DELETE CASCADE,
   INDEX idx_requirement_buyer (buyer_id, created_at),
   INDEX idx_requirement_match (status, category, subcategory, created_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS audit_log (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  actor VARCHAR(190) NOT NULL,
+  actor_role VARCHAR(40) NOT NULL,
+  action VARCHAR(80) NOT NULL,
+  entity VARCHAR(40) NOT NULL,
+  entity_id VARCHAR(80) NOT NULL,
+  old_value TEXT NULL,
+  new_value TEXT NULL,
+  request_ip VARCHAR(64) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_audit_entity (entity, entity_id, created_at),
+  INDEX idx_audit_actor (actor, created_at)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS requirement_supplier_matches (
