@@ -61,3 +61,11 @@ For an existing Hostinger database, let the application startup schema check run
 - States and allowed moves live in `rfq.js` (pure functions): submitted, matching, sourcing, quotes_received, costing, quote_sent, buyer_approved, converted, lost, rejected, closed, cancelled. All moves go through `moveRfq()` which locks the row, rejects illegal moves (HTTP 409) and writes `audit_log`.
 - `audit_log` records actor, role, action, entity, old/new value for RFQ creation/state moves, supplier quotes, capacity updates and quote-request decisions.
 - Admin endpoints: `GET /api/admin/procurement/queue`, `POST /api/admin/requirements/:id/state`, `GET /api/admin/requirements/:id/capability-matches`, `GET /api/admin/audit`.
+
+## Phase 2: SupplyDesk quote -> buyer decision -> order
+
+- `rfq_quotes`: the single SupplyDesk price sent to the buyer (quote_no `SQ-YYYYMM-XXXX`, unit price, quantity, total, lead time, validity, terms). A new quote supersedes the previous open one. Supplier identity/price is never stored here.
+- `orders`: created when the buyer accepts (`PO-YYYYMM-XXXX`, one order per RFQ). Order states: confirmed, in_production, shipped, delivered, cancelled (rules in `rfq.js`). Payment is handled manually for now.
+- Buyer flow: RFQ moves quote_sent -> buyer_approved -> converted on accept, or -> lost on decline. Expired quotes (valid_until) cannot be accepted. `quote_sent -> costing` allows revising a quote.
+- Endpoints: `POST /api/admin/requirements/:id/buyer-quote`, `POST /api/buyer-requirements/:id/quote/respond`, `GET /api/buyer-orders`, `GET /api/admin/orders`, `PATCH /api/admin/orders/:id/status`. With `SD_HIDE_SUPPLIERS=true` the buyer's quotes endpoint returns only SupplyDesk quotes (`sdQuotes`), never raw supplier quotes.
+- Supplier cost prices (supplier quotes) are visible to Admin and Super Admin; supplier identity stays Super Admin only.

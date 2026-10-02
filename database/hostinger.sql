@@ -370,6 +370,45 @@ CREATE TABLE IF NOT EXISTS audit_log (
   INDEX idx_audit_actor (actor, created_at)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS rfq_quotes (
+  id CHAR(36) PRIMARY KEY,
+  rfq_id CHAR(36) NOT NULL,
+  quote_no VARCHAR(24) NOT NULL UNIQUE,
+  unit_price DECIMAL(14,4) NOT NULL,
+  currency VARCHAR(10) NOT NULL DEFAULT 'INR',
+  quantity VARCHAR(60) NOT NULL,
+  total_price DECIMAL(16,2) NULL,
+  lead_time_days INT NULL,
+  valid_until DATE NULL,
+  terms TEXT NULL,
+  note TEXT NULL,
+  status ENUM('sent','accepted','rejected','superseded') NOT NULL DEFAULT 'sent',
+  buyer_note VARCHAR(500) NULL,
+  created_by VARCHAR(190) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  responded_at DATETIME NULL,
+  INDEX idx_rfqq_rfq (rfq_id, status, created_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS orders (
+  id CHAR(36) PRIMARY KEY,
+  po_number VARCHAR(24) NOT NULL UNIQUE,
+  rfq_id CHAR(36) NOT NULL UNIQUE,
+  rfq_quote_id CHAR(36) NOT NULL,
+  buyer_id CHAR(36) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  quantity VARCHAR(60) NOT NULL,
+  unit_price DECIMAL(14,4) NOT NULL,
+  currency VARCHAR(10) NOT NULL,
+  total_price DECIMAL(16,2) NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'confirmed',
+  status_changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  notes VARCHAR(500) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_orders_buyer (buyer_id, created_at),
+  INDEX idx_orders_status (status, created_at)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS requirement_supplier_matches (
   id CHAR(36) PRIMARY KEY,
   requirement_id CHAR(36) NOT NULL,
