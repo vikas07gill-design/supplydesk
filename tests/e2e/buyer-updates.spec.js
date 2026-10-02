@@ -46,7 +46,7 @@ test("admin message + quote + order updates appear on buyer dashboard", async ({
   await card.getByRole("button", { name: /Accept/ }).click();
   await expect(page.locator("#orders")).toContainText("PO-");
   list = (await (await request.get("/api/buyer-requirements", { headers: bh })).json()).requirements.find(r => r.id === id);
-  expect(list.messages[0].subject).toMatch(/^Order PO-.* confirmed/);
+  expect(list.messages[0].subject).toMatch(/^Order PO-.* received/);
   expect(list.stateStep).toBe(4);
 
   // admin sees thread

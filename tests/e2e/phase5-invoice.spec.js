@@ -26,6 +26,7 @@ test.describe("invoice and payments", () => {
     const { requirementId } = await (await request.post("/api/buyer-requirements", { data: { dashboardToken: buyer.token, buyerName: "P5", buyerCountry: "India", title: "P5 " + Date.now(), description: "d", category: "Plastics & Polymers", subcategory: "Containers", quantity: "1000", unit: "pcs" } })).json();
     await request.post(`/api/admin/requirements/${requirementId}/buyer-quote`, { headers: ah, data: { unitPrice: 12.5, quantity: "1000 pcs" } });
     const { orderId } = await (await request.post(`/api/buyer-requirements/${requirementId}/quote/respond`, { headers: buyer.bh, data: { decision: "accept" } })).json();
+    await request.post(`/api/admin/orders/${orderId}/review`, { headers: ah, data: { decision: "accept" } });
 
     expect((await request.post(`/api/admin/orders/${orderId}/invoice`, { headers: buyer.bh, data: { gstRate: 18 } })).status()).toBeGreaterThanOrEqual(401);
     expect((await request.post(`/api/admin/orders/${orderId}/invoice`, { headers: ah, data: { gstRate: 40 } })).status()).toBe(400);
@@ -69,6 +70,7 @@ test.describe("invoice and payments", () => {
     const { requirementId } = await (await request.post("/api/buyer-requirements", { data: { dashboardToken: v.dashboardToken, buyerName: "P5", buyerCountry: "India", title: "P5v " + Date.now(), description: "d", category: "Plastics & Polymers", subcategory: "Containers", quantity: "100", unit: "pcs" } })).json();
     await request.post(`/api/admin/requirements/${requirementId}/buyer-quote`, { headers: ah, data: { unitPrice: 10, quantity: "100 pcs" } });
     const { orderId } = await (await request.post(`/api/buyer-requirements/${requirementId}/quote/respond`, { headers: bh, data: { decision: "accept" } })).json();
+    await request.post(`/api/admin/orders/${orderId}/review`, { headers: ah, data: { decision: "accept" } });
     const a = await (await request.post(`/api/admin/orders/${orderId}/invoice`, { headers: ah, data: { gstRate: 5 } })).json();
     expect((await request.patch(`/api/admin/invoices/${a.invoiceId}/void`, { headers: ah, data: { note: "wrong GST" } })).status()).toBe(200);
     expect((await (await request.get("/api/buyer-invoices", { headers: bh })).json()).invoices.length).toBe(0);   // void hidden from buyer

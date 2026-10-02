@@ -48,6 +48,7 @@ test.describe("margin is Super Admin only", () => {
     expect(q.status()).toBe(201);
     expect((await q.json()).total).toBe(125000);
     const { orderId, poNumber } = await (await request.post(`/api/buyer-requirements/${requirementId}/quote/respond`, { headers: bh, data: { decision: "accept" } })).json().then(async j => ({ orderId: j.orderId, poNumber: j.poNumber }));
+    await request.post(`/api/admin/orders/${orderId}/review`, { headers: ah, data: { decision: "accept" } });
 
     let rep = await (await request.get("/api/super-admin/margin-report", { headers: sa })).json();
     let row = rep.items.find(i => i.id === orderId);

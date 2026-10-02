@@ -544,14 +544,25 @@ async function loadPurchaseOrders(){
   try{
     const d=await api("/api/supplier-dashboard/purchase-orders"); const list=d.purchaseOrders||[];
     if(!list.length){el.innerHTML='<div class="empty">No purchase orders yet.</div>';return;}
-    const label={accepted:"Accept",declined:"Decline",in_production:"Start production",dispatched:"Mark dispatched",completed:"Mark completed"};
-    el.innerHTML=list.map(p=>'<div style="border:1px solid var(--line);border-radius:13px;padding:14px;margin-top:10px"><div style="display:flex;justify-content:space-between;gap:10px"><strong>'+esc(p.po_number)+' · '+esc(p.title)+'</strong><span class="pill">'+esc(p.statusLabel)+'</span></div><div style="font-size:13px;margin-top:6px">Quantity: <b>'+esc(p.quantity)+'</b> · Unit cost: <b>'+esc(p.unit_cost)+' '+esc(p.currency)+'</b>'+(p.total_cost?' · Total: <b>'+esc(p.total_cost)+' '+esc(p.currency)+'</b>':'')+(p.delivery_by?' · Deliver by '+esc(String(p.delivery_by).slice(0,10)):'')+'</div>'+(p.terms?'<div style="font-size:12px;color:var(--muted);margin-top:4px">'+esc(p.terms)+'</div>':'')+(p.supplier_note?'<div style="font-size:12px;margin-top:4px">Your note: '+esc(p.supplier_note)+'</div>':'')+'<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'+(p.allowedNext||[]).map(n=>'<button class="btn '+(n==="declined"?"":"primary")+'" onclick="poStatus(\''+esc(p.id)+'\',\''+n+'\')">'+esc(label[n]||n)+'</button>').join("")+'</div></div>').join("");
+    const label={accepted:"Accept",partially_accepted:"Accept partly",declined:"Reject",in_production:"Start production",ready_for_qc:"Ready for QC",ready_for_dispatch:"Ready for dispatch",dispatched:"Mark dispatched",completed:"Mark completed"};
+    el.innerHTML=list.map(p=>'<div style="border:1px solid var(--line);border-radius:13px;padding:14px;margin-top:10px"><div style="display:flex;justify-content:space-between;gap:10px"><strong>'+esc(p.po_number)+' · '+esc(p.title)+'</strong><span class="pill">'+esc(p.statusLabel)+'</span></div><div style="font-size:13px;margin-top:6px">Quantity: <b>'+esc(p.quantity)+'</b> · Unit cost: <b>'+esc(p.unit_cost)+' '+esc(p.currency)+'</b>'+(p.total_cost?' · Total: <b>'+esc(p.total_cost)+' '+esc(p.currency)+'</b>':'')+(p.delivery_by?' · Deliver by '+esc(String(p.delivery_by).slice(0,10)):'')+'</div>'+(p.terms?'<div style="font-size:12px;color:var(--muted);margin-top:4px">'+esc(p.terms)+'</div>':'')+(p.accepted_quantity?'<div style="font-size:12px;margin-top:4px">You accepted: <b>'+esc(p.accepted_quantity)+'</b></div>':'')+((p.batch_no||p.expected_completion||p.production_started_at)?'<div style="font-size:12px;margin-top:4px">'+(p.batch_no?'Batch <b>'+esc(p.batch_no)+'</b> · ':'')+(p.production_started_at?'Production started '+esc(String(p.production_started_at).slice(0,10))+' · ':'')+(p.expected_completion?'Expected completion <b>'+esc(String(p.expected_completion).slice(0,10))+'</b>':'')+'</div>':'')+(p.supplier_note?'<div style="font-size:12px;margin-top:4px">Your note: '+esc(p.supplier_note)+'</div>':'')+'<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'+(p.allowedNext||[]).map(n=>'<button class="btn '+(n==="declined"?"":"primary")+'" onclick="poStatus(\''+esc(p.id)+'\',\''+n+'\')">'+esc(label[n]||n)+'</button>').join("")+(["accepted","partially_accepted","in_production","ready_for_qc","ready_for_dispatch"].includes(p.status)?'<button class="btn" onclick="poSchedule(\''+esc(p.id)+'\')">Update completion date / batch</button>':'')+'</div></div>').join("");
   }catch(e){el.innerHTML='<div class="empty">'+esc(e.message||"Could not load purchase orders.")+'</div>';}
 }
 async function poStatus(id,status){
-  let note="";
-  if(status==="declined"){note=prompt("Reason for declining (required):","");if(!note)return;}
-  try{await api("/api/supplier-dashboard/purchase-orders/"+encodeURIComponent(id)+"/status",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,note})});await loadPurchaseOrders();}catch(e){alert(e.message);}
+  const body={status};
+  if(status==="declined"){body.note=prompt("Reason for rejecting (required):","");if(!body.note)return;}
+  if(status==="partially_accepted"){body.acceptedQuantity=prompt("How much can you supply? (quantity)","");if(!body.acceptedQuantity)return;body.note=prompt("Note for SupplyDesk (optional):","")||undefined;}
+  if(status==="in_production"){
+    body.expectedCompletion=prompt("Expected completion date (YYYY-MM-DD):","");if(body.expectedCompletion===null)return;if(!body.expectedCompletion)delete body.expectedCompletion;
+    body.batchNo=prompt("Production batch number (optional):","")||undefined;
+  }
+  try{await api("/api/supplier-dashboard/purchase-orders/"+encodeURIComponent(id)+"/status",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});await loadPurchaseOrders();}catch(e){alert(e.message);}
+}
+async function poSchedule(id){
+  const expectedCompletion=prompt("Expected completion date (YYYY-MM-DD), blank to keep:","");if(expectedCompletion===null)return;
+  const batchNo=prompt("Production batch number, blank to keep:","")||"";
+  const body={};if(expectedCompletion)body.expectedCompletion=expectedCompletion;if(batchNo)body.batchNo=batchNo;
+  try{await api("/api/supplier-dashboard/purchase-orders/"+encodeURIComponent(id)+"/schedule",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});await loadPurchaseOrders();}catch(e){alert(e.message);}
 }
 let requirementCache=[];
 async function loadRequirements(){

@@ -60,12 +60,13 @@ test.describe("SupplyDesk quote -> buyer accepts -> order", () => {
     const rq = (await (await request.get("/api/buyer-requirements", { headers: buyer.bh })).json()).requirements.find(r => r.id === requirementId);
     expect(rq.rfq_state).toBe("converted");
 
-    // order lifecycle: illegal jump -> 409, then legal steps; buyer cannot change it
+    // a new order starts as Pending Review; progress is no longer set by hand through the coarse status endpoint
+    expect(mine.find(o => o.id === orderId).reviewStatus).toBe("pending_review");
     expect((await request.patch(`/api/admin/orders/${orderId}/status`, { headers: buyer.bh, data: { status: "shipped" } })).status()).toBeGreaterThanOrEqual(401);
-    expect((await request.patch(`/api/admin/orders/${orderId}/status`, { headers: ah, data: { status: "delivered" } })).status()).toBe(409);
-    for (const s of ["in_production", "shipped", "delivered"]) expect((await request.patch(`/api/admin/orders/${orderId}/status`, { headers: ah, data: { status: s } })).status()).toBe(200);
-    expect((await request.patch(`/api/admin/orders/${orderId}/status`, { headers: ah, data: { status: "cancelled" } })).status()).toBe(409);
-    expect((await (await request.get("/api/buyer-orders", { headers: buyer.bh })).json()).orders[0].status).toBe("delivered");
+    for (const s of ["in_production", "shipped", "delivered"]) expect((await request.patch(`/api/admin/orders/${orderId}/status`, { headers: ah, data: { status: s } })).status()).toBe(409);
+    expect((await request.patch(`/api/admin/orders/${orderId}/status`, { headers: ah, data: { status: "cancelled" } })).status()).toBe(200);
+    expect((await request.patch(`/api/admin/orders/${orderId}/status`, { headers: ah, data: { status: "in_production" } })).status()).toBe(409);
+    expect((await (await request.get("/api/buyer-orders", { headers: buyer.bh })).json()).orders[0].status).toBe("cancelled");
 
     const audit = (await (await request.get(`/api/admin/audit?entity=order&id=${orderId}`, { headers: ah })).json()).entries.map(a => a.action);
     expect(audit).toContain("order.created");
