@@ -425,6 +425,24 @@ async function requireSuperAdmin(req,res,next){
   }catch(error){console.error("Super Admin auth failed:",error);res.status(500).json({error:"Could not authenticate Super Admin."});}
 }
 
+// Full supplier details (identity, contact, exact capacity) are for Super Admin only.
+// Normal admins/testers get an alias and capacity band so they can still work the queue.
+const isSuper=(req)=>req.admin?.role==="super_admin";
+const supplierAlias=(id)=>"Supplier "+crypto.createHash("sha1").update(String(id||"")).digest("hex").slice(0,6).toUpperCase();
+function maskSupplierRow(req,row){
+  if(isSuper(req)||!row)return row;
+  const o={...row},alias=supplierAlias(row.supplier_id);
+  for(const k of ["legal_name","trade_name"])if(k in o)o[k]=alias;
+  for(const k of ["business_email","city","country","address","website","business_phone","contact_person"])if(k in o)o[k]="";
+  if("supplier_id" in o)o.supplier_id=null;
+  if("monthly_capacity" in o||"available_capacity" in o){
+    o.capacity_band=capacityBand(row.available_capacity);o.capacity_status=capacityStatus(Number(row.monthly_capacity)||null,row.available_capacity==null?null:Number(row.available_capacity));
+    o.monthly_capacity=null;o.available_capacity=null;
+  }
+  o.details_restricted=true;
+  return o;
+}
+
 const adminLoginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false,
   message: { error: "Too many sign-in attempts. Please wait 15 minutes and try again." }
@@ -1352,7 +1370,7 @@ app.get("/api/admin/connect-requests", requireAdmin, async (req,res)=>{
   sql+=" ORDER BY c.created_at DESC LIMIT 300";
   try{
     const [rows]=await pool.execute(sql,params);
-    res.json({requests:rows});
+    res.json({requests:rows.map(r=>maskSupplierRow(req,r)),detailsRestricted:!isSuper(req)});
   }catch(error){
     console.error("Admin connection requests failed:",error);
     res.status(500).json({error:"Could not load connection requests."});
@@ -1526,8 +1544,8 @@ app.get("/api/admin/requirements/:id/capability-matches",requireAdmin,async(req,
        WHERE p.status='approved' AND s.verified=1 AND s.published=1 LIMIT 2000`);
     const matches=caps.map(c=>({c,sc:RFQ.scoreCapability(r,c)})).filter(x=>x.sc.eligible&&x.sc.score>0)
       .sort((a,b)=>b.sc.score-a.sc.score).slice(0,30)
-      .map(({c,sc})=>({productId:c.id,capabilityCode:c.capability_code,productName:c.product_name,category:c.category,subcategory:c.subcategory,supplierId:c.supplier_id,supplierName:c.trade_name||c.legal_name,country:c.country,region:c.origin_region||"",
-        monthlyCapacity:c.monthly_capacity,availableCapacity:c.available_capacity,capacityUnit:c.capacity_unit||c.unit||"",leadTimeDays:c.lead_time_days,moq:c.moq,score:sc.score,reasons:sc.reasons,coversFull:sc.coversFull,stale:sc.stale}));
+      .map(({c,sc})=>({productId:c.id,capabilityCode:c.capability_code,productName:c.product_name,category:c.category,subcategory:c.subcategory,supplierId:isSuper(req)?c.supplier_id:null,supplierName:isSuper(req)?(c.trade_name||c.legal_name):supplierAlias(c.supplier_id),country:isSuper(req)?c.country:"",region:c.origin_region||"",
+        monthlyCapacity:isSuper(req)?c.monthly_capacity:null,availableCapacity:isSuper(req)?c.available_capacity:null,capacityBand:capacityBand(c.available_capacity),capacityUnit:c.capacity_unit||c.unit||"",leadTimeDays:c.lead_time_days,moq:c.moq,score:sc.score,reasons:sc.reasons,coversFull:sc.coversFull,stale:sc.stale}));
     res.json({rfq:{id:r.id,rfqCode:r.rfq_code,title:r.title,quantity:r.quantity,requiredBy:r.required_by},totalCapabilities:caps.length,matches});
   }catch(error){console.error("Capability matching failed:",error);res.status(500).json({error:"Could not match capabilities."});}
 });
@@ -1556,7 +1574,7 @@ app.get("/api/admin/requirements/:id/matches",requireAdmin,async(req,res)=>{
     if(level==="subcategory"&&r.subcategory){sql+=" AND s.subcategory=?";params.push(r.subcategory);}
     sql+=" ORDER BY s.trade_name,s.legal_name LIMIT 500";
     const [suppliers]=await pool.execute(sql,params);
-    res.json({level,category:r.category,subcategory:r.subcategory,suppliers});
+    res.json({level,category:r.category,subcategory:r.subcategory,suppliers:isSuper(req)?suppliers:suppliers.map(x=>({id:x.id,legal_name:supplierAlias(x.id),trade_name:supplierAlias(x.id),country:"",city:"",category:x.category,subcategory:x.subcategory,sent_status:x.sent_status})),detailsRestricted:!isSuper(req)});
   }catch(error){console.error(error);res.status(500).json({error:"Could not load matching suppliers."});}
 });
 
@@ -1620,7 +1638,7 @@ app.post("/api/admin/requirements/:id/review",requireAdmin,async(req,res)=>{
   }catch(error){console.error("Requirement review failed:",error);res.status(500).json({error:"Could not save the review decision."});}
 });
 
-app.get("/api/admin/requirements/:id/quotes",requireAdmin,async(req,res)=>{try{const [quotes]=await pool.execute("SELECT q.*,s.trade_name,s.legal_name,s.business_email,s.country,s.city FROM supplier_quotes q JOIN supplier_profiles s ON s.id=q.supplier_id WHERE q.requirement_id=? ORDER BY q.created_at DESC",[clean(req.params.id,80)]);res.json({quotes});}catch(error){res.status(500).json({error:"Could not load requirement quotations."});}});
+app.get("/api/admin/requirements/:id/quotes",requireAdmin,async(req,res)=>{try{const [quotes]=await pool.execute("SELECT q.*,s.trade_name,s.legal_name,s.business_email,s.country,s.city FROM supplier_quotes q JOIN supplier_profiles s ON s.id=q.supplier_id WHERE q.requirement_id=? ORDER BY q.created_at DESC",[clean(req.params.id,80)]);res.json({quotes:quotes.map(q=>maskSupplierRow(req,q)),detailsRestricted:!isSuper(req)});}catch(error){res.status(500).json({error:"Could not load requirement quotations."});}});
 
 app.post("/api/supplier-update/request", supplierUpdateLimiter, async (req, res) => {
   const email = clean(req.body?.email, 255).toLowerCase();
@@ -2303,7 +2321,7 @@ app.get("/api/admin/products", requireAdmin, async (req,res)=>{
     }
     sql+=" ORDER BY p.created_at DESC LIMIT 300";
     const [rows]=await pool.execute(sql,params);
-    res.json({products:rows,filter:{status,q,count:rows.length}});
+    res.json({products:rows.map(r=>maskSupplierRow(req,r)),filter:{status,q,count:rows.length},detailsRestricted:!isSuper(req)});
   }catch(error){
     console.error("Admin product queue load failed:",error);
     res.status(500).json({error:"Could not load products."});
