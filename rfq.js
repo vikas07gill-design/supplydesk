@@ -157,7 +157,12 @@ const PAYMENT_METHODS = ["bank_transfer", "upi", "cheque", "cash", "other"];
 const newInvoiceNo = () => _code("INV");
 
 
-// ---- Margin (Phase 6). Markup is on supplier cost: price = cost * (1 + markup%). ----
+// ---- Margin. Margin is on the SELLING PRICE: price = cost / (1 - margin%). (priceFromMarkup kept for legacy callers.) ----
+function priceFromMargin(cost, marginPct) {
+  const c = Number(cost), m = Number(marginPct);
+  if (!Number.isFinite(c) || c <= 0 || !Number.isFinite(m) || m < 0 || m > 90) return null;
+  return Math.round(c / (1 - m / 100) * 10000) / 10000;
+}
 function priceFromMarkup(cost, markupPct) {
   const c = Number(cost), m = Number(markupPct);
   if (!Number.isFinite(c) || c <= 0 || !Number.isFinite(m) || m < 0 || m > 300) return null;
@@ -178,4 +183,4 @@ function buyerStep(state){
   if(["buyer_approved","converted"].includes(state))return 4;
   return 0;
 }
-module.exports = { STATES, TRANSITIONS, LEGACY_STATUS_TO_STATE, isState, canTransition, isTerminal, parseQuantity, scoreCapability, newRfqCode, ORDER_STATES, ORDER_TRANSITIONS, isOrderState, canOrderTransition, newQuoteNo, newPoNumber, PO_STATES, PO_TRANSITIONS, isPoState, canPoTransition, newSupplierPoNumber, toMinor, fromMinor, computeInvoice, invoiceStatus, PAYMENT_METHODS, newInvoiceNo, priceFromMarkup, marginOf, buyerStep };
+module.exports = { STATES, TRANSITIONS, LEGACY_STATUS_TO_STATE, isState, canTransition, isTerminal, parseQuantity, scoreCapability, newRfqCode, ORDER_STATES, ORDER_TRANSITIONS, isOrderState, canOrderTransition, newQuoteNo, newPoNumber, PO_STATES, PO_TRANSITIONS, isPoState, canPoTransition, newSupplierPoNumber, toMinor, fromMinor, computeInvoice, invoiceStatus, PAYMENT_METHODS, newInvoiceNo, priceFromMarkup, priceFromMargin, marginOf, buyerStep };

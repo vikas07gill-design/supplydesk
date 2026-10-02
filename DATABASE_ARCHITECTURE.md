@@ -91,5 +91,5 @@ For an existing Hostinger database, let the application startup schema check run
 
 ## Phase 6: margin (Super Admin only)
 
-- `rfq_quotes` gains `cost_unit_price` and `markup_pct` (additive columns). Markup is on supplier cost: price = cost x (1 + markup%). Only Super Admin can price by markup (server recomputes the price; the client value is ignored). Admin may still record the supplier cost and type the final price; the margin is never returned by any Admin endpoint, buyer endpoint or the audit log.
+- `rfq_quotes` gains `cost_unit_price` and `markup_pct` (additive columns). Margin is on the selling price: price = cost / (1 - margin%); the `markup_pct` column stores that margin %. Only Super Admin can price by markup (server recomputes the price; the client value is ignored). Admin may still record the supplier cost and type the final price; the margin is never returned by any Admin endpoint, buyer endpoint or the audit log.
 - `GET /api/super-admin/margin-report`: per order revenue (accepted SupplyDesk price), cost (active supplier POs, else the cost noted on the quote) and margin, with totals per currency.

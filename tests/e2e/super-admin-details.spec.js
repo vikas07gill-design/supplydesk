@@ -19,7 +19,7 @@ test("normal admin sees alias + capacity band; super admin sees full supplier de
   const s = { "x-admin-token": (await login(request, SID, SPW)).token };
   const adminRows = (await (await request.get("/api/admin/connect-requests", { headers: a })).json()).requests;
   const superRows = (await (await request.get("/api/admin/connect-requests", { headers: s })).json()).requests;
-  const ar = adminRows.find(r => r.customer_email === email), sr = superRows.find(r => r.customer_email === email);
+  const sr = superRows.find(r => r.customer_email === email), ar = adminRows.find(r => r.id === sr.id);   // buyer email is masked for admin
   expect(JSON.stringify(ar)).not.toMatch(/India Growth|supplier-e2e@example\.com|80000|120000/);
   expect(ar.capacity_band).toBe("50,000 - 100,000");
   expect(sr.trade_name).toBe("India Growth");
