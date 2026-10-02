@@ -77,3 +77,7 @@ For an existing Hostinger database, let the application startup schema check run
 - Admin issues a PO by Capability ID (so Admin never needs supplier identity); Super Admin may also pass a supplier id. Admin sees an alias, Super Admin sees the supplier name.
 - Endpoints: `POST /api/admin/orders/:id/supplier-po`, `GET /api/admin/orders/:id/supplier-pos`, `PATCH /api/admin/supplier-pos/:id/cancel`, `GET /api/supplier-dashboard/purchase-orders`, `PATCH /api/supplier-dashboard/purchase-orders/:id/status`. Test mode (`E2E_TEST_MODE` + `x-e2e-key`) also works for supplier dashboard OTP.
 - The buyer-facing order status is still updated by SupplyDesk manually; supplier PO status is internal.
+
+## Phase 4: buyer order follows supplier progress
+
+`syncOrderFromPos()` (server.js) keeps `orders.status` in step with live supplier POs (declined/cancelled ignored): confirmed -> in_production when any PO starts production; in_production -> shipped when every live PO is dispatched/completed. It never moves backwards, never sets delivered (SupplyDesk confirms delivery manually) and writes an audit row; the buyer is emailed on each automatic change. No schema change.
