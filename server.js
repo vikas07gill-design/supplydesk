@@ -2566,6 +2566,13 @@ app.get("/api/admin/applications", requireAdmin, async (req, res) => {
 });
 
 
+app.get("/api/super-admin/suppliers", requireSuperAdmin, async (req,res)=>{
+  try{
+    const q=clean(req.query.q,80);const like="%"+q+"%";
+    const [rows]=await pool.execute("SELECT id,legal_name,trade_name,business_type,country,city,website,business_email,business_phone,contact_person,category,subcategory,verified,published,created_at FROM supplier_profiles"+(q?" WHERE legal_name LIKE ? OR trade_name LIKE ? OR category LIKE ? OR country LIKE ? OR business_email LIKE ?":"")+" ORDER BY created_at DESC LIMIT 500",q?[like,like,like,like,like]:[]);
+    res.json({suppliers:rows});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not load suppliers."});}
+});
 app.get("/api/super-admin/suppliers/:id", requireSuperAdmin, async (req,res)=>{
   try{
     const [[supplier]]=await pool.execute("SELECT * FROM supplier_profiles WHERE id=?",[clean(req.params.id,80)]);
