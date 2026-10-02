@@ -137,4 +137,23 @@ const isPoState = (s) => Object.prototype.hasOwnProperty.call(PO_STATES, s);
 const canPoTransition = (from, to) => from === to || (PO_TRANSITIONS[from] || []).includes(to);
 const newSupplierPoNumber = () => _code("SPO");
 
-module.exports = { STATES, TRANSITIONS, LEGACY_STATUS_TO_STATE, isState, canTransition, isTerminal, parseQuantity, scoreCapability, newRfqCode, ORDER_STATES, ORDER_TRANSITIONS, isOrderState, canOrderTransition, newQuoteNo, newPoNumber, PO_STATES, PO_TRANSITIONS, isPoState, canPoTransition, newSupplierPoNumber };
+
+// ---- Invoices & payments (Phase 5). Money is handled in integer minor units (paise/cents) to avoid float drift. ----
+const toMinor = (v) => Math.round(Number(v) * 100);
+const fromMinor = (n) => Math.round(n) / 100;
+// subtotal + GST % -> { subtotal, gst, total } (all in major units, 2 dp)
+function computeInvoice(subtotal, gstRate) {
+  const sub = toMinor(subtotal), rate = Number(gstRate) || 0;
+  if (!Number.isFinite(sub) || sub <= 0) return null;
+  if (!Number.isFinite(rate) || rate < 0 || rate > 28) return null;
+  const gst = Math.round(sub * rate / 100);
+  return { subtotal: fromMinor(sub), gst: fromMinor(gst), total: fromMinor(sub + gst) };
+}
+const invoiceStatus = (total, paid) => {
+  const t = toMinor(total), p = toMinor(paid);
+  return p <= 0 ? "issued" : p >= t ? "paid" : "partially_paid";
+};
+const PAYMENT_METHODS = ["bank_transfer", "upi", "cheque", "cash", "other"];
+const newInvoiceNo = () => _code("INV");
+
+module.exports = { STATES, TRANSITIONS, LEGACY_STATUS_TO_STATE, isState, canTransition, isTerminal, parseQuantity, scoreCapability, newRfqCode, ORDER_STATES, ORDER_TRANSITIONS, isOrderState, canOrderTransition, newQuoteNo, newPoNumber, PO_STATES, PO_TRANSITIONS, isPoState, canPoTransition, newSupplierPoNumber, toMinor, fromMinor, computeInvoice, invoiceStatus, PAYMENT_METHODS, newInvoiceNo };

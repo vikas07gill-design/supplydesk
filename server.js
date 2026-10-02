@@ -147,19 +147,25 @@ function parseCapacityInput(body){
 }
 
 const categories = Object.keys(catalog);
+// Test-only config (E2E_TEST_MODE) runs many buyers from one IP; production never sets it.
+const e2eSkipLimit = () => String(process.env.E2E_TEST_MODE || "").toLowerCase() === "true";
 const buyerOtpRequestLimiter = rateLimit({
+  skip: e2eSkipLimit,
   windowMs: 60 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false,
   message: { error: "Too many verification codes requested. Please wait a while and try again." }
 });
 const buyerOtpVerifyLimiter = rateLimit({
+  skip: e2eSkipLimit,
   windowMs: 60 * 60 * 1000, limit: 40, standardHeaders: true, legacyHeaders: false,
   message: { error: "Too many verification attempts. Please wait a while and try again." }
 });
 const buyerRequirementLimiter = rateLimit({
+  skip: e2eSkipLimit,
   windowMs: 60 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false,
   message: { error: "Too many requirements submitted from this network. Please try again later." }
 });
 const connectLimiter = rateLimit({
+  skip: e2eSkipLimit,
   windowMs: 60 * 60 * 1000,
   limit: 15,
   standardHeaders: true,
@@ -1506,6 +1512,94 @@ async function syncOrderFromPos(conn,req,orderId){
   await audit(conn,req,"order.status_change","order",orderId,{status:o.status},{status:to,note:"auto: supplier progress"});
   return {order:o,to};
 }
+// ---- Invoices & payments (Phase 5): internal tracking, GST % shown. Not a statutory tax invoice (no GSTIN/HSN). ----
+app.post("/api/admin/orders/:id/invoice",requireAdmin,async(req,res)=>{
+  const id=clean(req.params.id,80),b=req.body||{};
+  const gstRate=b.gstRate===""||b.gstRate==null?0:Number(b.gstRate),dueDate=clean(b.dueDate,10)||null,notes=clean(b.notes,1000)||null;
+  if(!Number.isFinite(gstRate)||gstRate<0||gstRate>28)return res.status(400).json({error:"GST rate must be between 0 and 28."});
+  if(dueDate&&!/^\d{4}-\d{2}-\d{2}$/.test(dueDate))return res.status(400).json({error:"Enter a valid due date."});
+  const conn=await pool.getConnection();
+  try{
+    await conn.beginTransaction();
+    const [[o]]=await conn.execute("SELECT o.id,o.po_number,o.title,o.status,o.buyer_id,o.currency,o.total_price,b.email,b.name FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.id=? FOR UPDATE",[id]);
+    if(!o){await conn.rollback();return res.status(404).json({error:"Order not found."});}
+    if(o.status==="cancelled"){await conn.rollback();return res.status(409).json({error:"A cancelled order cannot be invoiced."});}
+    const [[dup]]=await conn.execute("SELECT id FROM invoices WHERE order_id=? AND status<>'void' LIMIT 1",[id]);
+    if(dup){await conn.rollback();return res.status(409).json({error:"This order already has an active invoice. Void it first to issue a new one."});}
+    const subtotal=b.subtotal===""||b.subtotal==null?Number(o.total_price):Number(b.subtotal);
+    const calc=RFQ.computeInvoice(subtotal,gstRate);
+    if(!calc){await conn.rollback();return res.status(400).json({error:"Enter a valid invoice amount."});}
+    const iid=crypto.randomUUID();let no;
+    for(let a=0;a<8;a++){no=RFQ.newInvoiceNo();try{
+      await conn.execute("INSERT INTO invoices (id,invoice_no,order_id,buyer_id,subtotal,gst_rate,gst_amount,total,currency,due_date,notes,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",[iid,no,id,o.buyer_id,calc.subtotal,gstRate,calc.gst,calc.total,o.currency,dueDate,notes,actorOf(req).id]);break;}
+      catch(e){if(e?.code!=="ER_DUP_ENTRY"||a===7)throw e;}}
+    await audit(conn,req,"invoice.issued","invoice",iid,null,{invoiceNo:no,orderId:id,subtotal:calc.subtotal,gstRate,total:calc.total,currency:o.currency});
+    await conn.commit();
+    try{await sendBrandedMail(o.email,"SupplyDesk | Invoice "+no,{preheader:"Invoice issued",title:"Invoice "+no,intro:"Hello "+(o.name||"Buyer")+", an invoice for order "+o.po_number+" ("+o.title+") has been issued. Total: "+calc.total+" "+o.currency+(dueDate?", due "+dueDate:"")+".",bodyHtml:"",textLines:["Invoice "+no+": "+calc.total+" "+o.currency],ctaText:"View invoice",ctaUrl:ORIGIN()+"/buyer-dashboard"});}catch(e){console.error("Invoice mail failed:",e);}
+    res.status(201).json({ok:true,invoiceId:iid,invoiceNo:no,...calc});
+  }catch(error){await conn.rollback();console.error("Invoice failed:",error);res.status(500).json({error:"Could not issue the invoice."});}
+  finally{conn.release();}
+});
+
+app.get("/api/admin/orders/:id/invoice",requireAdmin,async(req,res)=>{
+  try{const oid=clean(req.params.id,80);
+    const [invoices]=await pool.execute("SELECT id,invoice_no,subtotal,gst_rate,gst_amount,total,currency,due_date,notes,status,paid_amount,created_at FROM invoices WHERE order_id=? ORDER BY created_at DESC",[oid]);
+    const [payments]=invoices.length?await pool.query("SELECT id,invoice_id,amount,method,reference,received_on,note,recorded_by,created_at FROM payments WHERE invoice_id IN (?) ORDER BY received_on,created_at",[invoices.map(i=>i.id)]):[[]];
+    res.json({invoices:invoices.map(i=>({...i,outstanding:RFQ.fromMinor(RFQ.toMinor(i.total)-RFQ.toMinor(i.paid_amount)),payments:payments.filter(p=>p.invoice_id===i.id)}))});}
+  catch(error){console.error(error);res.status(500).json({error:"Could not load invoices."});}
+});
+
+app.post("/api/admin/invoices/:id/payments",requireAdmin,async(req,res)=>{
+  const id=clean(req.params.id,80),b=req.body||{};
+  const amount=Number(b.amount),method=clean(b.method,20),reference=clean(b.reference,120)||null,note=clean(b.note,500)||null;
+  const receivedOn=clean(b.receivedOn,10)||new Date().toISOString().slice(0,10);
+  if(!Number.isFinite(amount)||amount<=0)return res.status(400).json({error:"Enter a valid payment amount."});
+  if(!RFQ.PAYMENT_METHODS.includes(method))return res.status(400).json({error:"Choose a payment method."});
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(receivedOn)||new Date(receivedOn)>new Date(Date.now()+86400000))return res.status(400).json({error:"Received date cannot be in the future."});
+  const conn=await pool.getConnection();
+  try{
+    await conn.beginTransaction();
+    const [[inv]]=await conn.execute("SELECT i.id,i.invoice_no,i.total,i.paid_amount,i.status,i.currency,b.email,b.name FROM invoices i JOIN buyers b ON b.id=i.buyer_id WHERE i.id=? FOR UPDATE",[id]);
+    if(!inv){await conn.rollback();return res.status(404).json({error:"Invoice not found."});}
+    if(inv.status==="void"){await conn.rollback();return res.status(409).json({error:"This invoice is void."});}
+    const outstanding=RFQ.toMinor(inv.total)-RFQ.toMinor(inv.paid_amount),pay=RFQ.toMinor(amount);
+    if(outstanding<=0){await conn.rollback();return res.status(409).json({error:"This invoice is already fully paid."});}
+    if(pay>outstanding){await conn.rollback();return res.status(400).json({error:"Payment exceeds the outstanding amount ("+RFQ.fromMinor(outstanding)+" "+inv.currency+")."});}
+    const newPaid=RFQ.fromMinor(RFQ.toMinor(inv.paid_amount)+pay),status=RFQ.invoiceStatus(inv.total,newPaid);
+    const pid=crypto.randomUUID();
+    await conn.execute("INSERT INTO payments (id,invoice_id,amount,method,reference,received_on,note,recorded_by) VALUES (?,?,?,?,?,?,?,?)",[pid,id,RFQ.fromMinor(pay),method,reference,receivedOn,note,actorOf(req).id]);
+    await conn.execute("UPDATE invoices SET paid_amount=?,status=? WHERE id=?",[newPaid,status,id]);
+    await audit(conn,req,"payment.recorded","invoice",id,{status:inv.status,paid:inv.paid_amount},{status,paid:newPaid,amount:RFQ.fromMinor(pay),method,reference});
+    await conn.commit();
+    try{await sendBrandedMail(inv.email,"SupplyDesk | Payment received for "+inv.invoice_no,{preheader:"Payment received",title:"Payment received",intro:"Hello "+(inv.name||"Buyer")+", we received "+RFQ.fromMinor(pay)+" "+inv.currency+" against invoice "+inv.invoice_no+"."+(status==="paid"?" The invoice is now fully paid. Thank you.":" Outstanding: "+RFQ.fromMinor(RFQ.toMinor(inv.total)-RFQ.toMinor(newPaid))+" "+inv.currency+"."),bodyHtml:"",textLines:[inv.invoice_no+" payment received"],ctaText:"View invoice",ctaUrl:ORIGIN()+"/buyer-dashboard"});}catch(e){console.error("Payment mail failed:",e);}
+    res.status(201).json({ok:true,paymentId:pid,status,paid:newPaid});
+  }catch(error){await conn.rollback();console.error("Payment failed:",error);res.status(500).json({error:"Could not record the payment."});}
+  finally{conn.release();}
+});
+
+app.patch("/api/admin/invoices/:id/void",requireAdmin,async(req,res)=>{
+  const id=clean(req.params.id,80),note=clean(req.body?.note,500)||null;
+  const conn=await pool.getConnection();
+  try{
+    await conn.beginTransaction();
+    const [[inv]]=await conn.execute("SELECT id,invoice_no,status,paid_amount FROM invoices WHERE id=? FOR UPDATE",[id]);
+    if(!inv){await conn.rollback();return res.status(404).json({error:"Invoice not found."});}
+    if(inv.status==="void"){await conn.rollback();return res.status(409).json({error:"Already void."});}
+    if(RFQ.toMinor(inv.paid_amount)>0){await conn.rollback();return res.status(409).json({error:"An invoice with recorded payments cannot be voided."});}
+    await conn.execute("UPDATE invoices SET status='void',voided_at=NOW(),notes=COALESCE(?,notes) WHERE id=?",[note,id]);
+    await audit(conn,req,"invoice.voided","invoice",id,{status:inv.status},{status:"void",note});
+    await conn.commit();res.json({ok:true});
+  }catch(error){await conn.rollback();console.error(error);res.status(500).json({error:"Could not void the invoice."});}
+  finally{conn.release();}
+});
+
+app.get("/api/buyer-invoices",requireBuyerDashboard,async(req,res)=>{
+  try{const [invoices]=await pool.execute("SELECT i.id,i.invoice_no,i.subtotal,i.gst_rate,i.gst_amount,i.total,i.currency,i.due_date,i.status,i.paid_amount,i.created_at,o.po_number,o.title FROM invoices i JOIN orders o ON o.id=i.order_id WHERE i.buyer_id=? AND i.status<>'void' ORDER BY i.created_at DESC LIMIT 100",[req.buyer.id]);
+    const [payments]=invoices.length?await pool.query("SELECT invoice_id,amount,method,reference,received_on FROM payments WHERE invoice_id IN (?) ORDER BY received_on",[invoices.map(i=>i.id)]):[[]];
+    res.json({invoices:invoices.map(i=>({...i,outstanding:RFQ.fromMinor(RFQ.toMinor(i.total)-RFQ.toMinor(i.paid_amount)),payments:payments.filter(p=>p.invoice_id===i.id)}))});}
+  catch(error){console.error(error);res.status(500).json({error:"Could not load invoices."});}
+});
+
 // ---- Supplier purchase orders (Phase 3): SupplyDesk -> supplier. The supplier never sees buyer identity or buyer price. ----
 const PO_LIVE_ORDER_STATES=["confirmed","in_production"];
 
@@ -3136,6 +3230,38 @@ async function ensureRfqSchema() {
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_spo_supplier (supplier_id, status, created_at),
     INDEX idx_spo_order (order_id, status)
+  ) ENGINE=InnoDB`);
+  await pool.execute(`CREATE TABLE IF NOT EXISTS invoices (
+    id CHAR(36) PRIMARY KEY,
+    invoice_no VARCHAR(24) NOT NULL UNIQUE,
+    order_id CHAR(36) NOT NULL,
+    buyer_id CHAR(36) NOT NULL,
+    subtotal DECIMAL(16,2) NOT NULL,
+    gst_rate DECIMAL(5,2) NOT NULL DEFAULT 0,
+    gst_amount DECIMAL(16,2) NOT NULL DEFAULT 0,
+    total DECIMAL(16,2) NOT NULL,
+    currency VARCHAR(10) NOT NULL,
+    due_date DATE NULL,
+    notes VARCHAR(1000) NULL,
+    status ENUM('issued','partially_paid','paid','void') NOT NULL DEFAULT 'issued',
+    paid_amount DECIMAL(16,2) NOT NULL DEFAULT 0,
+    created_by VARCHAR(190) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    voided_at DATETIME NULL,
+    INDEX idx_inv_order (order_id, status),
+    INDEX idx_inv_buyer (buyer_id, created_at)
+  ) ENGINE=InnoDB`);
+  await pool.execute(`CREATE TABLE IF NOT EXISTS payments (
+    id CHAR(36) PRIMARY KEY,
+    invoice_id CHAR(36) NOT NULL,
+    amount DECIMAL(16,2) NOT NULL,
+    method VARCHAR(20) NOT NULL,
+    reference VARCHAR(120) NULL,
+    received_on DATE NOT NULL,
+    note VARCHAR(500) NULL,
+    recorded_by VARCHAR(190) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_pay_invoice (invoice_id, received_on)
   ) ENGINE=InnoDB`);
   await pool.execute(`CREATE TABLE IF NOT EXISTS audit_log (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

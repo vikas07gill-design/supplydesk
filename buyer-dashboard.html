@@ -26,7 +26,7 @@ main{padding:34px 0 60px}.hero{display:flex;justify-content:space-between;gap:20
 <div class="card metric"><strong id="active">0</strong><span>Active requests</span></div>
 <div class="card metric"><strong id="closed">0</strong><span>Closed requests</span></div>
 </div>
-<div class="card" style="margin-bottom:18px"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2 class="section-title" style="margin:0">My requirements</h2><p style="color:var(--muted);margin:5px 0 0;font-size:13px">Requirements you posted and quotations received from suppliers.</p></div><a class="btn primary" href="requirement.html">＋ Post Requirement</a></div><div id="requirements" style="margin-top:15px"></div></div><div class="card" style="margin-bottom:18px"><h2 class="section-title" style="margin:0">My orders</h2><div id="orders" style="margin-top:12px"></div></div>
+<div class="card" style="margin-bottom:18px"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2 class="section-title" style="margin:0">My requirements</h2><p style="color:var(--muted);margin:5px 0 0;font-size:13px">Requirements you posted and quotations received from suppliers.</p></div><a class="btn primary" href="requirement.html">＋ Post Requirement</a></div><div id="requirements" style="margin-top:15px"></div></div><div class="card" style="margin-bottom:18px"><h2 class="section-title" style="margin:0">My orders</h2><div id="orders" style="margin-top:12px"></div></div><div class="card" style="margin-bottom:18px"><h2 class="section-title" style="margin:0">Invoices &amp; payments</h2><div id="invoices" style="margin-top:12px"></div></div>
 
 <div class="card">
 <h2 class="section-title">My quote requests</h2>
@@ -50,7 +50,7 @@ async function load(){
   const r=await fetch("/api/buyer-dashboard",{headers:{"x-buyer-dashboard-token":token}});
   if(!r.ok)throw new Error();
   const d=await r.json(),b=d.buyer||{},e=d.enquiries||[];
-  await loadRequirements();await loadOrders();
+  await loadRequirements();await loadOrders();await loadInvoices();
   document.getElementById("email").textContent=b.email||"";
   ["name","company","country","phone"].forEach(k=>document.getElementById(k).value=b[k]||"");
   document.getElementById("total").textContent=e.length;
@@ -72,6 +72,12 @@ async function respondQuote(id,decision){
  if(decision==="accept"&&!confirm("Accept this quotation and place the order?"))return;
  try{const r=await fetch("/api/buyer-requirements/"+encodeURIComponent(id)+"/quote/respond",{method:"POST",headers:{"Content-Type":"application/json","x-buyer-dashboard-token":token},body:JSON.stringify({decision,note})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Could not save.");
   document.querySelectorAll("div[style*=fixed]").forEach(x=>x.remove());alert(decision==="accept"?"Order placed: "+d.poNumber:"Quotation declined.");await loadRequirements();await loadOrders();}catch(e){alert(e.message);}
+}
+
+async function loadInvoices(){
+ const el=document.getElementById("invoices");if(!el)return;
+ try{const r=await fetch("/api/buyer-invoices",{headers:{"x-buyer-dashboard-token":token}});const d=await r.json();const l=d.invoices||[];
+  el.innerHTML=l.length?l.map(i=>'<div style="border:1px solid var(--line);border-radius:13px;padding:14px;margin-top:10px"><div style="display:flex;justify-content:space-between;gap:10px"><strong>'+esc(i.invoice_no)+' · '+esc(i.po_number)+'</strong><span class="pill">'+esc(i.status==="partially_paid"?"Partly paid":i.status==="paid"?"Paid":"Payment due")+'</span></div><div style="font-size:13px;margin-top:6px">'+esc(i.subtotal)+' + GST '+esc(i.gst_rate)+'% ('+esc(i.gst_amount)+') = <b>'+esc(i.total)+' '+esc(i.currency)+'</b></div><div style="font-size:12px;color:var(--muted);margin-top:4px">Paid '+esc(i.paid_amount)+' · Outstanding '+esc(i.outstanding)+(i.due_date?' · Due '+esc(String(i.due_date).slice(0,10)):'')+'</div>'+(i.payments||[]).map(p=>'<div style="font-size:12px;color:var(--muted)">'+esc(String(p.received_on).slice(0,10))+' · '+esc(p.amount)+' received'+(p.reference?' · '+esc(p.reference):'')+'</div>').join("")+'</div>').join(""):'<div class="empty">No invoices yet.</div>';}catch{el.innerHTML='<div class="empty">Could not load invoices.</div>';}
 }
 async function loadOrders(){
  const el=document.getElementById("orders");if(!el)return;

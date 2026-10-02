@@ -81,3 +81,10 @@ For an existing Hostinger database, let the application startup schema check run
 ## Phase 4: buyer order follows supplier progress
 
 `syncOrderFromPos()` (server.js) keeps `orders.status` in step with live supplier POs (declined/cancelled ignored): confirmed -> in_production when any PO starts production; in_production -> shipped when every live PO is dispatched/completed. It never moves backwards, never sets delivered (SupplyDesk confirms delivery manually) and writes an audit row; the buyer is emailed on each automatic change. No schema change.
+
+## Phase 5: invoices and payment tracking
+
+- `invoices` (`INV-YYYYMM-XXXX`): one active invoice per order (subtotal defaults to the order total, GST % 0-28, GST amount and total computed in integer paise by `rfq.js`). Status: issued, partially_paid, paid, void. Void only when no payment is recorded.
+- `payments`: manual receipts (bank transfer, UPI, cheque, cash, other) with reference and date; overpayment is rejected; status updates from the paid total.
+- This is an internal tracking record, NOT a statutory GST tax invoice (no GSTIN/HSN/place of supply). Confirm requirements with a CA before using it as one.
+- Endpoints: `POST/GET /api/admin/orders/:id/invoice`, `POST /api/admin/invoices/:id/payments`, `PATCH /api/admin/invoices/:id/void`, `GET /api/buyer-invoices`. Buyer is emailed on invoice issue and on each payment.
