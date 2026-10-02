@@ -372,6 +372,40 @@ CREATE TABLE IF NOT EXISTS supplier_pos (
   INDEX idx_spo_order (order_id, status)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS invoices (
+  id CHAR(36) PRIMARY KEY,
+  invoice_no VARCHAR(24) NOT NULL UNIQUE,
+  order_id CHAR(36) NOT NULL,
+  buyer_id CHAR(36) NOT NULL,
+  subtotal DECIMAL(16,2) NOT NULL,
+  gst_rate DECIMAL(5,2) NOT NULL DEFAULT 0,
+  gst_amount DECIMAL(16,2) NOT NULL DEFAULT 0,
+  total DECIMAL(16,2) NOT NULL,
+  currency VARCHAR(10) NOT NULL,
+  due_date DATE NULL,
+  notes VARCHAR(1000) NULL,
+  status ENUM('issued','partially_paid','paid','void') NOT NULL DEFAULT 'issued',
+  paid_amount DECIMAL(16,2) NOT NULL DEFAULT 0,
+  created_by VARCHAR(190) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  voided_at DATETIME NULL,
+  INDEX idx_inv_order (order_id, status),
+  INDEX idx_inv_buyer (buyer_id, created_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS payments (
+  id CHAR(36) PRIMARY KEY,
+  invoice_id CHAR(36) NOT NULL,
+  amount DECIMAL(16,2) NOT NULL,
+  method VARCHAR(20) NOT NULL,
+  reference VARCHAR(120) NULL,
+  received_on DATE NOT NULL,
+  note VARCHAR(500) NULL,
+  recorded_by VARCHAR(190) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_pay_invoice (invoice_id, received_on)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS requirement_supplier_matches (
   id CHAR(36) PRIMARY KEY,
   requirement_id CHAR(36) NOT NULL,
