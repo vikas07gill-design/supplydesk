@@ -34,3 +34,42 @@ test("email OTP login creates the session and opens the buyer dashboard", async 
   await expect(page).toHaveURL(/buyer-dashboard/);
   await expect(page.locator("h1")).toContainText("Your sourcing activity");
 });
+
+test.describe("login persists while browsing", () => {
+  test.skip(!KEY, "needs E2E_TEST_KEY");
+  async function login(page, request) {
+    const email = `stay-${Date.now()}@example.com`;
+    const otp = await (await request.post("/api/buyer-email/request-otp", { headers: { "x-e2e-key": KEY }, data: { email } })).json();
+    const v = await (await request.post("/api/buyer-email/verify-otp", { data: { email, otp: otp.testOtp } })).json();
+    await page.addInitScript(t => localStorage.setItem("supplydesk_buyer_dashboard_token", t), v.dashboardToken);
+    return { email, token: v.dashboardToken };
+  }
+
+  test("public pages show My Dashboard / Logout instead of Login / Sign Up, and Logout ends the session", async ({ page, request }) => {
+    await login(page, request);
+    for (const p of ["/index.html", "/search.html", "/explore.html"]) {
+      await page.goto(p);
+      await expect(page.locator("a", { hasText: "My Dashboard" }).first()).toHaveAttribute("href", "buyer-dashboard.html");
+      await expect(page.locator("a[href^='buyer-login.html']")).toHaveCount(0);
+    }
+    await page.goto("/index.html");
+    await page.locator("a", { hasText: "Logout" }).first().click();
+    await expect(page).toHaveURL(/index\.html/);
+    await expect(page.locator(".actions a", { hasText: "Login" }).first()).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem("supplydesk_buyer_dashboard_token"))).toBeNull();
+  });
+
+  test("an expired session falls back to Login", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("supplydesk_buyer_dashboard_token", "bad-token"));
+    await page.goto("/index.html");
+    await expect(page.locator(".actions a", { hasText: "Login" }).first()).toBeVisible();
+  });
+
+  test("requirement page does not ask a logged-in buyer to verify the email again", async ({ page, request }) => {
+    const { email } = await login(page, request);
+    await page.goto("/requirement.html");
+    await expect(page.locator("#email")).toHaveValue(email);
+    await expect(page.locator("#verifyStatus")).toContainText("already verified");
+    await expect(page.locator("#sendOtp")).toBeHidden();
+  });
+});

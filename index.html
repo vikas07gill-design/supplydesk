@@ -78,5 +78,5 @@ document.querySelectorAll(".search-tab").forEach(tab=>tab.addEventListener("clic
 function searchDemo(){const q=document.getElementById("product").value.trim();if(!q){document.getElementById("product").focus();return}location.href="search.html?q="+encodeURIComponent(q)+(searchType&&searchType!=="product"?"&type="+encodeURIComponent(searchType):"")}
 function quick(q){document.getElementById("product").value=q;searchDemo()}
 </script>
-</body>
+<script src="assets/authnav.js" defer></script></body>
 </html>
