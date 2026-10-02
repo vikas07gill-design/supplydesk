@@ -2566,6 +2566,32 @@ app.get("/api/admin/applications", requireAdmin, async (req, res) => {
 });
 
 
+app.get("/api/super-admin/suppliers", requireSuperAdmin, async (req,res)=>{
+  try{
+    const q=clean(req.query.q,80);const like="%"+q+"%";
+    const [rows]=await pool.execute("SELECT id,legal_name,trade_name,business_type,country,city,website,business_email,business_phone,contact_person,category,subcategory,verified,published,created_at FROM supplier_profiles"+(q?" WHERE legal_name LIKE ? OR trade_name LIKE ? OR category LIKE ? OR country LIKE ? OR business_email LIKE ?":"")+" ORDER BY created_at DESC LIMIT 500",q?[like,like,like,like,like]:[]);
+    res.json({suppliers:rows});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not load suppliers."});}
+});
+app.patch("/api/super-admin/suppliers/:id/email", requireSuperAdmin, async (req,res)=>{
+  const id=clean(req.params.id,80),email=clean(req.body?.businessEmail,255).toLowerCase();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return res.status(400).json({error:"Enter a valid business email."});
+  const conn=await pool.getConnection();
+  try{
+    await conn.beginTransaction();
+    const [[s]]=await conn.execute("SELECT id,application_id,business_email FROM supplier_profiles WHERE id=? FOR UPDATE",[id]);
+    if(!s){await conn.rollback();return res.status(404).json({error:"Supplier not found."});}
+    const [[dup]]=await conn.execute("SELECT id FROM supplier_profiles WHERE business_email=? AND id<>? LIMIT 1",[email,id]);
+    if(dup){await conn.rollback();return res.status(409).json({error:"Another supplier already uses this email."});}
+    await conn.execute("UPDATE supplier_profiles SET business_email=? WHERE id=?",[email,id]);
+    await conn.execute("UPDATE supplier_applications SET business_email=? WHERE id=?",[email,s.application_id]);
+    await conn.execute("UPDATE supplier_dashboard_tokens SET revoked_at=NOW() WHERE supplier_id=? AND revoked_at IS NULL",[id]);
+    await audit(conn,req,"supplier.email_changed","supplier",id,{email:s.business_email},{email});
+    await conn.commit();
+    res.json({ok:true,message:"Supplier business email updated."});
+  }catch(error){await conn.rollback();console.error(error);res.status(500).json({error:"Could not update the email."});}
+  finally{conn.release();}
+});
 app.get("/api/super-admin/suppliers/:id", requireSuperAdmin, async (req,res)=>{
   try{
     const [[supplier]]=await pool.execute("SELECT * FROM supplier_profiles WHERE id=?",[clean(req.params.id,80)]);

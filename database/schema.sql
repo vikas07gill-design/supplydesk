@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS supplier_profiles (
   subcategory VARCHAR(180) NOT NULL,
   verified TINYINT(1) NOT NULL DEFAULT 0,
   published TINYINT(1) NOT NULL DEFAULT 0,
+  profile_details_json TEXT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_profile_application
@@ -107,8 +108,6 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
   INDEX idx_admin_session_expiry (expires_at),
   INDEX idx_admin_session_role (role)
 ) ENGINE=InnoDB;
-
-ALTER TABLE supplier_profiles ADD COLUMN profile_details_json TEXT NULL;
 
 CREATE TABLE IF NOT EXISTS supplier_dashboard_tokens (
   id CHAR(36) PRIMARY KEY,
@@ -254,6 +253,24 @@ CREATE TABLE IF NOT EXISTS buyer_email_otps (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_buyer_email_otp (email, created_at),
   INDEX idx_buyer_email_otp_token (verification_token_hash)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS connect_requests (
+  id CHAR(36) PRIMARY KEY,
+  supplier_id CHAR(36) NOT NULL,
+  customer_name VARCHAR(180) NOT NULL,
+  customer_email VARCHAR(255) NOT NULL,
+  customer_phone VARCHAR(80) NULL,
+  product_name VARCHAR(255) NULL,
+  source_action ENUM('phone','email','contact') NOT NULL DEFAULT 'contact',
+  message TEXT NULL,
+  status ENUM('new','contacted','in_discussion','closed') NOT NULL DEFAULT 'new',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_connect_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE,
+  INDEX idx_connect_supplier (supplier_id, created_at),
+  INDEX idx_connect_customer (customer_email, created_at),
+  INDEX idx_connect_status (status, created_at)
 ) ENGINE=InnoDB;
 
 ALTER TABLE connect_requests ADD COLUMN enquiry_id CHAR(36) NULL;
