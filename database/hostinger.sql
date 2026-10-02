@@ -355,6 +355,19 @@ CREATE TABLE IF NOT EXISTS buyer_requirements (
   INDEX idx_requirement_match (status, category, subcategory, created_at)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS rfq_messages (
+  id CHAR(36) PRIMARY KEY,
+  rfq_id CHAR(36) NOT NULL,
+  buyer_id CHAR(36) NOT NULL,
+  kind VARCHAR(30) NOT NULL DEFAULT 'message',
+  subject VARCHAR(255) NOT NULL,
+  body TEXT NULL,
+  created_by VARCHAR(120) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  INDEX idx_rfqmsg_rfq (rfq_id, created_at),
+  INDEX idx_rfqmsg_buyer (buyer_id, created_at)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   actor VARCHAR(190) NOT NULL,

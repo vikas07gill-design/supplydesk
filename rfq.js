@@ -170,4 +170,12 @@ function marginOf(price, cost) {
   return { amount, pctOnCost: Math.round((p - c) / c * 10000) / 100, pctOnPrice: Math.round((p - c) / p * 10000) / 100 };
 }
 
-module.exports = { STATES, TRANSITIONS, LEGACY_STATUS_TO_STATE, isState, canTransition, isTerminal, parseQuantity, scoreCapability, newRfqCode, ORDER_STATES, ORDER_TRANSITIONS, isOrderState, canOrderTransition, newQuoteNo, newPoNumber, PO_STATES, PO_TRANSITIONS, isPoState, canPoTransition, newSupplierPoNumber, toMinor, fromMinor, computeInvoice, invoiceStatus, PAYMENT_METHODS, newInvoiceNo, priceFromMarkup, marginOf };
+// Buyer-facing progress: 1 Received, 2 In review/sourcing, 3 Quote ready, 4 Order
+function buyerStep(state){
+  if(["submitted","matching"].includes(state))return 1;
+  if(["sourcing","quotes_received","costing"].includes(state))return 2;
+  if(state==="quote_sent")return 3;
+  if(["buyer_approved","converted"].includes(state))return 4;
+  return 0;
+}
+module.exports = { STATES, TRANSITIONS, LEGACY_STATUS_TO_STATE, isState, canTransition, isTerminal, parseQuantity, scoreCapability, newRfqCode, ORDER_STATES, ORDER_TRANSITIONS, isOrderState, canOrderTransition, newQuoteNo, newPoNumber, PO_STATES, PO_TRANSITIONS, isPoState, canPoTransition, newSupplierPoNumber, toMinor, fromMinor, computeInvoice, invoiceStatus, PAYMENT_METHODS, newInvoiceNo, priceFromMarkup, marginOf, buyerStep };
