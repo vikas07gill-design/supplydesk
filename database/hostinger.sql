@@ -381,6 +381,8 @@ CREATE TABLE IF NOT EXISTS rfq_quotes (
   lead_time_days INT NULL,
   valid_until DATE NULL,
   terms TEXT NULL,
+  cost_unit_price DECIMAL(14,4) NULL,
+  markup_pct DECIMAL(6,2) NULL,
   note TEXT NULL,
   status ENUM('sent','accepted','rejected','superseded') NOT NULL DEFAULT 'sent',
   buyer_note VARCHAR(500) NULL,
