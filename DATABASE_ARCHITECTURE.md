@@ -54,3 +54,10 @@ For an existing Hostinger database, let the application startup schema check run
 - Public APIs return a capacity **band** (never the exact number), availability status, lead time, MOQ and region. They never return the supplier name, id, website or contact.
 - `SD_HIDE_SUPPLIERS` (default `true`) controls this. Setting it to `false` restores the old public supplier profiles and direct connect flow (rollback switch).
 - A buyer "Request Quote" creates a `buyer_enquiries` + `connect_requests` row and notifies only the buyer. The supplier receives nothing. Admin decides with `POST /api/admin/connect-requests/:id/decision` (`accepted` / `partial` + `approved_quantity` / `rejected`, remarks required for partial and rejected). The decision, quantity and remarks are stored on `buyer_enquiries` and shown in the Buyer Dashboard and by email.
+
+## Phase 1B: structured RFQ, state machine, audit log
+
+- `buyer_requirements` gains `rfq_code` (`RFQ-YYYYMM-XXXX`, unique), `rfq_state`, `state_changed_at`, `specification`, `quality_standards`, `certifications`, `packaging`, `payment_terms`, `incoterm`. Added by `ensureRfqSchema()` at startup (additive; old rows are backfilled from the legacy `status`). The legacy `status` ENUM is kept for backward compatibility.
+- States and allowed moves live in `rfq.js` (pure functions): submitted, matching, sourcing, quotes_received, costing, quote_sent, buyer_approved, converted, lost, rejected, closed, cancelled. All moves go through `moveRfq()` which locks the row, rejects illegal moves (HTTP 409) and writes `audit_log`.
+- `audit_log` records actor, role, action, entity, old/new value for RFQ creation/state moves, supplier quotes, capacity updates and quote-request decisions.
+- Admin endpoints: `GET /api/admin/procurement/queue`, `POST /api/admin/requirements/:id/state`, `GET /api/admin/requirements/:id/capability-matches`, `GET /api/admin/audit`.
