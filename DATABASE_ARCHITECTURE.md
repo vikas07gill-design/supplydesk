@@ -88,3 +88,8 @@ For an existing Hostinger database, let the application startup schema check run
 - `payments`: manual receipts (bank transfer, UPI, cheque, cash, other) with reference and date; overpayment is rejected; status updates from the paid total.
 - This is an internal tracking record, NOT a statutory GST tax invoice (no GSTIN/HSN/place of supply). Confirm requirements with a CA before using it as one.
 - Endpoints: `POST/GET /api/admin/orders/:id/invoice`, `POST /api/admin/invoices/:id/payments`, `PATCH /api/admin/invoices/:id/void`, `GET /api/buyer-invoices`. Buyer is emailed on invoice issue and on each payment.
+
+## Phase 6: margin (Super Admin only)
+
+- `rfq_quotes` gains `cost_unit_price` and `markup_pct` (additive columns). Markup is on supplier cost: price = cost x (1 + markup%). Only Super Admin can price by markup (server recomputes the price; the client value is ignored). Admin may still record the supplier cost and type the final price; the margin is never returned by any Admin endpoint, buyer endpoint or the audit log.
+- `GET /api/super-admin/margin-report`: per order revenue (accepted SupplyDesk price), cost (active supplier POs, else the cost noted on the quote) and margin, with totals per currency.

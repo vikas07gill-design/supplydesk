@@ -1512,6 +1512,29 @@ async function syncOrderFromPos(conn,req,orderId){
   await audit(conn,req,"order.status_change","order",orderId,{status:o.status},{status:to,note:"auto: supplier progress"});
   return {order:o,to};
 }
+// Margin report: Super Admin only. Revenue = accepted SupplyDesk price; cost = supplier PO cost (active POs) or the cost noted on the quote.
+app.get("/api/super-admin/margin-report",requireSuperAdmin,async(req,res)=>{
+  try{
+    const [rows]=await pool.execute(`SELECT o.id,o.po_number,o.title,o.quantity,o.unit_price,o.currency,o.total_price,o.status,o.created_at,b.company buyer_company,b.name buyer_name,
+        q.cost_unit_price,q.markup_pct,
+        (SELECT COALESCE(SUM(po.total_cost),0) FROM supplier_pos po WHERE po.order_id=o.id AND po.status NOT IN ('declined','cancelled')) po_cost,
+        (SELECT COUNT(*) FROM supplier_pos po WHERE po.order_id=o.id AND po.status NOT IN ('declined','cancelled')) po_count
+      FROM orders o JOIN buyers b ON b.id=o.buyer_id LEFT JOIN rfq_quotes q ON q.id=o.rfq_quote_id WHERE o.status<>'cancelled' ORDER BY o.created_at DESC LIMIT 300`);
+    const items=rows.map(r=>{
+      const revenue=r.total_price==null?null:Number(r.total_price);
+      const qty=RFQ.parseQuantity(r.quantity);
+      let cost=Number(r.po_count)?Number(r.po_cost):(r.cost_unit_price&&qty?Math.round(Number(r.cost_unit_price)*qty*100)/100:null);
+      const source=Number(r.po_count)?"supplier_po":(cost!=null?"quote_estimate":null);
+      const margin=revenue!=null&&cost!=null?Math.round((revenue-cost)*100)/100:null;
+      return {id:r.id,poNumber:r.po_number,title:r.title,buyer:r.buyer_company||r.buyer_name,currency:r.currency,status:r.status,revenue,cost,costSource:source,margin,marginPctOnPrice:margin!=null&&revenue?Math.round(margin/revenue*10000)/100:null,markupPct:r.markup_pct==null?null:Number(r.markup_pct),createdAt:r.created_at};
+    });
+    const totals={};
+    for(const i of items){if(i.margin==null)continue;const t=totals[i.currency]||(totals[i.currency]={revenue:0,cost:0,margin:0,orders:0});t.revenue+=i.revenue;t.cost+=i.cost;t.margin+=i.margin;t.orders++;}
+    for(const t of Object.values(totals)){t.revenue=Math.round(t.revenue*100)/100;t.cost=Math.round(t.cost*100)/100;t.margin=Math.round(t.margin*100)/100;t.marginPctOnPrice=t.revenue?Math.round(t.margin/t.revenue*10000)/100:null;}
+    res.json({items,totals});
+  }catch(error){console.error("Margin report failed:",error);res.status(500).json({error:"Could not load the margin report."});}
+});
+
 // ---- Invoices & payments (Phase 5): internal tracking, GST % shown. Not a statutory tax invoice (no GSTIN/HSN). ----
 app.post("/api/admin/orders/:id/invoice",requireAdmin,async(req,res)=>{
   const id=clean(req.params.id,80),b=req.body||{};
@@ -1697,7 +1720,15 @@ const money=(v)=>Number.isFinite(v)?Math.round(v*100)/100:null;
 // Admin sends the buyer ONE SupplyDesk price (no supplier identity, no supplier price).
 app.post("/api/admin/requirements/:id/buyer-quote",requireAdmin,async(req,res)=>{
   const id=clean(req.params.id,80),b=req.body||{};
-  const unitPrice=Number(b.unitPrice),currency=(clean(b.currency,10)||"INR").toUpperCase(),quantity=clean(b.quantity,60);
+  const costUnit=b.costUnitPrice===""||b.costUnitPrice==null?null:Number(b.costUnitPrice);
+  const markupPct=b.markupPct===""||b.markupPct==null?null:Number(b.markupPct);
+  if(costUnit!=null&&(!Number.isFinite(costUnit)||costUnit<=0))return res.status(400).json({error:"Enter a valid supplier cost."});
+  if(markupPct!=null){
+    if(!isSuper(req))return res.status(403).json({error:"Only Super Admin can price by margin."});
+    if(costUnit==null)return res.status(400).json({error:"Supplier cost is required to apply a margin."});
+    if(!Number.isFinite(markupPct)||markupPct<0||markupPct>300)return res.status(400).json({error:"Margin must be between 0 and 300 percent."});
+  }
+  const unitPrice=markupPct!=null?RFQ.priceFromMarkup(costUnit,markupPct):Number(b.unitPrice),currency=(clean(b.currency,10)||"INR").toUpperCase(),quantity=clean(b.quantity,60);
   const leadTime=b.leadTimeDays===""||b.leadTimeDays==null?null:Number(b.leadTimeDays),validUntil=clean(b.validUntil,10)||null;
   const terms=clean(b.terms,2000)||null,note=clean(b.note,1000)||null;
   if(!Number.isFinite(unitPrice)||unitPrice<=0)return res.status(400).json({error:"Enter a valid unit price."});
@@ -1715,7 +1746,7 @@ app.post("/api/admin/requirements/:id/buyer-quote",requireAdmin,async(req,res)=>
     await conn.execute("UPDATE rfq_quotes SET status='superseded' WHERE rfq_id=? AND status='sent'",[id]);
     const qid=crypto.randomUUID();let quoteNo;
     for(let a=0;a<8;a++){quoteNo=RFQ.newQuoteNo();try{
-      await conn.execute("INSERT INTO rfq_quotes (id,rfq_id,quote_no,unit_price,currency,quantity,total_price,lead_time_days,valid_until,terms,note,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",[qid,id,quoteNo,unitPrice,currency,quantity,total,leadTime,validUntil,terms,note,actorOf(req).id]);break;}
+      await conn.execute("INSERT INTO rfq_quotes (id,rfq_id,quote_no,unit_price,currency,quantity,total_price,lead_time_days,valid_until,terms,note,created_by,cost_unit_price,markup_pct) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",[qid,id,quoteNo,unitPrice,currency,quantity,total,leadTime,validUntil,terms,note,actorOf(req).id,costUnit,markupPct]);break;}
       catch(e){if(e?.code!=="ER_DUP_ENTRY"||a===7)throw e;}}
     await moveRfq(conn,req,id,"quote_sent","quote "+quoteNo);
     await audit(conn,req,"rfq.quote_sent","rfq",id,null,{quoteNo,unitPrice,currency,quantity,total});
@@ -3192,6 +3223,10 @@ async function ensureRfqSchema() {
     responded_at DATETIME NULL,
     INDEX idx_rfqq_rfq (rfq_id, status, created_at)
   ) ENGINE=InnoDB`);
+  for (const ddl of ["cost_unit_price DECIMAL(14,4) NULL","markup_pct DECIMAL(6,2) NULL"]) {
+    try { await pool.query("ALTER TABLE rfq_quotes ADD COLUMN "+ddl); }
+    catch (e) { if(!["ER_DUP_FIELDNAME","ER_DUP_COLUMN"].includes(e?.code)) throw e; }
+  }
   await pool.execute(`CREATE TABLE IF NOT EXISTS orders (
     id CHAR(36) PRIMARY KEY,
     po_number VARCHAR(24) NOT NULL UNIQUE,

@@ -156,4 +156,18 @@ const invoiceStatus = (total, paid) => {
 const PAYMENT_METHODS = ["bank_transfer", "upi", "cheque", "cash", "other"];
 const newInvoiceNo = () => _code("INV");
 
-module.exports = { STATES, TRANSITIONS, LEGACY_STATUS_TO_STATE, isState, canTransition, isTerminal, parseQuantity, scoreCapability, newRfqCode, ORDER_STATES, ORDER_TRANSITIONS, isOrderState, canOrderTransition, newQuoteNo, newPoNumber, PO_STATES, PO_TRANSITIONS, isPoState, canPoTransition, newSupplierPoNumber, toMinor, fromMinor, computeInvoice, invoiceStatus, PAYMENT_METHODS, newInvoiceNo };
+
+// ---- Margin (Phase 6). Markup is on supplier cost: price = cost * (1 + markup%). ----
+function priceFromMarkup(cost, markupPct) {
+  const c = Number(cost), m = Number(markupPct);
+  if (!Number.isFinite(c) || c <= 0 || !Number.isFinite(m) || m < 0 || m > 300) return null;
+  return Math.round(c * (1 + m / 100) * 10000) / 10000;
+}
+function marginOf(price, cost) {
+  const p = Number(price), c = Number(cost);
+  if (!Number.isFinite(p) || !Number.isFinite(c) || p <= 0 || c <= 0) return null;
+  const amount = Math.round((p - c) * 10000) / 10000;
+  return { amount, pctOnCost: Math.round((p - c) / c * 10000) / 100, pctOnPrice: Math.round((p - c) / p * 10000) / 100 };
+}
+
+module.exports = { STATES, TRANSITIONS, LEGACY_STATUS_TO_STATE, isState, canTransition, isTerminal, parseQuantity, scoreCapability, newRfqCode, ORDER_STATES, ORDER_TRANSITIONS, isOrderState, canOrderTransition, newQuoteNo, newPoNumber, PO_STATES, PO_TRANSITIONS, isPoState, canPoTransition, newSupplierPoNumber, toMinor, fromMinor, computeInvoice, invoiceStatus, PAYMENT_METHODS, newInvoiceNo, priceFromMarkup, marginOf };
