@@ -1469,7 +1469,11 @@ app.post("/api/buyer-requirements", buyerRequirementLimiter, async(req,res)=>{
     try{if(buyer.email&&process.env.SMTP_HOST&&process.env.SMTP_USER&&process.env.SMTP_PASSWORD&&process.env.SMTP_FROM){const cm=buildProfessionalEmail({preheader:"We received your sourcing requirement",title:"Requirement received",intro:"Hello "+(buyerName||"Buyer")+", your sourcing requirement has been submitted. The SupplyDesk team will review it and share it with matching suppliers. We will email you at each step.",bodyHtml:'<div style="margin:20px 0;padding:16px;background:#f4f9fc;border:1px solid #dbe8ed;border-radius:12px"><div style="font-size:12px;color:#58717c;text-transform:uppercase;font-weight:700;letter-spacing:1px">Your requirement</div><div style="font-size:16px;font-weight:700;margin-top:6px">'+escapeEmailHtml(title)+'</div></div><p style="line-height:1.6">Status: <strong>Under SupplyDesk review</strong>. Your email and phone number stay private. You can track progress and quotations in your Buyer Dashboard.</p>',textLines:["Hello "+(buyerName||"Buyer")+",","","Your sourcing requirement has been submitted:",title,"","Quotations will appear in your Buyer Dashboard."],ctaText:"Open Buyer Dashboard",ctaUrl:String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"")+"/buyer-dashboard.html"});await mailer.sendMail({from:process.env.SMTP_FROM,replyTo:process.env.SMTP_FROM,to:buyer.email,subject:"SupplyDesk | Requirement received",text:cm.text,html:cm.html});}}catch(mailError){console.error("Requirement confirmation email failed:",mailError);}
 res.status(201).json({ok:true,requirementId:id,rfqCode,status:"pending_review",message:"Requirement submitted. SupplyDesk will review it and share it with matching suppliers. You can track it in your Buyer Dashboard."});}catch(error){const ref=crypto.randomUUID().slice(0,8);console.error("Requirement submit failed ["+ref+"]:",{code:error?.code,errno:error?.errno,sqlMessage:error?.sqlMessage||error?.message});res.status(500).json({error:"Could not submit the requirement. Please try again. (Ref "+ref+")"});}
 });
-app.get("/api/buyer-requirements",requireBuyerDashboard,async(req,res)=>{try{const [requirements]=await pool.execute("SELECT r.id,r.rfq_code,r.rfq_state,r.required_by,r.requirement_type,r.title,r.category,r.subcategory,r.quantity,r.unit,r.delivery_country,r.status,r.fulfilment_mode,r.buyer_note,r.created_at,r.reviewed_at,(SELECT COUNT(*) FROM requirement_supplier_matches m WHERE m.requirement_id=r.id) sent_count,(SELECT COUNT(*) FROM supplier_quotes q WHERE q.requirement_id=r.id AND q.status='submitted') quote_count FROM buyer_requirements r WHERE r.buyer_id=? ORDER BY r.created_at DESC LIMIT 100",[req.buyer.id]);res.json({requirements:requirements.map(r=>{const st=r.rfq_state||RFQ.LEGACY_STATUS_TO_STATE[r.status]||"submitted";return {...r,rfq_state:st,stateLabel:(RFQ.STATES[st]||RFQ.STATES.submitted).buyerLabel};})});}catch(error){res.status(500).json({error:"Could not load requirements."});}});
+app.get("/api/buyer-requirements",requireBuyerDashboard,async(req,res)=>{try{const [requirements]=await pool.execute("SELECT r.id,r.rfq_code,r.rfq_state,r.required_by,r.requirement_type,r.title,r.category,r.subcategory,r.quantity,r.unit,r.delivery_country,r.status,r.fulfilment_mode,r.buyer_note,r.created_at,r.reviewed_at,(SELECT COUNT(*) FROM requirement_supplier_matches m WHERE m.requirement_id=r.id) sent_count,(SELECT COUNT(*) FROM supplier_quotes q WHERE q.requirement_id=r.id AND q.status='submitted') quote_count FROM buyer_requirements r WHERE r.buyer_id=? ORDER BY r.created_at DESC LIMIT 100",[req.buyer.id]);const ids=requirements.map(r=>r.id);let msgs=[],oq=[];
+    if(ids.length){
+      [msgs]=await pool.query("SELECT rfq_id,kind,subject,body,created_at FROM rfq_messages WHERE rfq_id IN (?) ORDER BY created_at DESC, id DESC",[ids]);
+      [oq]=await pool.query("SELECT rfq_id,quote_no,unit_price,currency,quantity,total_price,lead_time_days,valid_until,terms,note FROM rfq_quotes WHERE status='sent' AND rfq_id IN (?) ORDER BY created_at DESC",[ids]);}
+    res.json({requirements:requirements.map(r=>{const st=r.rfq_state||RFQ.LEGACY_STATUS_TO_STATE[r.status]||"submitted";return {...r,rfq_state:st,stateLabel:(RFQ.STATES[st]||RFQ.STATES.submitted).buyerLabel,stateStep:RFQ.buyerStep?RFQ.buyerStep(st):0,messages:msgs.filter(m=>m.rfq_id===r.id).slice(0,6),openQuote:st==="quote_sent"?(oq.find(q=>q.rfq_id===r.id)||null):null};})});}catch(error){console.error(error);res.status(500).json({error:"Could not load requirements."});}});
 app.get("/api/buyer-requirements/:id/quotes",requireBuyerDashboard,async(req,res)=>{try{const [[requirement]]=await pool.execute("SELECT id,title,status FROM buyer_requirements WHERE id=? AND buyer_id=?",[clean(req.params.id,80),req.buyer.id]);if(!requirement)return res.status(404).json({error:"Requirement not found."});const [sdQuotes]=await pool.execute("SELECT id,quote_no,unit_price,currency,quantity,total_price,lead_time_days,valid_until,terms,note,status,created_at,responded_at FROM rfq_quotes WHERE rfq_id=? AND status IN ('sent','accepted','rejected') ORDER BY created_at DESC",[requirement.id]);if(HIDE_SUPPLIERS)return res.json({requirement,quotes:[],sdQuotes});const [quotes]=await pool.execute("SELECT q.id,q.unit_price,q.currency,q.quantity_available,q.moq,q.lead_time,q.payment_terms,q.incoterm,q.quote_valid_until,q.sample_available,q.notes,q.status,q.created_at,s.id supplier_id,s.trade_name,s.legal_name,s.country,s.city FROM supplier_quotes q JOIN supplier_profiles s ON s.id=q.supplier_id WHERE q.requirement_id=? AND q.status='submitted' ORDER BY q.created_at DESC",[requirement.id]);res.json({requirement,quotes:HIDE_SUPPLIERS?quotes.map((q,i)=>{const {supplier_id,trade_name,legal_name,country,city,...rest}=q;return {...rest,supplier_label:"SupplyDesk sourcing partner #"+(quotes.length-i)};}):quotes,sdQuotes});}catch(error){res.status(500).json({error:"Could not load quotations."});}});
 app.get("/api/supplier-dashboard/requirements",requireSupplierDashboard,async(req,res)=>{try{const [rows]=await pool.execute("SELECT r.id,r.requirement_type,r.title,r.category,r.subcategory,r.description,r.quantity,r.unit,r.target_price,r.currency,r.delivery_country,r.delivery_city,r.required_by,r.market_scope,r.created_at,m.status match_status,q.id quote_id,q.unit_price quote_unit_price,q.currency quote_currency,q.updated_at quote_updated_at FROM buyer_requirements r JOIN requirement_supplier_matches m ON m.requirement_id=r.id AND m.supplier_id=? LEFT JOIN supplier_quotes q ON q.requirement_id=r.id AND q.supplier_id=? AND q.status='submitted' WHERE r.status='open' ORDER BY r.created_at DESC LIMIT 100",[req.supplier.id,req.supplier.id]);res.json({requirements:rows});}catch(error){res.status(500).json({error:"Could not load buyer requirements."});}});
 app.post("/api/supplier-dashboard/requirements/:id/view",requireSupplierDashboard,async(req,res)=>{try{const id=clean(req.params.id,80),[[r]]=await pool.execute("SELECT id,status FROM buyer_requirements WHERE id=?",[id]);if(!r||r.status!=="open")return res.status(404).json({error:"Requirement is no longer open."});const [vr]=await pool.execute("UPDATE requirement_supplier_matches SET status=IF(status='quoted',status,'viewed'),viewed_at=COALESCE(viewed_at,NOW()) WHERE requirement_id=? AND supplier_id=?",[id,req.supplier.id]);if(!vr.affectedRows)return res.status(404).json({error:"Requirement is no longer open."});res.json({ok:true});}catch(error){res.status(500).json({error:"Could not record requirement view."});}});
@@ -1500,7 +1504,7 @@ const REQ_STATUS_LABEL={pending_review:"Under SupplyDesk review",open:"Shared wi
 //  confirmed -> in_production when any live PO is in production/dispatched/completed
 //  in_production -> shipped when every live PO (not declined/cancelled) is dispatched or completed
 async function syncOrderFromPos(conn,req,orderId){
-  const [[o]]=await conn.execute("SELECT o.id,o.po_number,o.status,o.title,b.email,b.name FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.id=? FOR UPDATE",[orderId]);
+  const [[o]]=await conn.execute("SELECT o.id,o.rfq_id,o.po_number,o.status,o.title,b.email,b.name FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.id=? FOR UPDATE",[orderId]);
   if(!o||!["confirmed","in_production"].includes(o.status))return null;
   const [pos]=await conn.execute("SELECT status FROM supplier_pos WHERE order_id=? AND status NOT IN ('declined','cancelled')",[orderId]);
   if(!pos.length)return null;
@@ -1510,6 +1514,7 @@ async function syncOrderFromPos(conn,req,orderId){
   if(!to||to===o.status||!RFQ.canOrderTransition(o.status,to))return null;
   await conn.execute("UPDATE orders SET status=?,status_changed_at=NOW() WHERE id=?",[to,orderId]);
   await audit(conn,req,"order.status_change","order",orderId,{status:o.status},{status:to,note:"auto: supplier progress"});
+  await logBuyerMessage(conn,o.rfq_id,"order","Order "+o.po_number+": "+RFQ.ORDER_STATES[to].buyerLabel,null,"SupplyDesk");
   return {order:o,to};
 }
 // Margin report: Super Admin only. Revenue = accepted SupplyDesk price; cost = supplier PO cost (active POs) or the cost noted on the quote.
@@ -1717,6 +1722,26 @@ app.patch("/api/supplier-dashboard/purchase-orders/:id/status",requireSupplierDa
 // ---- Commercial flow (Phase 2): SupplyDesk quote -> buyer decision -> order ----
 const money=(v)=>Number.isFinite(v)?Math.round(v*100)/100:null;
 
+// Admin writes to the buyer: emailed AND kept on the requirement so it shows in the buyer dashboard.
+app.get("/api/admin/requirements/:id/messages",requireAdmin,async(req,res)=>{
+  try{const [rows]=await pool.execute("SELECT kind,subject,body,created_by,created_at FROM rfq_messages WHERE rfq_id=? ORDER BY created_at DESC, id DESC LIMIT 50",[clean(req.params.id,80)]);res.json({messages:rows});}
+  catch(error){console.error(error);res.status(500).json({error:"Could not load messages."});}
+});
+app.post("/api/admin/requirements/:id/message",requireAdmin,async(req,res)=>{
+  const id=clean(req.params.id,80),message=clean(req.body?.message,2000),subject=clean(req.body?.subject,150)||"Message from SupplyDesk";
+  if(!message)return res.status(400).json({error:"Write a message first."});
+  try{
+    const [[r]]=await pool.execute("SELECT r.id,r.title,r.rfq_code,b.email,b.name FROM buyer_requirements r JOIN buyers b ON b.id=r.buyer_id WHERE r.id=?",[id]);
+    if(!r)return res.status(404).json({error:"Requirement not found."});
+    await logBuyerMessage(pool,id,"message",subject,message,actorOf(req).id);
+    await audit(pool,req,"rfq.message_sent","rfq",id,null,{subject});
+    let emailed=false;
+    try{emailed=!!(await sendBrandedMail(r.email,"SupplyDesk | "+subject+(r.rfq_code?" ("+r.rfq_code+")":""),{preheader:subject,title:subject,intro:"Hello "+(r.name||"Buyer")+", SupplyDesk has an update on your requirement "+r.title+".",
+      bodyHtml:'<div style="margin:18px 0;padding:16px;background:#f4f9fc;border:1px solid #dbe8ed;border-radius:12px;font-size:15px;white-space:pre-wrap">'+escapeEmailHtml(message)+'</div>',textLines:[message],ctaText:"Open Buyer Dashboard",ctaUrl:ORIGIN()+"/buyer-dashboard"}));}catch(e){console.error("Buyer message mail failed:",e);}
+    res.status(201).json({ok:true,emailed});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not send the message."});}
+});
+
 // Admin sends the buyer ONE SupplyDesk price (no supplier identity, no supplier price).
 app.post("/api/admin/requirements/:id/buyer-quote",requireAdmin,async(req,res)=>{
   const id=clean(req.params.id,80),b=req.body||{};
@@ -1750,6 +1775,8 @@ app.post("/api/admin/requirements/:id/buyer-quote",requireAdmin,async(req,res)=>
       catch(e){if(e?.code!=="ER_DUP_ENTRY"||a===7)throw e;}}
     await moveRfq(conn,req,id,"quote_sent","quote "+quoteNo);
     await audit(conn,req,"rfq.quote_sent","rfq",id,null,{quoteNo,unitPrice,currency,quantity,total});
+    await logBuyerMessage(conn,id,"quote","Quotation "+quoteNo+" is ready",
+      unitPrice+" "+currency+" per unit for "+quantity+(total?" (total "+total+" "+currency+")":"")+(leadTime!=null?". Lead time "+leadTime+" days":"")+(validUntil?". Valid until "+validUntil:"")+"."+(note?"\n"+note:"")+(terms?"\nTerms: "+terms:""),actorOf(req).id);
     await conn.commit();
     try{await sendBrandedMail(r.email,"SupplyDesk | Your quotation "+quoteNo,{preheader:"Quotation ready",title:"Your quotation is ready",intro:"Hello "+(r.name||"Buyer")+", SupplyDesk has prepared a quotation for "+r.title+".",
       bodyHtml:'<p style="font-size:14px">Quote <b>'+escapeEmailHtml(quoteNo)+'</b>: '+escapeEmailHtml(String(unitPrice))+' '+escapeEmailHtml(currency)+' per unit for '+escapeEmailHtml(quantity)+'.</p>',textLines:["Quote "+quoteNo+": "+unitPrice+" "+currency+" per unit for "+quantity],ctaText:"Review quotation",ctaUrl:ORIGIN()+"/buyer-dashboard"});}catch(e){console.error("Buyer quote mail failed:",e);}
@@ -1784,6 +1811,7 @@ app.post("/api/buyer-requirements/:id/quote/respond",requireBuyerDashboard,async
       await conn.execute("INSERT INTO orders (id,po_number,rfq_id,rfq_quote_id,buyer_id,title,quantity,unit_price,currency,total_price) VALUES (?,?,?,?,?,?,?,?,?,?)",[oid,po,id,q.id,req.buyer.id,r.title,q.quantity,q.unit_price,q.currency,q.total_price]);break;}
       catch(e){if(e?.code!=="ER_DUP_ENTRY"||a===7)throw e;}}
     await moveRfq(conn,actor,id,"converted","order "+po);
+    await logBuyerMessage(conn,id,"order","Order "+po+" confirmed","Thank you. SupplyDesk will keep you updated on production and delivery here.","SupplyDesk");
     await audit(conn,actor,"order.created","order",oid,null,{poNumber:po,quoteNo:q.quote_no,quantity:q.quantity,unitPrice:q.unit_price,currency:q.currency});
     await conn.commit();
     try{await sendBrandedMail(req.buyer.email,"SupplyDesk | Order confirmed "+po,{preheader:"Order confirmed",title:"Order confirmed",intro:"Thank you. Your order "+po+" for "+r.title+" is confirmed. SupplyDesk will keep you updated.",bodyHtml:"",textLines:["Order "+po],ctaText:"View order",ctaUrl:ORIGIN()+"/buyer-dashboard"});}catch(e){console.error("Order mail failed:",e);}
@@ -1810,12 +1838,13 @@ app.patch("/api/admin/orders/:id/status",requireAdmin,async(req,res)=>{
   const conn=await pool.getConnection();
   try{
     await conn.beginTransaction();
-    const [[o]]=await conn.execute("SELECT o.id,o.po_number,o.status,o.title,b.email,b.name FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.id=? FOR UPDATE",[id]);
+    const [[o]]=await conn.execute("SELECT o.id,o.rfq_id,o.po_number,o.status,o.title,b.email,b.name FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.id=? FOR UPDATE",[id]);
     if(!o){await conn.rollback();return res.status(404).json({error:"Order not found."});}
     if(o.status===to){await conn.rollback();return res.json({ok:true,changed:false});}
     if(!RFQ.canOrderTransition(o.status,to)){await conn.rollback();return res.status(409).json({error:"Cannot move this order from "+RFQ.ORDER_STATES[o.status].label+" to "+RFQ.ORDER_STATES[to].label+"."});}
     await conn.execute("UPDATE orders SET status=?,status_changed_at=NOW(),notes=COALESCE(?,notes) WHERE id=?",[to,note,id]);
     await audit(conn,req,"order.status_change","order",id,{status:o.status},{status:to,note});
+    await logBuyerMessage(conn,o.rfq_id,"order","Order "+o.po_number+": "+RFQ.ORDER_STATES[to].buyerLabel,note||null,actorOf(req).id);
     await conn.commit();
     try{await sendBrandedMail(o.email,"SupplyDesk | Order "+o.po_number+": "+RFQ.ORDER_STATES[to].buyerLabel,{preheader:RFQ.ORDER_STATES[to].buyerLabel,title:"Order update",intro:"Hello "+(o.name||"Buyer")+", your order "+o.po_number+" ("+o.title+") is now: "+RFQ.ORDER_STATES[to].buyerLabel+"."+(note?" "+note:""),bodyHtml:"",textLines:[o.po_number+": "+RFQ.ORDER_STATES[to].buyerLabel],ctaText:"View order",ctaUrl:ORIGIN()+"/buyer-dashboard"});}catch(e){console.error("Order update mail failed:",e);}
     res.json({ok:true,changed:true,status:to});
@@ -1951,6 +1980,7 @@ app.post("/api/admin/requirements/:id/review",requireAdmin,async(req,res)=>{
     }catch(e){await conn.rollback();if(e instanceof RfqError)return res.status(e.status).json({error:e.message});throw e;}finally{conn.release();}
 
     // Notifications are best-effort; the decision is already saved.
+    try{await logBuyerMessage(pool,id,"update",action==="share_suppliers"?"Requirement approved":action==="supplydesk"?"SupplyDesk will handle your requirement":"Requirement not accepted",buyerNote,admin);}catch(e){console.error("Message log failed:",e);}
     const dash=ORIGIN()+"/buyer-dashboard.html";
     const status=action==="share_suppliers"?"open":action==="supplydesk"?"fulfilling":"rejected";
     const lead=action==="share_suppliers"?"Your requirement has been approved and shared with "+(newlyShared.length||targets.length)+" matching supplier(s). Quotations will appear in your Buyer Dashboard."
@@ -3138,6 +3168,11 @@ function actorOf(req){
   if(req?.supplier) return {id:"supplier:"+req.supplier.id,role:"supplier"};
   return {id:"system",role:"system"};
 }
+// Every buyer-facing update is also kept on the requirement so the buyer sees it in the dashboard, not just in email.
+async function logBuyerMessage(db, rfqId, kind, subject, body, by){
+  await db.execute("INSERT INTO rfq_messages (id,rfq_id,buyer_id,kind,subject,body,created_by) SELECT ?,id,buyer_id,?,?,?,? FROM buyer_requirements WHERE id=?",
+    [crypto.randomUUID(),kind,String(subject).slice(0,255),body?String(body).slice(0,4000):null,by?String(by).slice(0,120):null,rfqId]);
+}
 async function audit(db, req, action, entity, entityId, oldValue, newValue){
   const a=actorOf(req), j=(v)=>v==null?null:JSON.stringify(v).slice(0,8000);
   await db.execute("INSERT INTO audit_log (actor,actor_role,action,entity,entity_id,old_value,new_value,request_ip) VALUES (?,?,?,?,?,?,?,?)",
@@ -3311,6 +3346,18 @@ async function ensureRfqSchema() {
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_audit_entity (entity, entity_id, created_at),
     INDEX idx_audit_actor (actor, created_at)
+  ) ENGINE=InnoDB`);
+  await pool.execute(`CREATE TABLE IF NOT EXISTS rfq_messages (
+    id CHAR(36) PRIMARY KEY,
+    rfq_id CHAR(36) NOT NULL,
+    buyer_id CHAR(36) NOT NULL,
+    kind VARCHAR(30) NOT NULL DEFAULT 'message',
+    subject VARCHAR(255) NOT NULL,
+    body TEXT NULL,
+    created_by VARCHAR(120) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    INDEX idx_rfqmsg_rfq (rfq_id, created_at),
+    INDEX idx_rfqmsg_buyer (buyer_id, created_at)
   ) ENGINE=InnoDB`);
   // Backfill state + code for requirements created before Phase 1B.
   const [old] = await pool.query("SELECT id,status FROM buyer_requirements WHERE rfq_state IS NULL OR rfq_code IS NULL");
