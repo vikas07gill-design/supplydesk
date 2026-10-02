@@ -574,8 +574,25 @@ async function openBuyerRequirementAdmin(id,level){
 async function loadOrders(){
  try{const d=await api("/api/admin/orders");document.getElementById("message").textContent="";
   document.getElementById("detail").innerHTML="";
-  document.getElementById("list").innerHTML=(d.orders||[]).length?'<div class="row header"><div>PO</div><div>Buyer</div><div>Order</div><div>Status</div><div></div></div>'+d.orders.map(o=>'<div class="row"><div><b>'+esc(o.po_number)+'</b><div class="muted">'+esc(o.rfq_code||"")+'</div></div><div>'+esc(o.buyer_company||o.buyer_name||"")+'</div><div>'+esc(o.title)+'<div class="muted">'+esc(o.quantity)+' @ '+esc(o.unit_price)+' '+esc(o.currency)+(o.total_price?' = '+esc(o.total_price):'')+'</div></div><div><span class="pill">'+esc(o.statusLabel)+'</span></div><div>'+(o.allowedNext||[]).map(n=>'<button onclick="setOrderStatus(\''+esc(o.id)+'\',\''+esc(n)+'\')">'+esc(d.states[n]||n)+'</button>').join(" ")+'</div></div>').join(""):"<div class='muted'>No orders yet.</div>";
+  document.getElementById("list").innerHTML=(d.orders||[]).length?'<div class="row header"><div>PO</div><div>Buyer</div><div>Order</div><div>Status</div><div></div></div>'+d.orders.map(o=>'<div class="row"><div><b>'+esc(o.po_number)+'</b><div class="muted">'+esc(o.rfq_code||"")+'</div></div><div>'+esc(o.buyer_company||o.buyer_name||"")+'</div><div>'+esc(o.title)+'<div class="muted">'+esc(o.quantity)+' @ '+esc(o.unit_price)+' '+esc(o.currency)+(o.total_price?' = '+esc(o.total_price):'')+'</div></div><div><span class="pill">'+esc(o.statusLabel)+'</span></div><div>'+(o.allowedNext||[]).map(n=>'<button onclick="setOrderStatus(\''+esc(o.id)+'\',\''+esc(n)+'\')">'+esc(d.states[n]||n)+'</button>').join(" ")+'<button onclick="openSupplierPos(\''+esc(o.id)+'\')">Supplier POs</button></div></div>').join(""):"<div class='muted'>No orders yet.</div>";
  }catch(e){document.getElementById("message").textContent=e.message}
+}
+
+async function openSupplierPos(orderId){
+ try{const d=await api("/api/admin/orders/"+encodeURIComponent(orderId)+"/supplier-pos");
+  const rows=(d.supplierPos||[]).map(p=>'<tr><td><b>'+esc(p.po_number)+'</b></td><td>'+esc(p.trade_name||p.legal_name)+'</td><td>'+esc(p.quantity)+'</td><td>'+esc(p.unit_cost)+' '+esc(p.currency)+'</td><td>'+esc(p.statusLabel)+(p.supplier_note?'<div class="muted">'+esc(p.supplier_note)+'</div>':'')+'</td><td>'+(["issued","accepted","in_production"].includes(p.status)?'<button onclick="cancelSupplierPo(\''+esc(p.id)+'\',\''+esc(orderId)+'\')">Cancel</button>':'')+'</td></tr>').join("");
+  document.getElementById("detail").innerHTML='<h2>Supplier purchase orders</h2>'+(rows?'<table style="width:100%;font-size:13px"><tr><th>PO</th><th>Supplier</th><th>Qty</th><th>Unit cost</th><th>Status</th><th></th></tr>'+rows+'</table>':'<div class="muted">No supplier PO issued yet.</div>')+'<h3 style="margin-top:22px">Issue a purchase order</h3><div class="muted" style="margin-bottom:6px">Use the Capability ID from the RFQ matches. The supplier never sees the buyer or the buyer price.</div><div class="toolbar"><input id="spoCode" placeholder="Capability ID (SD-XXX-XXXX)"><input id="spoQty" placeholder="Quantity"><input id="spoCost" type="number" step="0.0001" min="0" placeholder="Unit cost"><select id="spoCur"><option>INR</option><option>USD</option><option>EUR</option><option>GBP</option><option>AED</option></select><input id="spoDate" type="date"></div><textarea id="spoTerms" placeholder="Terms (payment, packing, delivery)" style="min-height:50px"></textarea><div class="actions"><button class="primary" onclick="issueSupplierPo(\''+esc(orderId)+'\')">Issue PO to supplier</button></div>';
+ }catch(e){document.getElementById("message").textContent=e.message}
+}
+async function issueSupplierPo(orderId){
+ const g=x=>document.getElementById(x).value.trim();
+ if(!confirm("Issue this purchase order? The supplier will be emailed."))return;
+ try{const d=await api("/api/admin/orders/"+encodeURIComponent(orderId)+"/supplier-po",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({capabilityCode:g("spoCode"),quantity:g("spoQty"),unitCost:g("spoCost"),currency:g("spoCur"),deliveryBy:g("spoDate"),terms:g("spoTerms")})});
+  document.getElementById("message").textContent="PO "+d.poNumber+" issued.";await openSupplierPos(orderId);}catch(e){document.getElementById("message").textContent=e.message}
+}
+async function cancelSupplierPo(id,orderId){
+ const note=prompt("Reason (shown to supplier, optional):","");if(note===null)return;
+ try{await api("/api/admin/supplier-pos/"+encodeURIComponent(id)+"/cancel",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({note})});await openSupplierPos(orderId);}catch(e){document.getElementById("message").textContent=e.message}
 }
 async function setOrderStatus(id,status){
  const note=prompt("Note for the buyer (optional):","");if(note===null)return;

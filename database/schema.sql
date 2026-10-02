@@ -350,6 +350,28 @@ CREATE TABLE IF NOT EXISTS orders (
   INDEX idx_orders_status (status, created_at)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS supplier_pos (
+  id CHAR(36) PRIMARY KEY,
+  po_number VARCHAR(24) NOT NULL UNIQUE,
+  order_id CHAR(36) NOT NULL,
+  supplier_id CHAR(36) NOT NULL,
+  product_id CHAR(36) NULL,
+  title VARCHAR(255) NOT NULL,
+  quantity VARCHAR(60) NOT NULL,
+  unit_cost DECIMAL(14,4) NOT NULL,
+  currency VARCHAR(10) NOT NULL,
+  total_cost DECIMAL(16,2) NULL,
+  delivery_by DATE NULL,
+  terms TEXT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'issued',
+  supplier_note VARCHAR(500) NULL,
+  status_changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by VARCHAR(190) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_spo_supplier (supplier_id, status, created_at),
+  INDEX idx_spo_order (order_id, status)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS requirement_supplier_matches (
   id CHAR(36) PRIMARY KEY,
   requirement_id CHAR(36) NOT NULL,

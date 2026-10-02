@@ -69,3 +69,11 @@ For an existing Hostinger database, let the application startup schema check run
 - Buyer flow: RFQ moves quote_sent -> buyer_approved -> converted on accept, or -> lost on decline. Expired quotes (valid_until) cannot be accepted. `quote_sent -> costing` allows revising a quote.
 - Endpoints: `POST /api/admin/requirements/:id/buyer-quote`, `POST /api/buyer-requirements/:id/quote/respond`, `GET /api/buyer-orders`, `GET /api/admin/orders`, `PATCH /api/admin/orders/:id/status`. With `SD_HIDE_SUPPLIERS=true` the buyer's quotes endpoint returns only SupplyDesk quotes (`sdQuotes`), never raw supplier quotes.
 - Supplier cost prices (supplier quotes) are visible to Admin and Super Admin; supplier identity stays Super Admin only.
+
+## Phase 3: supplier purchase orders
+
+- `supplier_pos` (`SPO-YYYYMM-XXXX`): SupplyDesk's PO to a supplier for a confirmed buyer order. Holds only neutral order title, quantity, unit cost, delivery date and terms. The supplier never receives the buyer's identity or buyer price.
+- States (rules in `rfq.js`): issued -> accepted/declined; accepted -> in_production -> dispatched -> completed; admin can cancel before dispatch. Declining needs a reason.
+- Admin issues a PO by Capability ID (so Admin never needs supplier identity); Super Admin may also pass a supplier id. Admin sees an alias, Super Admin sees the supplier name.
+- Endpoints: `POST /api/admin/orders/:id/supplier-po`, `GET /api/admin/orders/:id/supplier-pos`, `PATCH /api/admin/supplier-pos/:id/cancel`, `GET /api/supplier-dashboard/purchase-orders`, `PATCH /api/supplier-dashboard/purchase-orders/:id/status`. Test mode (`E2E_TEST_MODE` + `x-e2e-key`) also works for supplier dashboard OTP.
+- The buyer-facing order status is still updated by SupplyDesk manually; supplier PO status is internal.
