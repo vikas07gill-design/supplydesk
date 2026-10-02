@@ -14,19 +14,6 @@ const publicPages = [
   "/supplier-dashboard.html"
 ];
 
-async function getPublishedSupplierId(request) {
-  const response = await request.get("/api/products");
-  expect(response.status()).toBe(200);
-  const body = await response.json();
-  expect(Array.isArray(body.products)).toBe(true);
-  expect(body.products.length, "At least one public product must exist").toBeGreaterThan(0);
-
-  const supplier = body.products[0]?.supplier;
-  const supplierId = supplier?.id || body.products[0]?.supplierId;
-  expect(supplierId, "Public product must expose its supplier id").toBeTruthy();
-  return supplierId;
-}
-
 test.describe("SupplyDesk production smoke tests", () => {
   test("public pages return successfully", async ({ request }) => {
     for (const path of publicPages) {
@@ -50,18 +37,16 @@ test.describe("SupplyDesk production smoke tests", () => {
     expect(Array.isArray(body.products)).toBe(true);
   });
 
-  test("public supplier APIs resolve a currently published supplier", async ({ request }) => {
-    const supplierId = await getPublishedSupplierId(request);
-
-    const supplierResponse = await request.get("/api/suppliers/" + encodeURIComponent(supplierId));
-    expect(supplierResponse.status()).toBe(200);
-    const supplierBody = await supplierResponse.json();
-    expect(supplierBody.supplier?.id).toBe(supplierId);
-
-    const productsResponse = await request.get("/api/suppliers/" + encodeURIComponent(supplierId) + "/products");
-    expect(productsResponse.status()).toBe(200);
-    const productsBody = await productsResponse.json();
-    expect(Array.isArray(productsBody.products)).toBe(true);
+  test("public supplier identity stays private", async ({ request }) => {
+    const list = await (await request.get("/api/suppliers")).json();
+    expect(list.suppliers).toEqual([]);
+    expect((await request.get("/api/suppliers/any-supplier")).status()).toBe(404);
+    const body = await (await request.get("/api/products")).json();
+    for (const product of body.products) {
+      expect(product.supplierId, "product must not expose supplier id").toBeUndefined();
+      expect(product.supplierName, "product must not expose supplier name").toBeUndefined();
+      expect(product.capacity, "product exposes capacity block").toBeTruthy();
+    }
   });
 
   test("homepage renders without a browser crash", async ({ page }) => {
@@ -72,12 +57,11 @@ test.describe("SupplyDesk production smoke tests", () => {
     expect(errors, "Uncaught browser errors").toEqual([]);
   });
 
-  test("supplier profile page renders without a browser crash", async ({ page, request }) => {
-    const supplierId = await getPublishedSupplierId(request);
+  test("supplier profile page shows the private notice", async ({ page }) => {
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
-    await page.goto("/supplier.html?id=" + encodeURIComponent(supplierId), { waitUntil: "domcontentloaded" });
-    await expect(page.locator("body")).toContainText(/Supplier/i);
+    await page.goto("/supplier.html?id=anything", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("body")).toContainText(/Supplier profiles are private/i);
     expect(errors, "Uncaught browser errors").toEqual([]);
   });
 
@@ -85,7 +69,7 @@ test.describe("SupplyDesk production smoke tests", () => {
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
     await page.goto("/product.html", { waitUntil: "domcontentloaded" });
-    await expect(page.locator("body")).toContainText(/Connect|Enquiry|Product/i);
+    await expect(page.locator("body")).toContainText(/Request Quote|Product/i);
     expect(errors, "Uncaught browser errors").toEqual([]);
   });
 });

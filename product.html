@@ -25,11 +25,17 @@ nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!i
 .connect-box{display:none;position:fixed;inset:0;z-index:20;background:rgba(3,18,31,.72);backdrop-filter:blur(8px);padding:20px;align-items:center;justify-content:center}
 .connect-box.open{display:flex}.connect-card{width:min(560px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:22px;padding:24px;box-shadow:0 30px 80px rgba(0,0,0,.28)}.connect-card h2{margin:0 0 6px;font-size:25px}.connect-card p{color:var(--muted);font-size:13px}.connect-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.connect-grid .full{grid-column:1/-1}.connect-card label{display:block;font-size:12px;font-weight:800;margin:10px 0 6px}.connect-card input,.connect-card textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font:inherit}.connect-card textarea{min-height:90px;resize:vertical}.connect-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}.otp-row{display:flex;gap:8px;align-items:end}.otp-row>div{flex:1}.otp-btn{white-space:nowrap}.verified-mark{display:none;color:#087f6f;font-size:12px;font-weight:900;margin-top:5px}.verified-mark.show{display:block}
 .connect-status{margin-top:12px;font-size:13px}.connect-status.success{color:#087f6f}.connect-status.error{color:#b42318}@media(max-width:600px){.connect-grid{grid-template-columns:1fr}.connect-grid .full{grid-column:auto}}
-</style><link rel="stylesheet" href="assets/depth.css"><script src="assets/depth.js" defer></script></head><body><nav><div class="wrap nav"><a class="brand-logo" href="index.html" aria-label="SupplyDesk home"><img src="assets/supplydesk-logo-dark.svg" alt="SupplyDesk" style="width:180px;height:auto;display:block"></a><a class="btn" href="search.html">← Back to Search</a></div></nav><main class="wrap"><div class="back">Product listing</div><section class="hero"><div class="visual" id="visual"><div class="shape"></div><div id="gallery" class="gallery"></div></div><div><div class="eyebrow">Product</div><h1 id="name">Plastic Storage Container</h1><div class="meta" id="meta">📍 Ahmedabad, India · Domestic</div><p class="desc" id="desc">Example product listing. The live version will connect the product to its supplier and full product information.</p><div class="tags"><span class="tag">Plastic</span><span class="tag">Storage</span><span class="tag">Household</span></div><div class="actions"><button class="btn primary" id="connectBtn" type="button" style="display:none" onclick="openConnect()">Connect Now →</button><a class="btn" id="supplier" href="supplier.html?id=india-growth&product=Plastic%20Storage%20Container">View Supplier</a><a class="btn" href="search.html">More Products</a></div></div></section><section class="info"><h2>About this listing</h2><p>SupplyDesk is currently an information and connection platform. Product specifications, availability, pricing and supplier details will be connected to the database in the next stage.</p></section></main>
+.capcode{display:inline-block;margin:6px 0 4px;padding:5px 11px;border-radius:99px;background:#e8f0ff;color:#174aa6;font-weight:800;font-size:12px;letter-spacing:.04em}
+.capacity .capgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:12px}
+.capitem{background:#f5f9fc;border:1px solid #dbe7eb;border-radius:14px;padding:14px}.capitem span{display:block;font-size:12px;color:#5b707a;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}.capitem b{font-size:16px;color:#0d2430}
+.capnote{margin:14px 0 0;color:#5b707a;font-size:13px}
+.pill.cap-available{background:#d9f5e3;color:#0c5a2a}.pill.cap-limited{background:#fff1cc;color:#8a5200}.pill.cap-full{background:#ffe1e1;color:#8a1c1c}.pill.cap-unknown{background:#e9eef2;color:#46606b}
+.capitem .pill{display:inline-block;padding:4px 11px;border-radius:99px;font-size:13px;font-weight:800}
+</style><link rel="stylesheet" href="assets/depth.css"><script src="assets/depth.js" defer></script></head><body><nav><div class="wrap nav"><a class="brand-logo" href="index.html" aria-label="SupplyDesk home"><img src="assets/supplydesk-logo-dark.svg" alt="SupplyDesk" style="width:180px;height:auto;display:block"></a><a class="btn" href="search.html">← Back to Search</a></div></nav><main class="wrap"><div class="back">Product listing</div><section class="hero"><div class="visual" id="visual"><div class="shape"></div><div id="gallery" class="gallery"></div></div><div><div class="eyebrow">Product</div><h1 id="name">Loading product…</h1><div class="meta" id="meta"></div><p class="desc" id="desc"></p><div class="tags"></div><div class="capcode" id="capCode"></div><div class="actions"><button class="btn primary" id="connectBtn" type="button" style="display:none" onclick="openConnect()">Request Quote →</button><a class="btn" href="search.html">More Products</a></div></div></section><section class="info capacity" id="capacityPanel" style="display:none"><h2>Capacity &amp; availability</h2><div class="capgrid" id="capGrid"></div><p class="capnote" id="capNote"></p></section><section class="info"><h2>How it works</h2><p>Send your quantity and requirement to SupplyDesk. We check it against current manufacturing capacity and reply in your Buyer Dashboard: accepted, partially accepted (with the quantity we can supply) or not available, with remarks.</p></section></main>
 <div class="connect-box" id="connectBox" role="dialog" aria-modal="true" aria-labelledby="connectTitle">
   <div class="connect-card">
-    <h2 id="connectTitle">Connect with Supplier</h2>
-    <p id="connectIntro">Send your requirement directly to the supplier.</p>
+    <h2 id="connectTitle">Request a Quote from SupplyDesk</h2>
+    <p id="connectIntro">Tell us the quantity you need. SupplyDesk will check current capacity and reply.</p>
     <form id="connectForm">
       <div class="connect-grid">
         <div><label for="connectName">Name *</label><input id="connectName" required maxlength="180" autocomplete="name"></div>
@@ -37,11 +43,11 @@ nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!i
         <div><label for="connectCompany">Company</label><input id="connectCompany" maxlength="180" autocomplete="organization"></div>
         <div><label for="connectCountry">Country</label><input id="connectCountry" maxlength="120" autocomplete="country-name"></div>
         <div><label for="connectPhone">Phone</label><input id="connectPhone" maxlength="80" autocomplete="tel"></div>
-        <div><label for="connectQuantity">Quantity / Requirement</label><input id="connectQuantity" maxlength="120" placeholder="e.g. 5,000 pcs / monthly"></div>
-        <div class="full"><label for="connectMessage">Message</label><textarea id="connectMessage" maxlength="2000" placeholder="Tell the supplier what you need..."></textarea></div>
+        <div><label for="connectQuantity">Quantity needed *</label><input id="connectQuantity" required maxlength="120" placeholder="e.g. 5,000 pcs / monthly"></div>
+        <div class="full"><label for="connectMessage">Message</label><textarea id="connectMessage" maxlength="2000" placeholder="Specification, delivery location, required date..."></textarea></div>
       </div>
       <div class="connect-status" id="connectStatus"></div>
-      <div class="connect-actions"><a class="btn" id="buyerDashboardLink" href="/buyer-dashboard.html" style="display:none">Buyer Dashboard →</a><button class="btn" type="button" onclick="closeConnect()">Cancel</button><button class="btn primary" id="connectSubmit" type="submit">Send Enquiry →</button></div>
+      <div class="connect-actions"><a class="btn" id="buyerDashboardLink" href="/buyer-dashboard.html" style="display:none">Buyer Dashboard →</a><button class="btn" type="button" onclick="closeConnect()">Cancel</button><button class="btn primary" id="connectSubmit" type="submit">Send Request →</button></div>
     </form>
   </div>
 </div>
@@ -52,6 +58,23 @@ function escapeHtml(value) {
   return String(value == null ? "" : value).replace(/[&<>"']/g, function(ch) {
     return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch];
   });
+}
+function renderCapacity(product) {
+  var c = product.capacity || {};
+  var labels = {available:"Available", limited:"Limited capacity", full:"Fully booked", unknown:"Being reconfirmed"};
+  var rows = [
+    ["Monthly capacity", c.band ? c.band + (c.unit ? " " + c.unit : "") : "Shared on request"],
+    ["Availability", '<span class="pill cap-' + escapeHtml(c.status || "unknown") + '">' + escapeHtml(labels[c.status] || labels.unknown) + '</span>'],
+    ["Lead time", c.leadTimeDays ? c.leadTimeDays + " days" : "Confirmed on quote"],
+    ["Minimum order (MOQ)", product.moq ? escapeHtml(product.moq) + (product.unit ? " " + escapeHtml(product.unit) : "") : "Confirmed on quote"],
+    ["Manufacturing location", escapeHtml([c.region, product.country].filter(Boolean).join(", ") || "-")]
+  ];
+  document.getElementById("capGrid").innerHTML = rows.map(function(r) {
+    return '<div class="capitem"><span>' + escapeHtml(r[0]) + '</span><b>' + (r[0] === "Availability" ? r[1] : (r[0] === "Minimum order (MOQ)" || r[0] === "Manufacturing location" ? r[1] : escapeHtml(r[1]))) + '</b></div>';
+  }).join("");
+  var note = c.stale ? "Capacity is being reconfirmed by SupplyDesk. Send your request and we will confirm the exact availability." : "Capacity is shown as a range and reconfirmed by SupplyDesk for every quote.";
+  document.getElementById("capNote").textContent = note;
+  document.getElementById("capacityPanel").style.display = "block";
 }
 async function loadLiveProduct() {
   if (!liveId) {
@@ -72,7 +95,9 @@ async function loadLiveProduct() {
     liveProduct = product;
     document.title = product.name + " | SupplyDesk";
     document.getElementById("name").textContent = product.name;
-    document.getElementById("meta").textContent = "📍 " + (product.city || "") + ", " + (product.country || "") + " · " + (product.market_scope || "");
+    document.getElementById("meta").textContent = "📍 " + [product.region, product.city, product.country].filter(Boolean).join(", ") + (product.market_scope ? " · " + product.market_scope : "");
+    if (product.capabilityCode) document.getElementById("capCode").textContent = "Capability ID: " + product.capabilityCode;
+    renderCapacity(product);
     document.getElementById("desc").textContent = product.description || ((product.category || "") + " · " + (product.subcategory || ""));
     const gallery = document.getElementById("gallery");
     if ((product.images || []).length) {
@@ -85,10 +110,8 @@ async function loadLiveProduct() {
       .filter(Boolean)
       .map(function(tag) { return '<span class="tag">' + escapeHtml(tag) + '</span>'; })
       .join("");
-    document.getElementById("supplier").href =
-      "supplier.html?id=" + encodeURIComponent(product.supplierId) + "&product=" + encodeURIComponent(product.name);
     document.getElementById("connectIntro").textContent =
-      "Send your requirement for " + product.name + " directly to the verified supplier.";
+      "Tell us the quantity you need for " + product.name + ". SupplyDesk will check current capacity and reply in your Buyer Dashboard.";
     document.getElementById("connectBtn").style.display = "inline-flex";
   } catch (error) {
     console.error("Product load failed:", error);
@@ -177,7 +200,7 @@ document.getElementById("connectForm").addEventListener("submit",async e=>{
   btn.disabled=true;btn.textContent="Sending...";
   status.className="connect-status";status.textContent="";
   const body={
-    supplierId:liveProduct.supplierId,
+    supplierId:liveProduct.supplierId||undefined,
     productId:liveProduct.id,
     productName:liveProduct.name,
     customerName:document.getElementById("connectName").value.trim(),

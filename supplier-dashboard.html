@@ -281,6 +281,21 @@ header{background:rgba(5,20,35,.92);color:#fff;border-bottom:1px solid rgba(255,
     </section>
   </div>
 </main>
+<div id="capModal" class="hidden" style="position:fixed;inset:0;background:rgba(8,32,42,.42);z-index:60;padding:20px;overflow:auto">
+<div class="login" style="max-width:520px;margin:10vh auto">
+<div class="card-head"><div><div class="eyebrow">Capacity</div><h2 id="capTitle">Update capacity</h2></div><button class="btn" onclick="closeCap()">Close</button></div>
+<form id="capForm"><input type="hidden" id="capProductId">
+<div class="profile-grid">
+<div class="field"><label>Monthly capacity</label><input id="capMonthly" inputmode="numeric"></div>
+<div class="field"><label>Available capacity now</label><input id="capAvailable" inputmode="numeric"></div>
+<div class="field"><label>Capacity unit</label><select id="capUnit"><option value="">Select</option><option>pcs</option><option>kg</option><option>tons</option><option>meters</option><option>sets</option><option>units</option><option>liters</option><option>boxes</option><option>pairs</option><option>sq.m</option></select></div>
+<div class="field"><label>Lead time (days)</label><input id="capLead" inputmode="numeric"></div>
+<div class="field full"><label>Manufacturing region / state</label><input id="capRegion"></div>
+</div>
+<div id="capStatusMsg" class="notice hidden"></div>
+<div class="actions"><button class="btn primary" type="submit" id="capBtn">Save capacity</button></div>
+<div class="image-note">Capacity updates go live immediately and do not need re-approval. Keep it current: listings not updated for 45 days show as "being reconfirmed".</div>
+</form></div></div>
 <div id="productModal" class="hidden" style="position:fixed;inset:0;background:rgba(8,32,42,.42);z-index:50;padding:20px;overflow:auto">
 <div class="login" style="max-width:650px;margin:7vh auto">
 <div class="card-head"><div><div class="eyebrow">Product listing</div><h2 id="productTitle">Add Product</h2></div><button class="btn" onclick="closeProduct()">Close</button></div>
@@ -292,6 +307,11 @@ header{background:rgba(5,20,35,.92);color:#fff;border-bottom:1px solid rgba(255,
 <div class="field"><label>Sub-category *</label><select id="productSubcategory" required></select></div>
 <div class="field"><label>MOQ</label><input id="productMoq" placeholder="Example: 500 pcs"></div>
 <div class="field"><label>Unit</label><input id="productUnit" placeholder="pcs / kg / ton / set"></div>
+<div class="field"><label>Monthly capacity</label><input id="productMonthlyCap" inputmode="numeric" placeholder="Example: 500000"></div>
+<div class="field"><label>Available capacity now</label><input id="productAvailableCap" inputmode="numeric" placeholder="Example: 180000"></div>
+<div class="field"><label>Capacity unit</label><select id="productCapUnit"><option value="">Select</option><option>pcs</option><option>kg</option><option>tons</option><option>meters</option><option>sets</option><option>units</option><option>liters</option><option>boxes</option><option>pairs</option><option>sq.m</option></select></div>
+<div class="field"><label>Lead time (days)</label><input id="productLeadTime" inputmode="numeric" placeholder="Example: 25"></div>
+<div class="field full"><label>Manufacturing region / state</label><input id="productRegion" placeholder="Example: Jiangsu, Gujarat"><div class="image-note">Buyers see capacity as a range plus your region. Your company name and contact details are never shown to buyers.</div></div>
 <div class="field full"><label>Market</label><select id="productMarket"><option>Both</option><option>Domestic</option><option>International</option></select></div>
 <div class="field full"><label>Description</label><textarea id="productDescription" placeholder="Tell buyers what you supply, specifications, capacity or key details."></textarea></div>
 <div class="field full"><label>Product images</label><input id="productImages" type="file" accept="image/jpeg,image/png,image/webp" multiple><div class="image-note">Up to 6 images, max 5 MB each. Images are reviewed before becoming public.</div><div id="imagePreview" class="product-images"></div></div>
@@ -448,12 +468,24 @@ async function submitBusinessProfile(ev){
   const profileDetails={about:document.getElementById("detailAbout").value.trim(),capabilities:document.getElementById("detailCapabilities").value.trim(),industries:document.getElementById("detailIndustries").value.trim(),markets:document.getElementById("detailMarkets").value.trim(),monthlyCapacity:document.getElementById("detailCapacity").value.trim(),leadTime:document.getElementById("detailLeadTime").value.trim(),paymentTerms:document.getElementById("detailPayment").value.trim(),incoterms:document.getElementById("detailIncoterms").value.trim(),shippingModes:document.getElementById("detailShipping").value.trim(),certifications:document.getElementById("detailCertifications").value.trim(),oem:document.getElementById("detailOem").value,customManufacturing:document.getElementById("detailCustom").value};
   btn.disabled=true;try{const d=await api("/api/supplier-dashboard/profile-update",{method:"POST",body:JSON.stringify({profileDetails}),headers:{"Content-Type":"application/json"}});s.textContent=d.message;s.className="notice success";s.classList.remove("hidden");renderBusinessSummary(dashboardData.supplier,profileDetails);setTimeout(()=>toggleBusinessEditor(false),700)}catch(e){s.textContent=e.message;s.className="notice error";s.classList.remove("hidden")}finally{btn.disabled=false}
 }
+function capLine(p){
+  const fmt=n=>n==null?"-":Number(n).toLocaleString("en-IN");
+  const age=p.capacity_updated_at?Math.floor((Date.now()-new Date(p.capacity_updated_at).getTime())/86400000):null;
+  const stale=age==null||age>45;
+  return '<div class="product-meta"><b>Capability ID:</b> '+esc(p.capability_code||"-")+' · <b>Monthly:</b> '+fmt(p.monthly_capacity)+' '+esc(p.capacity_unit||"")+' · <b>Available:</b> '+fmt(p.available_capacity)+' · <b>Lead time:</b> '+(p.lead_time_days?esc(p.lead_time_days)+" days":"-")+(stale?' · <span style="color:#b45309;font-weight:700">Capacity needs updating</span>':'')+'</div>';
+}
+function editCap(id){const p=findProduct(id);if(!p)return;
+  document.getElementById("capProductId").value=id;document.getElementById("capTitle").textContent="Capacity: "+p.product_name;
+  document.getElementById("capMonthly").value=p.monthly_capacity??"";document.getElementById("capAvailable").value=p.available_capacity??"";
+  document.getElementById("capUnit").value=p.capacity_unit||"";document.getElementById("capLead").value=p.lead_time_days??"";document.getElementById("capRegion").value=p.origin_region||"";
+  document.getElementById("capStatusMsg").classList.add("hidden");document.getElementById("capModal").classList.remove("hidden");}
+function closeCap(){document.getElementById("capModal").classList.add("hidden")}
 function renderProducts(items){
   const el=document.getElementById("products");
   if(!items.length){el.innerHTML='<div class="empty">No products yet. Add your first product listing.</div>';return}
   el.innerHTML=items.map(p=>{
     const imgs=(p.images||[]).filter(x=>x.status!=="archived").map(x=>'<img data-product-image="'+esc(x.id)+'" data-product-id="'+esc(p.id)+'" alt="'+esc(p.product_name)+'">').join("");
-    return '<div class="product"><div class="product-head"><div><div class="product-title">'+esc(p.product_name)+'</div><div class="product-meta">'+esc(p.category)+' → '+esc(p.subcategory)+' · '+esc(p.market_scope)+'</div></div><span class="badge '+esc(p.status)+'">'+esc(p.status)+'</span></div><div class="product-meta">'+esc(p.description||"No description added.")+(p.moq?' · MOQ: '+esc(p.moq):"")+(p.unit?' · Unit: '+esc(p.unit):"")+'</div>'+(imgs?'<div class="product-images">'+imgs+'</div>':"")+(p.admin_notes?'<div class="notice">'+esc(p.admin_notes)+'</div>':"")+'<div class="product-actions"><button class="btn" onclick="editProduct(\''+p.id+'\')">Edit</button><button class="btn" onclick="copyProduct(\''+p.id+'\')">Copy</button><button class="btn danger" onclick="archiveProduct(\''+p.id+'\')">Remove</button></div></div>';
+    return '<div class="product"><div class="product-head"><div><div class="product-title">'+esc(p.product_name)+'</div><div class="product-meta">'+esc(p.category)+' → '+esc(p.subcategory)+' · '+esc(p.market_scope)+'</div></div><span class="badge '+esc(p.status)+'">'+esc(p.status)+'</span></div><div class="product-meta">'+esc(p.description||"No description added.")+(p.moq?' · MOQ: '+esc(p.moq):"")+(p.unit?' · Unit: '+esc(p.unit):"")+'</div>'+capLine(p)+(imgs?'<div class="product-images">'+imgs+'</div>':"")+(p.admin_notes?'<div class="notice">'+esc(p.admin_notes)+'</div>':"")+'<div class="product-actions"><button class="btn" onclick="editCap(\''+p.id+'\')">Update capacity</button><button class="btn" onclick="editProduct(\''+p.id+'\')">Edit</button><button class="btn" onclick="copyProduct(\''+p.id+'\')">Copy</button><button class="btn danger" onclick="archiveProduct(\''+p.id+'\')">Remove</button></div></div>';
   }).join("");
   hydrateDashboardImages();
 }
@@ -475,7 +507,7 @@ async function updateConnectionStatus(id,status){
 }
 function renderConnections(items){
   const el=document.getElementById("connections");
-  if(!items.length){el.innerHTML='<div class="empty">No connection requests yet.</div>';return}
+  if(!items.length){el.innerHTML='<div class="empty">Buyer requests are handled by SupplyDesk. We will contact you when an order matches your capacity.</div>';return}
   el.innerHTML=items.map(c=>`
     <div class="connection">
       <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
@@ -556,6 +588,11 @@ function openProduct(product,mode){
   document.getElementById("productMoq").value=product?.moq||"";
   document.getElementById("productUnit").value=product?.unit||"";
   document.getElementById("productMarket").value=product?.market_scope||"Both";
+  document.getElementById("productMonthlyCap").value=product?.monthly_capacity??"";
+  document.getElementById("productAvailableCap").value=product?.available_capacity??"";
+  document.getElementById("productCapUnit").value=product?.capacity_unit||"";
+  document.getElementById("productLeadTime").value=product?.lead_time_days??"";
+  document.getElementById("productRegion").value=product?.origin_region||"";
   document.getElementById("productDescription").value=product?.description||"";
   document.getElementById("productImages").value="";
   document.getElementById("imagePreview").innerHTML=(product?.images||[]).filter(x=>x.status!=="archived").map(x=>'<img data-modal-image="'+esc(x.id)+'" data-product-id="'+esc(product.id)+'" alt="">').join("");
@@ -669,7 +706,10 @@ document.getElementById("verifyOtpBtn").onclick=async()=>{
 document.getElementById("productForm").onsubmit=async e=>{
   e.preventDefault();const id=document.getElementById("productId").value;const btn=document.getElementById("productBtn"),s=document.getElementById("productStatus");btn.disabled=true;btn.textContent="Saving...";
   const body={product_name:document.getElementById("productName").value.trim(),category:document.getElementById("productCategory").value,subcategory:document.getElementById("productSubcategory").value,moq:document.getElementById("productMoq").value.trim(),unit:document.getElementById("productUnit").value.trim(),market_scope:document.getElementById("productMarket").value,description:document.getElementById("productDescription").value.trim()};
+  const capBody={monthly_capacity:document.getElementById("productMonthlyCap").value.trim(),available_capacity:document.getElementById("productAvailableCap").value.trim(),capacity_unit:document.getElementById("productCapUnit").value,lead_time_days:document.getElementById("productLeadTime").value.trim(),origin_region:document.getElementById("productRegion").value.trim()};
   try{
+    if(id){ if(capBody.monthly_capacity||capBody.available_capacity||capBody.lead_time_days) await api("/api/supplier-dashboard/products/"+id+"/capacity",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(capBody)}); }
+    else Object.assign(body,capBody);
     const d=await api(id?"/api/supplier-dashboard/products/"+id:"/api/supplier-dashboard/products",{method:id?"PATCH":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const productId=id||d.id;
     const files=document.getElementById("productImages").files;
@@ -682,6 +722,13 @@ document.getElementById("productForm").onsubmit=async e=>{
   }catch(e){s.textContent=e.message;s.className="notice error";s.classList.remove("hidden")}finally{btn.disabled=false;btn.textContent=id?"Submit Changes for Review":"Submit for Review"}
 };
 
+document.getElementById("capForm").onsubmit=async e=>{
+  e.preventDefault();const btn=document.getElementById("capBtn"),m=document.getElementById("capStatusMsg");btn.disabled=true;
+  const body={monthly_capacity:document.getElementById("capMonthly").value.trim(),available_capacity:document.getElementById("capAvailable").value.trim(),capacity_unit:document.getElementById("capUnit").value,lead_time_days:document.getElementById("capLead").value.trim(),origin_region:document.getElementById("capRegion").value.trim()};
+  try{const d=await api("/api/supplier-dashboard/products/"+document.getElementById("capProductId").value+"/capacity",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    m.textContent=d.message;m.className="notice success";setTimeout(async()=>{closeCap();await loadDashboard()},700);
+  }catch(err){m.textContent=err.message;m.className="notice error"}finally{btn.disabled=false}
+};
 document.getElementById("profileForm").onsubmit=async e=>{
   e.preventDefault();const btn=document.getElementById("profileBtn");btn.disabled=true;btn.textContent="Submitting...";
   const body={};new FormData(e.currentTarget).forEach((v,k)=>body[k]=String(v).trim());
