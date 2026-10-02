@@ -115,4 +115,26 @@ const _code = (prefix) => {
 const newQuoteNo = () => _code("SQ");
 const newPoNumber = () => _code("PO");
 
-module.exports = { STATES, TRANSITIONS, LEGACY_STATUS_TO_STATE, isState, canTransition, isTerminal, parseQuantity, scoreCapability, newRfqCode, ORDER_STATES, ORDER_TRANSITIONS, isOrderState, canOrderTransition, newQuoteNo, newPoNumber };
+
+// ---- Supplier purchase orders (Phase 3) ----
+const PO_STATES = {
+  issued:        { label: "Issued" },
+  accepted:      { label: "Accepted by supplier" },
+  declined:      { label: "Declined by supplier" },
+  in_production: { label: "In production" },
+  dispatched:    { label: "Dispatched" },
+  completed:     { label: "Completed" },
+  cancelled:     { label: "Cancelled" }
+};
+const PO_TRANSITIONS = {
+  issued: ["accepted", "declined", "cancelled"],
+  accepted: ["in_production", "cancelled"],
+  in_production: ["dispatched", "cancelled"],
+  dispatched: ["completed"],
+  completed: [], declined: [], cancelled: []
+};
+const isPoState = (s) => Object.prototype.hasOwnProperty.call(PO_STATES, s);
+const canPoTransition = (from, to) => from === to || (PO_TRANSITIONS[from] || []).includes(to);
+const newSupplierPoNumber = () => _code("SPO");
+
+module.exports = { STATES, TRANSITIONS, LEGACY_STATUS_TO_STATE, isState, canTransition, isTerminal, parseQuantity, scoreCapability, newRfqCode, ORDER_STATES, ORDER_TRANSITIONS, isOrderState, canOrderTransition, newQuoteNo, newPoNumber, PO_STATES, PO_TRANSITIONS, isPoState, canPoTransition, newSupplierPoNumber };

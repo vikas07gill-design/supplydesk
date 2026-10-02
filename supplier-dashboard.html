@@ -109,7 +109,7 @@ header{background:rgba(5,20,35,.92);color:#fff;border-bottom:1px solid rgba(255,
       <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
       <button class="tab-btn" data-tab="business" onclick="switchTab('business')">Business Profile</button>
       <button class="tab-btn" data-tab="products" onclick="switchTab('products')">My Products</button>
-      <button class="tab-btn" data-tab="requests" onclick="switchTab('requests')">Customer Requests</button><button class="tab-btn" data-tab="requirements" onclick="switchTab('requirements')">Buyer Requirements</button>
+      <button class="tab-btn" data-tab="requests" onclick="switchTab('requests')">Customer Requests</button><button class="tab-btn" data-tab="requirements" onclick="switchTab('requirements')">Buyer Requirements</button><button class="tab-btn" data-tab="purchase-orders" onclick="switchTab('purchase-orders')">Purchase Orders</button>
       <button class="tab-btn" data-tab="company" onclick="switchTab('company')">Company Details</button>
       <button class="tab-btn" data-tab="documents" onclick="switchTab('documents')">Documents</button>
     </div>
@@ -226,6 +226,13 @@ header{background:rgba(5,20,35,.92);color:#fff;border-bottom:1px solid rgba(255,
   <div class="card">
     <div class="section-toolbar"><div><div class="kicker">New sourcing opportunities</div><h2 class="section-title">Buyer Requirements</h2><p class="section-subtitle">See requirements matched to your category and send a quotation directly to the buyer. Buyer contact details stay private until the buyer chooses to connect.</p></div><button class="btn" onclick="loadRequirements()">Refresh</button></div>
     <div id="requirementsList"><div class="empty">Loading buyer requirements...</div></div>
+  </div>
+</section>
+
+<section id="tab-purchase-orders" class="tab-panel">
+  <div class="card">
+    <div class="section-toolbar"><div><div class="kicker">From SupplyDesk</div><h2 class="section-title">Purchase Orders</h2><p class="section-subtitle">Orders SupplyDesk has placed with you. Accept or decline, then keep the status updated through production and dispatch.</p></div></div>
+    <div id="poList"><div class="empty">Loading purchase orders...</div></div>
   </div>
 </section>
 
@@ -528,7 +535,23 @@ function switchTab(tab){
   document.querySelectorAll(".tab-panel").forEach(p=>p.classList.toggle("active",p.id==="tab-"+tab));
   if(history.replaceState)history.replaceState({},document.title,"supplier-dashboard.html#"+tab);
   if(tab==="requirements")loadRequirements();
+  if(tab==="purchase-orders")loadPurchaseOrders();
   window.scrollTo({top:0,behavior:"smooth"});
+}
+
+async function loadPurchaseOrders(){
+  const el=document.getElementById("poList"); if(!el)return;
+  try{
+    const d=await api("/api/supplier-dashboard/purchase-orders"); const list=d.purchaseOrders||[];
+    if(!list.length){el.innerHTML='<div class="empty">No purchase orders yet.</div>';return;}
+    const label={accepted:"Accept",declined:"Decline",in_production:"Start production",dispatched:"Mark dispatched",completed:"Mark completed"};
+    el.innerHTML=list.map(p=>'<div style="border:1px solid var(--line);border-radius:13px;padding:14px;margin-top:10px"><div style="display:flex;justify-content:space-between;gap:10px"><strong>'+esc(p.po_number)+' · '+esc(p.title)+'</strong><span class="pill">'+esc(p.statusLabel)+'</span></div><div style="font-size:13px;margin-top:6px">Quantity: <b>'+esc(p.quantity)+'</b> · Unit cost: <b>'+esc(p.unit_cost)+' '+esc(p.currency)+'</b>'+(p.total_cost?' · Total: <b>'+esc(p.total_cost)+' '+esc(p.currency)+'</b>':'')+(p.delivery_by?' · Deliver by '+esc(String(p.delivery_by).slice(0,10)):'')+'</div>'+(p.terms?'<div style="font-size:12px;color:var(--muted);margin-top:4px">'+esc(p.terms)+'</div>':'')+(p.supplier_note?'<div style="font-size:12px;margin-top:4px">Your note: '+esc(p.supplier_note)+'</div>':'')+'<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'+(p.allowedNext||[]).map(n=>'<button class="btn '+(n==="declined"?"":"primary")+'" onclick="poStatus(\''+esc(p.id)+'\',\''+n+'\')">'+esc(label[n]||n)+'</button>').join("")+'</div></div>').join("");
+  }catch(e){el.innerHTML='<div class="empty">'+esc(e.message||"Could not load purchase orders.")+'</div>';}
+}
+async function poStatus(id,status){
+  let note="";
+  if(status==="declined"){note=prompt("Reason for declining (required):","");if(!note)return;}
+  try{await api("/api/supplier-dashboard/purchase-orders/"+encodeURIComponent(id)+"/status",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,note})});await loadPurchaseOrders();}catch(e){alert(e.message);}
 }
 let requirementCache=[];
 async function loadRequirements(){

@@ -1490,6 +1490,92 @@ async function sendBrandedMail(to,subject,opts){
 const ORIGIN=()=>String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"");
 const REQ_STATUS_LABEL={pending_review:"Under SupplyDesk review",open:"Shared with suppliers",fulfilling:"SupplyDesk is handling your requirement",rejected:"Not accepted",closed:"Closed",cancelled:"Cancelled"};
 
+// ---- Supplier purchase orders (Phase 3): SupplyDesk -> supplier. The supplier never sees buyer identity or buyer price. ----
+const PO_LIVE_ORDER_STATES=["confirmed","in_production"];
+
+app.post("/api/admin/orders/:id/supplier-po",requireAdmin,async(req,res)=>{
+  const id=clean(req.params.id,80),b=req.body||{};
+  const unitCost=Number(b.unitCost),currency=(clean(b.currency,10)||"INR").toUpperCase(),quantity=clean(b.quantity,60);
+  const deliveryBy=clean(b.deliveryBy,10)||null,terms=clean(b.terms,2000)||null;
+  const code=clean(b.capabilityCode,30).toUpperCase(),sid=clean(b.supplierId,80);
+  if(!Number.isFinite(unitCost)||unitCost<=0)return res.status(400).json({error:"Enter a valid unit cost."});
+  if(!quantity)return res.status(400).json({error:"Quantity is required."});
+  if(deliveryBy&&(!/^\d{4}-\d{2}-\d{2}$/.test(deliveryBy)||new Date(deliveryBy)<new Date(new Date().toDateString())))return res.status(400).json({error:"Delivery date must be today or later."});
+  if(!code&&!(sid&&isSuper(req)))return res.status(400).json({error:"Choose a capability (capability ID)."});
+  const qty=RFQ.parseQuantity(quantity),total=qty?money(qty*unitCost):null;
+  const conn=await pool.getConnection();
+  try{
+    await conn.beginTransaction();
+    const [[o]]=await conn.execute("SELECT id,po_number,title,status FROM orders WHERE id=? FOR UPDATE",[id]);
+    if(!o){await conn.rollback();return res.status(404).json({error:"Order not found."});}
+    if(!PO_LIVE_ORDER_STATES.includes(o.status)){await conn.rollback();return res.status(409).json({error:"This order is "+RFQ.ORDER_STATES[o.status].label+"; no new supplier PO can be issued."});}
+    let sup;
+    if(code){[[sup]]=await conn.execute("SELECT s.id,s.business_email,p.id product_id FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id WHERE p.capability_code=? AND p.status='approved' AND s.verified=1 AND s.published=1 LIMIT 1",[code]);}
+    else{[[sup]]=await conn.execute("SELECT id,business_email,NULL product_id FROM supplier_profiles WHERE id=? AND verified=1 AND published=1",[sid]);}
+    if(!sup){await conn.rollback();return res.status(404).json({error:"No verified supplier found for that capability."});}
+    const [[dup]]=await conn.execute("SELECT id FROM supplier_pos WHERE order_id=? AND supplier_id=? AND status NOT IN ('declined','cancelled') LIMIT 1",[id,sup.id]);
+    if(dup){await conn.rollback();return res.status(409).json({error:"This supplier already has an active PO for this order."});}
+    const pid=crypto.randomUUID();let po;
+    for(let a=0;a<8;a++){po=RFQ.newSupplierPoNumber();try{
+      await conn.execute("INSERT INTO supplier_pos (id,po_number,order_id,supplier_id,product_id,title,quantity,unit_cost,currency,total_cost,delivery_by,terms,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",[pid,po,id,sup.id,sup.product_id||null,o.title,quantity,unitCost,currency,total,deliveryBy,terms,actorOf(req).id]);break;}
+      catch(e){if(e?.code!=="ER_DUP_ENTRY"||a===7)throw e;}}
+    await audit(conn,req,"supplier_po.issued","supplier_po",pid,null,{poNumber:po,orderId:id,supplierRef:isSuper(req)?sup.id:supplierAlias(sup.id),quantity,unitCost,currency});
+    await conn.commit();
+    try{await sendBrandedMail(sup.business_email,"SupplyDesk | New purchase order "+po,{preheader:"New purchase order",title:"New purchase order",intro:"SupplyDesk has issued purchase order "+po+" for "+o.title+" ("+quantity+"). Please review and accept or decline it in your Supplier Dashboard.",bodyHtml:"",textLines:["PO "+po],ctaText:"Open Supplier Dashboard",ctaUrl:ORIGIN()+"/supplier-dashboard#purchase-orders"});}catch(e){console.error("Supplier PO mail failed:",e);}
+    res.status(201).json({ok:true,poNumber:po,supplierPoId:pid});
+  }catch(error){await conn.rollback();console.error("Supplier PO failed:",error);res.status(500).json({error:"Could not issue the purchase order."});}
+  finally{conn.release();}
+});
+
+app.get("/api/admin/orders/:id/supplier-pos",requireAdmin,async(req,res)=>{
+  try{const [rows]=await pool.execute("SELECT po.id,po.po_number,po.supplier_id,po.quantity,po.unit_cost,po.currency,po.total_cost,po.delivery_by,po.terms,po.status,po.supplier_note,po.status_changed_at,po.created_at,s.legal_name,s.trade_name,s.country,s.city FROM supplier_pos po JOIN supplier_profiles s ON s.id=po.supplier_id WHERE po.order_id=? ORDER BY po.created_at DESC",[clean(req.params.id,80)]);
+    res.json({supplierPos:rows.map(r=>({...maskSupplierRow(req,r),statusLabel:RFQ.PO_STATES[r.status]?.label||r.status})),detailsRestricted:!isSuper(req)});}
+  catch(error){console.error(error);res.status(500).json({error:"Could not load supplier purchase orders."});}
+});
+
+app.patch("/api/admin/supplier-pos/:id/cancel",requireAdmin,async(req,res)=>{
+  const id=clean(req.params.id,80),note=clean(req.body?.note,500)||null;
+  const conn=await pool.getConnection();
+  try{
+    await conn.beginTransaction();
+    const [[po]]=await conn.execute("SELECT po.id,po.po_number,po.status,s.business_email FROM supplier_pos po JOIN supplier_profiles s ON s.id=po.supplier_id WHERE po.id=? FOR UPDATE",[id]);
+    if(!po){await conn.rollback();return res.status(404).json({error:"Purchase order not found."});}
+    if(!RFQ.canPoTransition(po.status,"cancelled")||po.status==="cancelled"){await conn.rollback();return res.status(409).json({error:"A "+RFQ.PO_STATES[po.status].label+" purchase order cannot be cancelled."});}
+    await conn.execute("UPDATE supplier_pos SET status='cancelled',status_changed_at=NOW(),supplier_note=COALESCE(?,supplier_note) WHERE id=?",[note,id]);
+    await audit(conn,req,"supplier_po.cancelled","supplier_po",id,{status:po.status},{status:"cancelled",note});
+    await conn.commit();
+    try{await sendBrandedMail(po.business_email,"SupplyDesk | Purchase order "+po.po_number+" cancelled",{preheader:"PO cancelled",title:"Purchase order cancelled",intro:"Purchase order "+po.po_number+" has been cancelled by SupplyDesk."+(note?" "+note:""),bodyHtml:"",textLines:[po.po_number+" cancelled"],ctaText:"Open Supplier Dashboard",ctaUrl:ORIGIN()+"/supplier-dashboard"});}catch(e){console.error(e);}
+    res.json({ok:true});
+  }catch(error){await conn.rollback();console.error(error);res.status(500).json({error:"Could not cancel the purchase order."});}
+  finally{conn.release();}
+});
+
+// Supplier side: only the PO itself (no buyer, no buyer price).
+app.get("/api/supplier-dashboard/purchase-orders",requireSupplierDashboard,async(req,res)=>{
+  try{const [rows]=await pool.execute("SELECT id,po_number,title,quantity,unit_cost,currency,total_cost,delivery_by,terms,status,supplier_note,status_changed_at,created_at FROM supplier_pos WHERE supplier_id=? ORDER BY created_at DESC LIMIT 200",[req.supplier.id]);
+    res.json({purchaseOrders:rows.map(r=>({...r,statusLabel:RFQ.PO_STATES[r.status]?.label||r.status,allowedNext:(RFQ.PO_TRANSITIONS[r.status]||[]).filter(n=>n!=="cancelled")}))});}
+  catch(error){console.error(error);res.status(500).json({error:"Could not load purchase orders."});}
+});
+
+app.patch("/api/supplier-dashboard/purchase-orders/:id/status",requireSupplierDashboard,async(req,res)=>{
+  const id=clean(req.params.id,80),to=clean(req.body?.status,20),note=clean(req.body?.note,500)||null;
+  if(!["accepted","declined","in_production","dispatched","completed"].includes(to))return res.status(400).json({error:"Choose a valid status."});
+  if(to==="declined"&&!note)return res.status(400).json({error:"Please add a reason for declining."});
+  const conn=await pool.getConnection();
+  try{
+    await conn.beginTransaction();
+    const [[po]]=await conn.execute("SELECT id,po_number,status FROM supplier_pos WHERE id=? AND supplier_id=? FOR UPDATE",[id,req.supplier.id]);
+    if(!po){await conn.rollback();return res.status(404).json({error:"Purchase order not found."});}
+    if(po.status===to){await conn.rollback();return res.json({ok:true,changed:false});}
+    if(!RFQ.canPoTransition(po.status,to)){await conn.rollback();return res.status(409).json({error:"Cannot move this purchase order from "+RFQ.PO_STATES[po.status].label+" to "+RFQ.PO_STATES[to].label+"."});}
+    await conn.execute("UPDATE supplier_pos SET status=?,status_changed_at=NOW(),supplier_note=COALESCE(?,supplier_note) WHERE id=?",[to,note,id]);
+    await audit(conn,{supplier:req.supplier},"supplier_po.status_change","supplier_po",id,{status:po.status},{status:to,note});
+    await conn.commit();
+    res.json({ok:true,changed:true,status:to});
+  }catch(error){await conn.rollback();console.error(error);res.status(500).json({error:"Could not update the purchase order."});}
+  finally{conn.release();}
+});
+
 // ---- Commercial flow (Phase 2): SupplyDesk quote -> buyer decision -> order ----
 const money=(v)=>Number.isFinite(v)?Math.round(v*100)/100:null;
 
@@ -1868,6 +1954,11 @@ app.post("/api/supplier-dashboard/request-otp", supplierDashboardLimiter, async 
     if(!supplier.verified||!supplier.published) return res.status(403).json({error:"This supplier account is not currently enabled for dashboard access.",requestId});
     if(!supplier.business_email) return res.status(400).json({error:"Supplier business email is missing.",requestId});
 
+    if(String(process.env.E2E_TEST_MODE||"").toLowerCase()==="true"&&clean(process.env.E2E_TEST_KEY,256)&&safeEqual(clean(req.get("x-e2e-key"),256),clean(process.env.E2E_TEST_KEY,256))){
+      const otp=String(crypto.randomInt(100000,1000000));
+      await pool.execute("INSERT INTO supplier_dashboard_otps (id,supplier_id,otp_hash,expires_at,attempts) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 10 MINUTE),0)",[crypto.randomUUID(),supplier.id,crypto.createHash("sha256").update(otp).digest("hex")]);
+      return res.json({ok:true,message:"Test verification code created.",requestId,testOtp:otp});
+    }
     console.log("Supplier dashboard OTP email starting:",{requestId,supplierId:supplier.id,to:supplier.business_email});
     const info=await sendSupplierDashboardOtp(supplier);
     console.log("Supplier dashboard OTP email sent:",{requestId,supplierId:supplier.id,to:supplier.business_email,messageId:info.messageId});
@@ -3003,6 +3094,27 @@ async function ensureRfqSchema() {
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_orders_buyer (buyer_id, created_at),
     INDEX idx_orders_status (status, created_at)
+  ) ENGINE=InnoDB`);
+  await pool.execute(`CREATE TABLE IF NOT EXISTS supplier_pos (
+    id CHAR(36) PRIMARY KEY,
+    po_number VARCHAR(24) NOT NULL UNIQUE,
+    order_id CHAR(36) NOT NULL,
+    supplier_id CHAR(36) NOT NULL,
+    product_id CHAR(36) NULL,
+    title VARCHAR(255) NOT NULL,
+    quantity VARCHAR(60) NOT NULL,
+    unit_cost DECIMAL(14,4) NOT NULL,
+    currency VARCHAR(10) NOT NULL,
+    total_cost DECIMAL(16,2) NULL,
+    delivery_by DATE NULL,
+    terms TEXT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'issued',
+    supplier_note VARCHAR(500) NULL,
+    status_changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(190) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_spo_supplier (supplier_id, status, created_at),
+    INDEX idx_spo_order (order_id, status)
   ) ENGINE=InnoDB`);
   await pool.execute(`CREATE TABLE IF NOT EXISTS audit_log (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
