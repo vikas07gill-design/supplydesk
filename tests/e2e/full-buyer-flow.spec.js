@@ -3,12 +3,14 @@ import { test, expect } from "@playwright/test";
 const EMAIL = "buyer-e2e@example.com";
 
 test.describe("SupplyDesk full buyer enquiry flow", () => {
-  test("seeded supplier legacy slug resolves", async ({ request }) => {
-    const response = await request.get("/api/suppliers/india-growth");
-    expect(response.status()).toBe(200);
-    const body = await response.json();
-    expect(body.supplier).toBeTruthy();
-    expect(body.supplier.trade_name).toBe("India Growth");
+  test("supplier identity is private: profile APIs are closed and products expose no supplier", async ({ request }) => {
+    // Phase 1A: SupplyDesk sells to the buyer, so supplier profiles are not public any more.
+    expect((await request.get("/api/suppliers/india-growth")).status()).toBe(404);
+    const list = await (await request.get("/api/suppliers")).json();
+    expect(list.suppliers).toEqual([]);
+    const body = await (await request.get("/api/products")).json();
+    const text = JSON.stringify(body);
+    expect(text).not.toMatch(/India Growth|supplierId|supplierName|example\.com|supplier-e2e/i);
   });
 
   test("OTP verification -> enquiry -> buyer dashboard", async ({ page }) => {

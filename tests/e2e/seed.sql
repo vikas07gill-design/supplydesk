@@ -20,6 +20,6 @@ VALUES
 ('00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000001','India Growth E2E Supplier','India Growth','Manufacturer','India','Delhi','E2E Test Address','https://example.com','supplier-e2e@example.com','9999999999','E2E Test Contact','Director','Plastics & Polymers','Containers',1,1,'{"about":"Automated test supplier","capabilities":"Automated end-to-end test supplier"}');
 
 INSERT INTO supplier_products
-(id,supplier_id,product_name,category,subcategory,description,moq,unit,market_scope,status,reviewed_at)
+(id,supplier_id,product_name,category,subcategory,description,moq,unit,market_scope,status,reviewed_at,monthly_capacity,available_capacity,capacity_unit,lead_time_days,origin_region,capacity_updated_at,capability_code)
 VALUES
-('00000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000002','E2E Test Product','Plastics & Polymers','Containers','Product used only by automated CI tests.','10','pcs','Both','approved',NOW());
+('00000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000002','E2E Test Product','Plastics & Polymers','Containers','Product used only by automated CI tests.','10','pcs','Both','approved',NOW(),120000,80000,'pcs',21,'E2E Region',NOW(),'SD-PPC-E2E1');

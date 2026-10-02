@@ -14,23 +14,24 @@ main{padding:34px 0 60px}.hero{display:flex;justify-content:space-between;gap:20
 .section-title{font-size:22px;letter-spacing:-.04em;margin:28px 0 12px}.table-wrap{overflow:auto}.table{width:100%;border-collapse:collapse;min-width:720px}.table th,.table td{text-align:left;padding:14px;border-bottom:1px solid #edf2f4;font-size:13px}.table th{color:#68818b;font-size:11px;text-transform:uppercase;letter-spacing:.08em}.pill{display:inline-flex;border-radius:999px;padding:6px 9px;background:#eef7f6;color:#14766e;font-size:10px;font-weight:900}.pill.closed{background:#f0f2f4;color:#687781}.pill.contacted{background:#edf4ff;color:#356ac2}
 .empty{text-align:center;padding:40px;color:var(--muted)}.profile{display:grid;grid-template-columns:1fr 1fr;gap:12px}.profile label{font-size:11px;font-weight:850;color:#607983}.profile input{width:100%;margin-top:6px;padding:11px;border:1px solid var(--line);border-radius:10px}.status{margin-top:12px;font-size:13px}.error{color:#b42318}.success{color:#087f6f}
 @media(max-width:700px){.hero{display:block}.hero h1{font-size:34px}.grid,.profile{grid-template-columns:1fr}}
+.dec{display:inline-block;padding:5px 11px;border-radius:99px;font-weight:800;font-size:12px}.dec-pending{background:#e9eef2;color:#46606b}.dec-accepted{background:#d9f5e3;color:#0c5a2a}.dec-partial{background:#fff1cc;color:#8a5200}.dec-rejected{background:#ffe1e1;color:#8a1c1c}.decnote{margin-top:6px;color:#46606b;font-size:12px;max-width:340px;line-height:1.5}
 </style>
 <link rel="stylesheet" href="assets/depth.css"><script src="assets/depth.js" defer></script></head>
 <body>
 <nav><div class="wrap nav"><a class="brand" href="index.html" aria-label="SupplyDesk home"><img src="assets/supplydesk-logo-dark.svg" alt="SupplyDesk" style="width:180px;height:auto;display:block"></a><div class="nav-actions"><a class="btn" href="index.html">Browse SupplyDesk</a><button class="btn" onclick="logout()">Logout</button></div></div></nav>
 <main class="wrap">
-<section class="hero"><div><div class="eyebrow">Buyer Dashboard</div><h1>Your sourcing activity</h1><p>Track your enquiries and keep your buyer details ready for future sourcing.</p></div><div class="email" id="email"></div></section>
+<section class="hero"><div><div class="eyebrow">Buyer Dashboard</div><h1>Your sourcing activity</h1><p>Track your quote requests. SupplyDesk checks current capacity and tells you here whether each request is accepted, partially accepted or not available.</p></div><div class="email" id="email"></div></section>
 <div class="grid">
-<div class="card metric"><strong id="total">0</strong><span>Total enquiries</span></div>
-<div class="card metric"><strong id="active">0</strong><span>Active enquiries</span></div>
-<div class="card metric"><strong id="closed">0</strong><span>Closed enquiries</span></div>
+<div class="card metric"><strong id="total">0</strong><span>Total requests</span></div>
+<div class="card metric"><strong id="active">0</strong><span>Active requests</span></div>
+<div class="card metric"><strong id="closed">0</strong><span>Closed requests</span></div>
 </div>
 <div class="card" style="margin-bottom:18px"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2 class="section-title" style="margin:0">My requirements</h2><p style="color:var(--muted);margin:5px 0 0;font-size:13px">Requirements you posted and quotations received from suppliers.</p></div><a class="btn primary" href="requirement.html">＋ Post Requirement</a></div><div id="requirements" style="margin-top:15px"></div></div>
 
 <div class="card">
-<h2 class="section-title">My enquiries</h2>
-<div class="table-wrap"><table class="table"><thead><tr><th>Product / Requirement</th><th>Supplier</th><th>Location</th><th>Quantity</th><th>Status</th><th>Date</th></tr></thead><tbody id="rows"></tbody></table></div>
-<div class="empty" id="empty">No enquiries yet. Browse products and send your first enquiry.</div>
+<h2 class="section-title">My quote requests</h2>
+<div class="table-wrap"><table class="table"><thead><tr><th>Product / Requirement</th><th>Capability ID</th><th>Quantity asked</th><th>SupplyDesk decision</th><th>Date</th></tr></thead><tbody id="rows"></tbody></table></div>
+<div class="empty" id="empty">No quote requests yet. Browse products and send your first request.</div>
 </div>
 <div class="card" style="margin-top:18px">
 <h2 class="section-title">Buyer profile</h2>
@@ -56,7 +57,8 @@ async function load(){
   document.getElementById("active").textContent=e.filter(x=>x.status!=="closed").length;
   document.getElementById("closed").textContent=e.filter(x=>x.status==="closed").length;
   const rows=document.getElementById("rows"),empty=document.getElementById("empty");
-  rows.innerHTML=e.map(x=>'<tr><td><strong>'+esc(x.productName)+'</strong></td><td>'+esc(x.supplierName)+'</td><td>'+esc((x.supplierCity||"")+" "+(x.supplierCountry||""))+'</td><td>'+esc(x.quantity||"—")+'</td><td><span class="pill '+esc(x.status)+'">'+esc(x.status.replaceAll("_"," "))+'</span></td><td>'+new Date(x.createdAt).toLocaleDateString()+'</td></tr>').join("");
+  const DEC={pending:["Under review","pending"],accepted:["Accepted","accepted"],partial:["Partially accepted","partial"],rejected:["Not available","rejected"]};
+  rows.innerHTML=e.map(x=>{const d=DEC[x.decision]||DEC.pending;return '<tr><td><strong>'+esc(x.productName)+'</strong></td><td>'+esc(x.capabilityCode||"—")+'</td><td>'+esc(x.quantity||"—")+'</td><td><span class="dec dec-'+d[1]+'">'+esc(d[0])+'</span>'+(x.decision==="partial"&&x.approvedQuantity?'<div class="decnote"><b>Available to you:</b> '+esc(x.approvedQuantity)+'</div>':'')+(x.remark?'<div class="decnote">'+esc(x.remark)+'</div>':'')+'</td><td>'+new Date(x.createdAt).toLocaleDateString()+'</td></tr>'}).join("");
   empty.style.display=e.length?"none":"block";
  }catch(e){localStorage.removeItem("supplydesk_buyer_dashboard_token");location.href="index.html";}
 }

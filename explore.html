@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Industries &amp; Countries | SupplyDesk</title>
-<meta name="description" content="Search verified suppliers and products by industry and country on SupplyDesk.">
+<meta name="description" content="Search products and manufacturing capacity by industry and country on SupplyDesk.">
 <style>
 :root{--ink:#0d2430;--muted:#647780;--line:#dbe7eb;--bg:#f5fafb;--card:#fff;--brand:#087f8c;--brand-2:#45d9ea;--dark:#092a38;--chip:#e8f4f6}
 *{box-sizing:border-box}
@@ -90,7 +90,7 @@ main.wrap{margin-top:-34px;position:relative;z-index:5;padding-bottom:60px}
 
 <section class="hero"><div class="wrap">
   <div class="eyebrow">Industries &amp; Countries</div>
-  <h1>Find the right supplier by industry and country.</h1>
+  <h1>Find manufacturing capacity by industry and country.</h1>
   <p>Type naturally — an industry, a product, a country or a city. Try “plastic machinery in India” or “textile Dubai”.</p>
   <div class="searchbox">
     <span class="ico" aria-hidden="true">⌕</span>
@@ -114,7 +114,7 @@ main.wrap{margin-top:-34px;position:relative;z-index:5;padding-bottom:60px}
       </div>
       <div class="tabs" role="tablist" id="tabs">
         <button class="tab" role="tab" data-t="all" aria-selected="true">All</button>
-        <button class="tab" role="tab" data-t="supplier" aria-selected="false">Suppliers</button>
+        
         <button class="tab" role="tab" data-t="product" aria-selected="false">Products</button>
       </div>
       <div class="summary" id="summary">Loading…</div>
@@ -277,7 +277,7 @@ function renderSuggest(){
   const box=$('suggest'),q=$('q').value;
   sugItems=suggestions(q);sugIdx=sugItems.length?0:-1;
   if(!q.trim()){box.classList.remove('open');$('q').setAttribute('aria-expanded','false');return}
-  if(!sugItems.length){box.innerHTML='<div class="none">No matching industry, country or supplier. Press Enter to search listings for “'+esc(q)+'”.</div>';box.classList.add('open');return}
+  if(!sugItems.length){box.innerHTML='<div class="none">No matching industry, country or product. Press Enter to search listings for “'+esc(q)+'”.</div>';box.classList.add('open');return}
   let html='',last='';
   sugItems.forEach((s,i)=>{
     if(s.k!==last){html+='<h4>'+KIND[s.k]+'</h4>';last=s.k}
@@ -364,17 +364,17 @@ function renderChips(){
 function card(r){
   const href=(r.type==='supplier'?'supplier.html?id=':'product.html?id=')+encodeURIComponent(r.id);
   return '<a class="card" href="'+href+'"><div class="type">'+esc(r.type)+(r.verified?' · ✓ Verified':'')+'</div><h3>'+esc(r.name)+'</h3>'+
-    '<div class="meta">'+flag(ISO_BY_NAME.get(r.country))+' '+esc([r.city,r.country].filter(Boolean).join(', '))+(r.type==='product'&&r.supplierName?' · by '+esc(r.supplierName):'')+'</div>'+
+    '<div class="meta">'+flag(ISO_BY_NAME.get(r.country))+' '+esc([r.city,r.country].filter(Boolean).join(', '))+'</div>'+
     '<div class="desc">'+esc(r.desc||'')+'</div>'+
-    '<div class="tags">'+[r.category,r.sub].filter(Boolean).map(t=>'<span class="tag">'+esc(t)+'</span>').join('')+(r.moq?'<span class="tag">MOQ '+esc(r.moq)+' '+esc(r.unit||'')+'</span>':'')+'</div>'+
-    '<span class="go">View '+(r.type==='supplier'?'supplier':'product')+' →</span></a>';
+    '<div class="tags">'+[r.category,r.sub].filter(Boolean).map(t=>'<span class="tag">'+esc(t)+'</span>').join('')+(r.moq?'<span class="tag">MOQ '+esc(r.moq)+' '+esc(r.unit||'')+'</span>':'')+(r.capacity&&r.capacity.band?'<span class="tag">Capacity '+esc(r.capacity.band)+(r.capacity.unit?' '+esc(r.capacity.unit):'')+'/mo</span>':'')+(r.capacity&&r.capacity.leadTimeDays?'<span class="tag">Lead '+esc(r.capacity.leadTimeDays)+' d</span>':'')+'</div>'+
+    '<span class="go">View product →</span></a>';
 }
 function renderResults(){
   if(!loaded)return;
   const {rows,e}=results();
   const bits=[e.industry,e.sub,e.country].filter(Boolean);
-  $('summary').textContent=rows.length+' result'+(rows.length===1?'':'s')+(bits.length?' for '+bits.join(' · '):'')+' · verified suppliers & products';
-  const capped=(window.__capSuppliers||window.__capProducts)?'<div class="note">Showing the most recent 200 suppliers/products from the directory. Narrow by industry or country to see more relevant listings.</div>':'';
+  $('summary').textContent=rows.length+' result'+(rows.length===1?'':'s')+(bits.length?' for '+bits.join(' · '):'')+' · products with capacity';
+  const capped=(window.__capSuppliers||window.__capProducts)?'<div class="note">Showing the most recent 200 products. Narrow by industry or country to see more relevant listings.</div>':'';
   if(!rows.length){
     const hasFilters=e.industry||e.sub||e.country||e.rest.length;
     window.__alts=e.inds.length>1?[]:e.parsed.alts.filter(a=>a.industry!==e.industry).slice(0,3);const alts=window.__alts;

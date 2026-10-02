@@ -46,3 +46,11 @@ For an existing Hostinger database, let the application startup schema check run
 - Suppliers see matched open requirements and can submit/update one quotation per requirement.
 - Buyers can review received quotations from the Buyer Dashboard.
 - Admin can review requirements and all supplier quotations.
+
+
+## Phase 1A: capacity-first listings (SupplyDesk sells to the buyer)
+
+- `supplier_products` now carries `monthly_capacity`, `available_capacity`, `capacity_unit`, `lead_time_days`, `origin_region`, `capacity_updated_at` and a unique `capability_code` (e.g. `SD-PLA-7K3Q`). Capacity is time-sensitive: the public API marks it "being reconfirmed" after 45 days without an update. Supplier capacity updates (`PATCH /api/supplier-dashboard/products/:id/capacity`) do not send a listing back for review.
+- Public APIs return a capacity **band** (never the exact number), availability status, lead time, MOQ and region. They never return the supplier name, id, website or contact.
+- `SD_HIDE_SUPPLIERS` (default `true`) controls this. Setting it to `false` restores the old public supplier profiles and direct connect flow (rollback switch).
+- A buyer "Request Quote" creates a `buyer_enquiries` + `connect_requests` row and notifies only the buyer. The supplier receives nothing. Admin decides with `POST /api/admin/connect-requests/:id/decision` (`accepted` / `partial` + `approved_quantity` / `rejected`, remarks required for partial and rejected). The decision, quantity and remarks are stored on `buyer_enquiries` and shown in the Buyer Dashboard and by email.
