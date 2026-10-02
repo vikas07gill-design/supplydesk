@@ -20,3 +20,15 @@ test("supplier directory: public + admin blocked, super admin sees full list", a
   const q = await (await request.get("/api/super-admin/suppliers?q=zzzz-none", { headers: s })).json();
   expect(q.suppliers).toEqual([]);
 });
+
+test("super admin can change supplier email; admin cannot; invalid rejected", async ({ request }) => {
+  test.skip(!SID || !SPW, "needs super env");
+  const s = { "x-admin-token": (await login(request, SID, SPW)).token };
+  const a = { "x-admin-token": (await login(request, AID, APW)).token };
+  const { suppliers } = await (await request.get("/api/super-admin/suppliers", { headers: s })).json();
+  const sup = suppliers.find(x => x.trade_name === "India Growth");
+  const url = `/api/super-admin/suppliers/${sup.id}/email`;
+  expect((await request.patch(url, { headers: a, data: { businessEmail: "x@example.com" } })).status()).toBeGreaterThanOrEqual(401);
+  expect((await request.patch(url, { headers: s, data: { businessEmail: "not-an-email" } })).status()).toBe(400);
+  expect((await request.patch(url, { headers: s, data: { businessEmail: sup.business_email } })).status()).toBe(200);
+});
