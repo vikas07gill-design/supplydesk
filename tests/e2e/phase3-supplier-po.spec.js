@@ -21,7 +21,7 @@ test.describe("SupplyDesk issues a PO to the supplier", () => {
     const { requirementId } = await (await request.post("/api/buyer-requirements", { data: { dashboardToken: v.dashboardToken, buyerName: "Secret Buyer Co", buyerCompany: "Secret Buyer Co", buyerCountry: "India", title: "P3 " + Date.now(), description: "d", category: "Plastics & Polymers", subcategory: "Containers", quantity: "1000", unit: "pcs" } })).json();
     await request.post(`/api/admin/requirements/${requirementId}/buyer-quote`, { headers: ah, data: { unitPrice: 50, quantity: "1000 pcs" } });
     const acc = await (await request.post(`/api/buyer-requirements/${requirementId}/quote/respond`, { headers: bh, data: { decision: "accept" } })).json();
-    return { orderId: acc.orderId, email };
+    return { orderId: acc.orderId, email, bh };
   }
   async function supplierHeaders(request) {
     const email = "supplier-e2e@example.com";
@@ -32,7 +32,8 @@ test.describe("SupplyDesk issues a PO to the supplier", () => {
 
   test("issue -> supplier accepts -> production -> dispatch -> complete, with privacy and permissions", async ({ request }) => {
     const ah = { "x-admin-token": (await (await request.post("/api/admin/login", { data: { adminId: AID, password: APW } })).json()).token };
-    const { orderId, email } = await makeOrder(request, ah);
+    const { orderId, bh } = await makeOrder(request, ah);
+    const orderStatus = async () => (await (await request.get("/api/buyer-orders", { headers: bh })).json()).orders[0].status;
     const sh = await supplierHeaders(request);
     const { products } = await (await request.get("/api/products")).json();
     const code = products.find(x => x.name === "E2E Test Product").capabilityCode;
@@ -59,8 +60,10 @@ test.describe("SupplyDesk issues a PO to the supplier", () => {
     // illegal moves, decline needs reason, then the happy path
     expect((await request.patch(`/api/supplier-dashboard/purchase-orders/${supplierPoId}/status`, { headers: sh, data: { status: "completed" } })).status()).toBe(409);
     expect((await request.patch(`/api/supplier-dashboard/purchase-orders/${supplierPoId}/status`, { headers: sh, data: { status: "declined" } })).status()).toBe(400);
+    const expectedOrder = { accepted: "confirmed", in_production: "in_production", dispatched: "shipped", completed: "shipped" };
     for (const s of ["accepted", "in_production", "dispatched", "completed"]) {
       expect((await request.patch(`/api/supplier-dashboard/purchase-orders/${supplierPoId}/status`, { headers: sh, data: { status: s, note: "ok" } })).status()).toBe(200);
+      expect(await orderStatus(), "buyer order after PO " + s).toBe(expectedOrder[s]);   // buyer order follows supplier progress
     }
     expect((await request.patch(`/api/admin/supplier-pos/${supplierPoId}/cancel`, { headers: ah, data: {} })).status()).toBe(409); // completed cannot be cancelled
 

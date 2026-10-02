@@ -1490,6 +1490,22 @@ async function sendBrandedMail(to,subject,opts){
 const ORIGIN=()=>String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"");
 const REQ_STATUS_LABEL={pending_review:"Under SupplyDesk review",open:"Shared with suppliers",fulfilling:"SupplyDesk is handling your requirement",rejected:"Not accepted",closed:"Closed",cancelled:"Cancelled"};
 
+// Keep the buyer-facing order status in step with supplier POs (never moves backwards; delivery stays a manual SupplyDesk confirmation).
+//  confirmed -> in_production when any live PO is in production/dispatched/completed
+//  in_production -> shipped when every live PO (not declined/cancelled) is dispatched or completed
+async function syncOrderFromPos(conn,req,orderId){
+  const [[o]]=await conn.execute("SELECT o.id,o.po_number,o.status,o.title,b.email,b.name FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.id=? FOR UPDATE",[orderId]);
+  if(!o||!["confirmed","in_production"].includes(o.status))return null;
+  const [pos]=await conn.execute("SELECT status FROM supplier_pos WHERE order_id=? AND status NOT IN ('declined','cancelled')",[orderId]);
+  if(!pos.length)return null;
+  let to=null;
+  if(pos.every(p=>["dispatched","completed"].includes(p.status)))to="shipped";
+  else if(o.status==="confirmed"&&pos.some(p=>["in_production","dispatched","completed"].includes(p.status)))to="in_production";
+  if(!to||to===o.status||!RFQ.canOrderTransition(o.status,to))return null;
+  await conn.execute("UPDATE orders SET status=?,status_changed_at=NOW() WHERE id=?",[to,orderId]);
+  await audit(conn,req,"order.status_change","order",orderId,{status:o.status},{status:to,note:"auto: supplier progress"});
+  return {order:o,to};
+}
 // ---- Supplier purchase orders (Phase 3): SupplyDesk -> supplier. The supplier never sees buyer identity or buyer price. ----
 const PO_LIVE_ORDER_STATES=["confirmed","in_production"];
 
@@ -1543,6 +1559,8 @@ app.patch("/api/admin/supplier-pos/:id/cancel",requireAdmin,async(req,res)=>{
     if(!RFQ.canPoTransition(po.status,"cancelled")||po.status==="cancelled"){await conn.rollback();return res.status(409).json({error:"A "+RFQ.PO_STATES[po.status].label+" purchase order cannot be cancelled."});}
     await conn.execute("UPDATE supplier_pos SET status='cancelled',status_changed_at=NOW(),supplier_note=COALESCE(?,supplier_note) WHERE id=?",[note,id]);
     await audit(conn,req,"supplier_po.cancelled","supplier_po",id,{status:po.status},{status:"cancelled",note});
+    const [[lk]]=await conn.execute("SELECT order_id FROM supplier_pos WHERE id=?",[id]);
+    await syncOrderFromPos(conn,req,lk.order_id);
     await conn.commit();
     try{await sendBrandedMail(po.business_email,"SupplyDesk | Purchase order "+po.po_number+" cancelled",{preheader:"PO cancelled",title:"Purchase order cancelled",intro:"Purchase order "+po.po_number+" has been cancelled by SupplyDesk."+(note?" "+note:""),bodyHtml:"",textLines:[po.po_number+" cancelled"],ctaText:"Open Supplier Dashboard",ctaUrl:ORIGIN()+"/supplier-dashboard"});}catch(e){console.error(e);}
     res.json({ok:true});
@@ -1570,8 +1588,11 @@ app.patch("/api/supplier-dashboard/purchase-orders/:id/status",requireSupplierDa
     if(!RFQ.canPoTransition(po.status,to)){await conn.rollback();return res.status(409).json({error:"Cannot move this purchase order from "+RFQ.PO_STATES[po.status].label+" to "+RFQ.PO_STATES[to].label+"."});}
     await conn.execute("UPDATE supplier_pos SET status=?,status_changed_at=NOW(),supplier_note=COALESCE(?,supplier_note) WHERE id=?",[to,note,id]);
     await audit(conn,{supplier:req.supplier},"supplier_po.status_change","supplier_po",id,{status:po.status},{status:to,note});
+    const [[link]]=await conn.execute("SELECT order_id FROM supplier_pos WHERE id=?",[id]);
+    const synced=await syncOrderFromPos(conn,{supplier:req.supplier},link.order_id);
     await conn.commit();
-    res.json({ok:true,changed:true,status:to});
+    if(synced){try{const l=RFQ.ORDER_STATES[synced.to].buyerLabel;await sendBrandedMail(synced.order.email,"SupplyDesk | Order "+synced.order.po_number+": "+l,{preheader:l,title:"Order update",intro:"Hello "+(synced.order.name||"Buyer")+", your order "+synced.order.po_number+" ("+synced.order.title+") is now: "+l+".",bodyHtml:"",textLines:[synced.order.po_number+": "+l],ctaText:"View order",ctaUrl:ORIGIN()+"/buyer-dashboard"});}catch(e){console.error("Order sync mail failed:",e);}}
+    res.json({ok:true,changed:true,status:to,orderStatus:synced?synced.to:undefined});
   }catch(error){await conn.rollback();console.error(error);res.status(500).json({error:"Could not update the purchase order."});}
   finally{conn.release();}
 });
