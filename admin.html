@@ -11,6 +11,24 @@
 .toolbar .subbar{display:flex;flex-wrap:wrap;gap:8px;flex-basis:100%}.toolbar .subbar>*{display:none}
 #buyerGroup,#supplierGroup{display:none}.signed #buyerGroup,.signed #supplierGroup{display:flex}
 .signed #loginBox{display:none!important}
+.rq-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.rq-head h2{margin:0 0 4px;font-size:20px}.rq-pill{white-space:nowrap;background:#e5f4f6;color:#075b66;font-weight:800;padding:5px 11px;border-radius:999px;font-size:12px}
+.rq-steps{display:flex;margin:16px 0 14px}.rq-step{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;font-size:11px;color:var(--muted);position:relative}.rq-step i{width:24px;height:24px;border-radius:50%;background:#e3edf1;color:#52707a;display:grid;place-items:center;font-style:normal;font-weight:800;font-size:12px;z-index:1}
+.rq-step:not(:last-child)::after{content:"";position:absolute;top:12px;left:50%;width:100%;height:2px;background:#e3edf1}.rq-step.done i,.rq-step.now i{background:var(--brand);color:#fff}.rq-step.done:not(:last-child)::after{background:var(--brand)}.rq-step.now{color:var(--ink);font-weight:800}
+.rq-next{border:1px solid #bfe0e4;background:#f3fafb;border-radius:14px;padding:14px;margin-bottom:14px}.rq-next.done{background:#f6f8f9;border-color:var(--line)}.rq-next-h{font-weight:850;font-size:14px;margin-bottom:4px}
+.rq-opts{display:grid;gap:10px;margin:12px 0}.rq-opt{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px}.rq-opt h4{margin:0 0 4px;font-size:13px}.rq-opt p{margin:0 0 8px;font-size:12px;color:var(--muted)}.rq-opt button{margin-top:8px}
+.rq-opt details summary,.rq-next details summary{cursor:pointer;font-size:12px;font-weight:800;color:var(--brand)}
+.rq-list{max-height:180px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:4px 10px;background:#fff}.rq-list label{display:flex;gap:8px;align-items:center;padding:5px 0;font-size:12px}
+.rq-grid,.rq-grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.rq-form label,.rq-grid2 label{display:block;font-size:11px;font-weight:800;color:#52707a}.rq-form label small,.rq-grid2 label small{font-weight:500;color:var(--muted)}.rq-form input,.rq-form select,.rq-form textarea,.rq-grid2 textarea{width:100%;margin-top:4px;font-weight:400}.rq-wide{margin-top:10px}
+.rq-facts{display:grid;grid-template-columns:1fr 1fr;gap:12px 18px;margin:6px 0 10px}.rq-facts label{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:#7a8e96;font-weight:800}.rq-facts span{font-size:13px}
+.rq-desc{font-size:13px;background:#f7fafb;border-radius:10px;padding:10px;margin-bottom:12px;white-space:pre-wrap}
+.rq-sec{border-top:1px solid var(--line);padding:2px 0}.rq-sec summary{cursor:pointer;padding:11px 0;font-weight:800;font-size:13px}.rq-sec summary em{font-style:normal;background:#e5f4f6;color:#075b66;border-radius:999px;padding:1px 8px;font-size:11px;margin-left:6px}.rq-sec-b{padding:0 0 12px}
+.rq-msg{background:#f1f8fa;border-radius:9px;padding:8px 10px;margin-top:6px;font-size:13px;white-space:pre-wrap}.rq-msg small{display:block;color:var(--muted);margin-top:3px}.rq-q{padding:7px 0;border-bottom:1px dashed var(--line);font-size:13px}.rq-t{width:100%;font-size:12px;border-collapse:collapse}.rq-t th,.rq-t td{text-align:left;padding:5px 6px;border-bottom:1px solid #edf2f4}
+@media(max-width:700px){.rq-grid,.rq-grid2,.rq-facts{grid-template-columns:1fr}}
+.rq-listhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:14px}.rq-search{width:100%;margin-bottom:10px}
+.rq-tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:6px}.rq-tab{border:0!important;background:none!important;border-bottom:2px solid transparent!important;border-radius:0!important;padding:8px 10px!important;font-weight:700;color:var(--muted)}.rq-tab em{font-style:normal;background:#eef3f5;border-radius:999px;padding:1px 7px;font-size:11px;margin-left:3px}.rq-tab.on{color:var(--brand);border-bottom-color:var(--brand)!important}
+.rq-row{display:flex;justify-content:space-between;gap:12px;padding:12px 8px;border-bottom:1px solid #edf2f4;cursor:pointer;border-radius:8px}.rq-row:hover{background:#f4fafb}.rq-row-t{font-weight:800;font-size:14px}.rq-row-s{text-align:right;white-space:nowrap}
+.rq-st{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800;background:#eef3f5;color:#41606b}.rq-st-action{background:#fff2d9;color:#8a5a00}.rq-st-waiting{background:#e3eefc;color:#1d4f9a}.rq-st-orders{background:#dff5e8;color:#17663a}.rq-st-closed{background:#eef0f2;color:#5b6870}
+.rq-flag{font-size:10.5px;font-weight:800;border-radius:6px;padding:2px 6px}.rq-flag.bad{background:#fde4e4;color:#a33}.rq-flag.warn{background:#fff2d9;color:#8a5a00}
 </style>
 <link rel="stylesheet" href="assets/depth.css"><script src="assets/depth.js" defer></script></head>
 <body>
@@ -553,29 +571,111 @@ async function loadApps(){try{const q=document.getElementById("status").value;co
 function renderList(items){if(!items.length){document.getElementById("list").innerHTML="<div class='muted'>No applications found.</div>";return}document.getElementById("list").innerHTML='<div class="row header"><div>Business</div><div>Location</div><div>Category</div><div>Status</div><div></div></div>'+items.map(a=>`<div class="row"><div><strong>${esc(a.legal_name)}</strong><br><span class="muted">${esc(a.business_type)}</span></div><div>${esc(a.city)}, ${esc(a.country)}</div><div>${esc(a.category)}<br>${esc(a.subcategory)}</div><div><span class="badge">${esc(a.status)}</span></div><div><button onclick="openApp('${a.id}')">Review</button></div></div>`).join("")}
 async function loadBuyerRequirements(){
  if(!role()){document.getElementById("message").textContent="Sign in as Admin or Super Admin to review buyer requirements.";return}
- try{const data=await api("/api/admin/requirements");document.getElementById("message").textContent="";renderBuyerRequirements(data.requirements||[]);renderQueueSummary();}catch(e){document.getElementById("message").textContent=e.message}
+ try{const q=await api("/api/admin/procurement/queue");document.getElementById("message").textContent="";reqQueue=q;renderRequirementList();}catch(e){document.getElementById("message").textContent=e.message}
 }
 const REQ_LABEL={pending_review:"Needs review",open:"Shared with suppliers",fulfilling:"SupplyDesk handling",rejected:"Rejected",closed:"Closed",cancelled:"Cancelled"};
-let reqFilter="pending_review",reqCache=[];
-function renderBuyerRequirements(items){
- reqCache=items;const counts={};items.forEach(r=>counts[r.status]=(counts[r.status]||0)+1);
- const tabs=["pending_review","open","fulfilling","rejected","all"].map(s=>'<button class="'+(reqFilter===s?"primary":"")+'" onclick="reqFilter=\''+s+'\';renderBuyerRequirements(reqCache)">'+(s==="all"?"All":REQ_LABEL[s])+' ('+(s==="all"?items.length:(counts[s]||0))+')</button>').join(" ");
- const shown=items.filter(r=>reqFilter==="all"||r.status===reqFilter);
- document.getElementById("list").innerHTML='<div class="actions" style="margin:0 0 10px">'+tabs+'</div>'+(shown.length?'<div class="row header"><div>Requirement</div><div>Buyer</div><div>Status</div><div>Quotes</div><div></div></div>'+shown.map(r=>'<div class="row"><div><strong>'+esc(r.title)+'</strong><br><span class="muted">'+esc(r.requirement_type)+' · '+esc(r.category||"Custom")+' · '+esc(String(r.created_at||"").slice(0,10))+'</span></div><div>'+esc(r.buyer_name||"")+'<br><span class="muted">'+esc(r.buyer_email)+'</span></div><div><span class="badge">'+esc(REQ_LABEL[r.status]||r.status)+'</span></div><div><span class="badge">'+esc(r.quote_count||0)+' quotes</span></div><div><button onclick="openBuyerRequirementAdmin(\''+esc(r.id)+'\')">Review</button></div></div>').join(""):'<div class="muted">No requirements in this view.</div>');
+const REQ_GROUPS={action:["Needs action",["submitted","matching","quotes_received","costing"]],waiting:["Waiting",["sourcing","quote_sent"]],orders:["Orders",["buyer_approved","converted"]],closed:["Closed",["lost","rejected","closed","cancelled"]],all:["All",null]};
+let reqFilter="action",reqCache=[],reqQueue={items:[],states:{}},reqSearch="";
+function setReqFilter(k){reqFilter=k;renderRequirementList()}
+function ageText(h){return h<1?"just now":h<48?h+"h":Math.floor(h/24)+"d"}
+function rqRowsHtml(){
+ const items=reqQueue.items||[],states=reqQueue.states||{};
+ const inGroup=(r,k)=>!REQ_GROUPS[k][1]||REQ_GROUPS[k][1].includes(r.rfq_state);
+ const needle=reqSearch.trim().toLowerCase();
+ const shown=items.filter(r=>inGroup(r,reqFilter)&&(!needle||(r.title+" "+(r.rfq_code||"")+" "+(r.buyer_name||"")+" "+(r.category||"")).toLowerCase().includes(needle)));
+ const FLAG={overdue:["Overdue","bad"],needs_review:["Waiting >24h","warn"],urgent:["Due soon","warn"]};
+ return shown.map(r=>{const f=FLAG[r.flag];const grp=Object.keys(REQ_GROUPS).find(k=>k!=="all"&&inGroup(r,k));
+  return '<div class="rq-row" onclick="openBuyerRequirementAdmin(\''+esc(r.id)+'\')"><div class="rq-row-main"><div class="rq-row-t">'+esc(r.title)+'</div><div class="muted">'+(r.rfq_code?esc(r.rfq_code)+' · ':"")+esc(r.buyer_name||"")+' · '+esc(((r.quantity||"")+" "+(r.unit||"")).trim()||"Qty n/a")+' · '+esc(r.category||"Custom")+'</div></div><div class="rq-row-s"><span class="rq-st rq-st-'+grp+'">'+esc(states[r.rfq_state]||r.rfq_state)+'</span><div class="muted">'+(f?'<span class="rq-flag '+f[1]+'">'+f[0]+'</span> ':"")+ageText(r.waitingHours||0)+(r.quote_count?' · '+esc(r.quote_count)+' supplier quote(s)':"")+'</div></div></div>';}).join("")||'<div class="muted" style="padding:14px 4px">Nothing in this view.</div>';
 }
-async function openBuyerRequirementAdmin(id,level){
- try{const all=await api("/api/admin/requirements");reqCache=all.requirements||[];const r=reqCache.find(x=>x.id===id);if(!r)throw Error("Requirement not found.");
- const qd=await api("/api/admin/requirements/"+encodeURIComponent(id)+"/quotes");
- const canAct=["pending_review","open","fulfilling"].includes(r.status);
- let match="";
- if(canAct){const m=await api("/api/admin/requirements/"+encodeURIComponent(id)+"/matches"+(level?"?level="+level:""));
-  const lv=m.level;
-  match='<h3 style="margin-top:22px">Share with suppliers</h3><div class="muted" style="margin-bottom:8px">Match level: <select onchange="openBuyerRequirementAdmin(\''+esc(id)+'\',this.value)"><option value="subcategory"'+(lv==="subcategory"?" selected":"")+'>Same sub-category</option><option value="category"'+(lv==="category"?" selected":"")+'>Same category</option><option value="all"'+(lv==="all"?" selected":"")+'>All verified suppliers</option></select> · '+m.suppliers.length+' found</div><div style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px 10px">'+(m.suppliers.map(s=>'<label style="display:flex;gap:8px;align-items:center;padding:5px 0;font-size:12px"><input type="checkbox" class="reqSup" value="'+esc(s.id)+'"'+(s.sent_status?" disabled":" checked")+'> <span><strong>'+esc(s.trade_name||s.legal_name)+'</strong> · '+esc(s.city||"")+', '+esc(s.country||"")+' · '+esc(s.subcategory||s.category||"")+(s.sent_status?' <span class="badge">already sent · '+esc(s.sent_status)+'</span>':"")+'</span></label>').join("")||'<div class="muted">No verified suppliers match. Try a broader level, or let SupplyDesk handle it.</div>')+'</div>';}
- const decision=canAct?'<h3 style="margin-top:22px">Decision</h3><textarea id="reqAdminNotes" placeholder="Internal notes (not shown to buyer)" style="min-height:60px">'+esc(r.admin_notes||"")+'</textarea><textarea id="reqBuyerNote" placeholder="Message to buyer (shown in dashboard and email)" style="min-height:60px;margin-top:8px">'+esc(r.buyer_note||"")+'</textarea><div class="actions"><button class="approve" onclick="reviewRequirement(\''+esc(id)+'\',\'share_suppliers\')">Approve &amp; send to selected suppliers</button><button onclick="reviewRequirement(\''+esc(id)+'\',\'supplydesk\')">SupplyDesk will supply (our billing)</button>'+(r.status==="pending_review"?'<button class="danger" onclick="reviewRequirement(\''+esc(id)+'\',\'reject\')">Reject</button>':"")+'</div>':"";
- document.getElementById("detail").innerHTML='<h2>'+esc(r.title)+'</h2><div class="status"><strong>Status:</strong> '+esc(REQ_LABEL[r.status]||r.status)+(r.reviewed_by?' · reviewed by '+esc(r.reviewed_by):"")+' · <strong>Quotes:</strong> '+esc(qd.quotes?.length||0)+'</div><div class="kv"><b>Buyer</b><span>'+esc(r.buyer_name||"")+(r.buyer_email?" · "+esc(r.buyer_email):"")+"</span><b>Company</b><span>"+esc(r.buyer_company||(role()==="super_admin"?"Not provided":"Super Admin only"))+'</span><b>Phone</b><span>'+esc(r.buyer_phone||(role()==="super_admin"?"Not provided":"Super Admin only"))+'</span><b>Type</b><span>'+esc(r.requirement_type)+'</span><b>Category</b><span>'+esc(r.category||"Custom")+' '+esc(r.subcategory||"")+'</span><b>Quantity</b><span>'+esc(r.quantity||"Not specified")+' '+esc(r.unit||"")+'</span><b>Target price</b><span>'+esc(r.target_price??"Not specified")+' '+esc(r.currency||"")+'</span><b>Delivery</b><span>'+esc(r.delivery_city||"")+', '+esc(r.delivery_country||"")+'</span><b>Required by</b><span>'+esc(r.required_by||"Not specified")+'</span><b>Description</b><span>'+esc(r.description)+'</span></div>'+match+decision+'<h3 style="margin-top:22px">Supplier Quotations</h3><div>'+((qd.quotes||[]).map(q=>'<div class="status" style="margin-bottom:8px"><strong>'+esc(q.trade_name||q.legal_name)+'</strong><br>Price: '+esc(q.unit_price)+' '+esc(q.currency)+' · MOQ: '+esc(q.moq||"—")+' · Lead: '+esc(q.lead_time||"—")+'<br><span class="muted">Supplier email: '+esc(q.business_email||"")+'</span></div>').join("")||'<div class="muted">No quotations yet.</div>')+'</div>';
- await renderRfqExtras(id,r);
+function renderRequirementList(){
+ const items=reqQueue.items||[];
+ const inGroup=(r,k)=>!REQ_GROUPS[k][1]||REQ_GROUPS[k][1].includes(r.rfq_state);
+ const tabs=Object.keys(REQ_GROUPS).map(k=>'<button class="rq-tab'+(reqFilter===k?" on":"")+'" onclick="setReqFilter(\''+k+'\')">'+REQ_GROUPS[k][0]+' <em>'+items.filter(r=>inGroup(r,k)).length+'</em></button>').join("");
+ const flagged=items.filter(x=>x.flag).length;
+ document.getElementById("list").innerHTML='<div class="rq-listhead"><b>Procurement queue</b>'+(flagged?'<span class="rq-flag bad">'+flagged+' need attention</span>':"")+'</div><input class="rq-search" placeholder="Search by title, RFQ no, buyer..." value="'+esc(reqSearch)+'" oninput="reqSearch=this.value;document.getElementById(\'rqRows\').innerHTML=rqRowsHtml()"><div class="rq-tabs">'+tabs+'</div><div id="rqRows">'+rqRowsHtml()+'</div>';
+}
+// ---- Buyer requirement detail: state-aware layout (one clear next step, everything else collapsed) ----
+const STEP_OF={submitted:1,matching:1,sourcing:2,quotes_received:2,costing:3,quote_sent:3,buyer_approved:4,converted:4};
+const STEP_NAMES=["Received","Sourcing","Quote","Order"];
+const rqStepper=st=>{const n=STEP_OF[st]||0;return n?'<div class="rq-steps">'+STEP_NAMES.map((t,i)=>'<div class="rq-step'+(i+1<n?" done":"")+(i+1===n?" now":"")+'"><i>'+(i+1<n?"✓":i+1)+'</i><span>'+t+'</span></div>').join("")+'</div>':""};
+const rqFact=(l,v)=>'<div><label>'+l+'</label><span>'+(v||'<span class="muted">—</span>')+'</span></div>';
+const rqSec=(title,body,open,count)=>'<details class="rq-sec"'+(open?" open":"")+'><summary>'+title+(count!=null?' <em>'+count+'</em>':"")+'</summary><div class="rq-sec-b">'+body+'</div></details>';
+function rqQuoteForm(id,r){
+ return '<div class="rq-form"><div class="muted" style="margin-bottom:8px">The buyer sees only the unit price below. Supplier names and your cost are never shown to the buyer.</div>'
+ +'<div class="rq-grid"><label>Supplier cost / unit <small>(optional, internal)</small><input id="bqCost" type="number" step="0.0001" min="0" oninput="calcMarkup()"></label>'
+ +(role()==="super_admin"?'<label>Margin % on selling price <small>(Super Admin)</small><input id="bqMarkup" type="number" step="0.01" min="0" max="90" oninput="calcMarkup()"></label>':"")
+ +'<label>Unit price to buyer *<input id="bqPrice" type="number" step="0.0001" min="0"></label>'
+ +'<label>Currency<select id="bqCur"><option>INR</option><option>USD</option><option>EUR</option><option>GBP</option><option>AED</option></select></label>'
+ +'<label>Quantity *<input id="bqQty" value="'+esc((r.quantity||"")+(r.unit?" "+r.unit:""))+'"></label>'
+ +'<label>Lead time (days)<input id="bqLead" type="number" min="0"></label>'
+ +'<label>Quote valid until<input id="bqValid" type="date"></label></div>'
+ +'<label class="rq-wide">Terms (payment, delivery)<textarea id="bqTerms" style="min-height:48px"></textarea></label>'
+ +'<label class="rq-wide">Note to buyer<textarea id="bqNote" style="min-height:48px"></textarea></label>'
+ +'<div class="actions"><button class="primary" onclick="sendBuyerQuote(\''+esc(id)+'\')">Send quotation to buyer</button></div></div>';
+}
+function rqSupplierPicker(id,m,lv){
+ return '<div class="muted" style="margin-bottom:8px">Match level: <select onchange="openBuyerRequirementAdmin(\''+esc(id)+'\',this.value)"><option value="subcategory"'+(lv==="subcategory"?" selected":"")+'>Same sub-category</option><option value="category"'+(lv==="category"?" selected":"")+'>Same category</option><option value="all"'+(lv==="all"?" selected":"")+'>All verified suppliers</option></select> · '+m.suppliers.length+' found</div>'
+ +'<div class="rq-list">'+(m.suppliers.map(s=>'<label><input type="checkbox" class="reqSup" value="'+esc(s.id)+'"'+(s.sent_status?" disabled":" checked")+'> <span><strong>'+esc(s.trade_name||s.legal_name)+'</strong>'+(s.city||s.country?' · '+esc(s.city||"")+' '+esc(s.country||""):"")+' · '+esc(s.subcategory||s.category||"")+(s.sent_status?' <span class="badge">already sent</span>':"")+'</span></label>').join("")||'<div class="muted" style="padding:6px">No verified suppliers match. Try a broader level, or choose "SupplyDesk supplies directly".</div>')+'</div>';
+}
+async function openBuyerRequirementAdmin(id,level,openSec){
+ try{
+  const enc=encodeURIComponent(id),all=await api("/api/admin/requirements");reqCache=all.requirements||[];
+  const r=reqCache.find(x=>x.id===id);if(!r)throw Error("Requirement not found.");
+  const [qd,q,mt,au,ms]=await Promise.all([api("/api/admin/requirements/"+enc+"/quotes"),api("/api/admin/procurement/queue"),api("/api/admin/requirements/"+enc+"/capability-matches"),api("/api/admin/audit?entity=rfq&id="+enc),api("/api/admin/requirements/"+enc+"/messages").catch(()=>({messages:[]}))]);
+  const it=(q.items||[]).find(x=>x.id===id)||{rfq_state:r.rfq_state||"submitted",allowedNext:[]},st=it.rfq_state,su=role()==="super_admin",priv=su?"":"Super Admin only";
+  const canAct=["pending_review","open","fulfilling"].includes(r.status),quotes=qd.quotes||[];
+  const stLabel=q.states[st]||st;
+  const reviewing=["submitted","matching"].includes(st)&&canAct,sourcing=["sourcing","quotes_received"].includes(st);
+  let m=null;if(canAct&&(reviewing||sourcing))m=await api("/api/admin/requirements/"+enc+"/matches"+(level?"?level="+level:""));
+  const day=v=>v?String(v).slice(0,10):"";
+  // facts
+  const facts=rqFact("Buyer",esc(r.buyer_name||""))+rqFact("Company",esc(r.buyer_company||priv))+rqFact("Contact",esc([r.buyer_email,r.buyer_phone].filter(Boolean).join(" · ")||priv))
+   +rqFact("Category",esc([r.category,r.subcategory].filter(Boolean).join(" › ")||"Custom"))+rqFact("Quantity",esc(((r.quantity||"")+" "+(r.unit||"")).trim()))
+   +rqFact("Target price",r.target_price!=null&&r.target_price!==""?esc(Number(r.target_price).toLocaleString("en-IN")+" "+(r.currency||"")):"")
+   +rqFact("Delivery",esc([r.delivery_city,r.delivery_country].filter(Boolean).join(", ")))+rqFact("Required by",esc(day(r.required_by)))
+   +(r.quality_standards?rqFact("Quality",esc(r.quality_standards)):"")+(r.certifications?rqFact("Certifications",esc(r.certifications)):"")+(r.packaging?rqFact("Packaging",esc(r.packaging)):"")
+   +(r.payment_terms?rqFact("Payment terms",esc(r.payment_terms)):"")+(r.incoterm?rqFact("Delivery terms",esc(r.incoterm)):"");
+  // next step
+  let next="";
+  if(reviewing){
+   next='<div class="rq-next"><div class="rq-next-h">Next step · Review this requirement</div><div class="muted">Choose how SupplyDesk will fulfil it. The buyer never sees supplier names or supplier prices.</div>'
+    +'<div class="rq-opts">'
+    +'<div class="rq-opt"><h4>1 · Source from suppliers</h4><p>Send the requirement (without buyer details) to matching verified suppliers and collect their quotes. Then you quote the buyer.</p><details><summary>Choose suppliers ('+m.suppliers.length+')</summary>'+rqSupplierPicker(id,m,m.level)+'</details><button class="approve" onclick="reviewRequirement(\''+esc(id)+'\',\'share_suppliers\')">Send to selected suppliers</button></div>'
+    +'<div class="rq-opt"><h4>2 · SupplyDesk supplies directly</h4><p>Skip supplier quotes. You set the price yourself and quote the buyer straight away.</p><button onclick="reviewRequirement(\''+esc(id)+'\',\'supplydesk\')">Handle directly</button></div>'
+    +'<div class="rq-opt"><h4>3 · Reject</h4><p>Decline this requirement. The buyer receives your message by email and in the dashboard.</p><button class="danger" onclick="reviewRequirement(\''+esc(id)+'\',\'reject\')">Reject requirement</button></div></div>'
+    +'<div class="rq-grid2"><label>Internal notes <small>(not shown to buyer)</small><textarea id="reqAdminNotes" style="min-height:52px">'+esc(r.admin_notes||"")+'</textarea></label><label>Message to buyer <small>(email + dashboard)</small><textarea id="reqBuyerNote" style="min-height:52px">'+esc(r.buyer_note||"")+'</textarea></label></div></div>';
+  }else if(sourcing){
+   next='<div class="rq-next"><div class="rq-next-h">Next step · Collect supplier quotes, then quote the buyer</div><div class="muted">Shared with '+esc(it.shared_count||0)+' supplier(s) · '+esc(quotes.length)+' quotation(s) received.</div><div class="actions"><button class="approve" onclick="setRfqState(\''+esc(id)+'\',\'costing\')">Prepare buyer quotation</button></div>'
+    +(m?'<details style="margin-top:10px"><summary>Share with more suppliers</summary>'+rqSupplierPicker(id,m,m.level)+'<div class="actions"><button onclick="reviewRequirement(\''+esc(id)+'\',\'share_suppliers\')">Send to selected suppliers</button></div></details>':"")+'</div>';
+  }else if(st==="costing"){
+   next='<div class="rq-next"><div class="rq-next-h">Next step · Send the quotation to the buyer</div>'+rqQuoteForm(id,r)+'</div>';
+  }else if(st==="quote_sent"){
+   next='<div class="rq-next"><div class="rq-next-h">Quotation sent · waiting for the buyer</div><div class="muted">The buyer can accept or decline in their dashboard. You can revise the quotation if needed.</div><div class="actions">'+((it.allowedNext||[]).includes("costing")?'<button onclick="setRfqState(\''+esc(id)+'\',\'costing\')">Revise quotation</button>':"")+((it.allowedNext||[]).includes("lost")?'<button class="danger" onclick="setRfqState(\''+esc(id)+'\',\'lost\')">Mark as lost</button>':"")+'</div></div>';
+  }else if(["buyer_approved","converted"].includes(st)){
+   next='<div class="rq-next done"><div class="rq-next-h">Order created</div><div class="muted">The buyer accepted the quotation. Manage supplier POs, invoices and delivery under Orders.</div><div class="actions"><button class="approve" onclick="loadOrders()">Open Orders</button></div></div>';
+  }else{
+   next='<div class="rq-next done"><div class="rq-next-h">'+esc(stLabel)+'</div><div class="muted">No further action is needed on this requirement.</div></div>';
+  }
+  // collapsible sections
+  const qHtml=quotes.map(x=>'<div class="rq-q"><strong>'+esc(x.trade_name||x.legal_name)+'</strong> · '+esc(x.unit_price)+' '+esc(x.currency)+' <span class="muted">MOQ '+esc(x.moq||"—")+' · Lead '+esc(x.lead_time||"—")+'</span>'+(x.business_email?'<div class="muted">'+esc(x.business_email)+'</div>':"")+'</div>').join("")||'<div class="muted">No supplier quotations yet.</div>';
+  const mRows=(mt.matches||[]).slice(0,10).map(x=>'<tr><td><b>'+esc(x.capabilityCode||"")+'</b></td><td>'+esc(x.supplierName)+'</td><td>'+esc(x.productName)+'</td><td>'+esc(x.availableCapacity==null?(x.capacityBand||"n/a"):x.availableCapacity+" "+x.capacityUnit)+'</td><td>'+esc(x.leadTimeDays==null?"-":x.leadTimeDays+"d")+'</td><td>'+esc(x.score)+(x.stale?" (stale)":"")+'</td></tr>').join("");
+  const mHtml=mRows?'<div class="muted" style="margin-bottom:6px">Ranked by capacity, location and lead time. Use the Capability ID when issuing a supplier PO.</div><table class="rq-t"><tr><th>ID</th><th>Supplier</th><th>Product</th><th>Free capacity</th><th>Lead</th><th>Score</th></tr>'+mRows+'</table>':'<div class="muted">No matching capability found.</div>';
+  const thread=(ms.messages||[]).map(x=>'<div class="rq-msg"><b>'+esc(x.subject)+'</b>'+(x.body?'<div>'+esc(x.body)+'</div>':"")+'<small>'+esc(new Date(x.created_at).toLocaleString())+' · '+esc(x.created_by||"")+'</small></div>').join("");
+  const msgHtml='<div class="muted" style="margin-bottom:6px">Sent by email and shown in the buyer dashboard.</div><input id="bmSubject" placeholder="Subject (optional)"><textarea id="bmText" placeholder="Write to the buyer..." style="min-height:60px;margin-top:6px"></textarea><div class="actions"><button class="primary" onclick="sendBuyerMessage(\''+esc(id)+'\')">Send message</button></div><div id="bmThread">'+(thread||'<div class="muted" style="margin-top:8px">No messages yet.</div>')+'</div>';
+  const log=(au.entries||[]).slice(0,15).map(e=>'<div class="muted">'+esc(new Date(e.created_at).toLocaleString())+' · '+esc(e.actor||"")+' · '+esc(e.action)+'</div>').join("")||'<div class="muted">No activity yet.</div>';
+  const manual=(it.allowedNext||[]).length?'<div class="muted" style="margin-bottom:6px">Only use this to correct a status. Normal progress happens through the steps above.</div><div class="actions">'+(it.allowedNext||[]).map(n=>'<button onclick="setRfqState(\''+esc(id)+'\',\''+esc(n)+'\')">'+esc(q.states[n]||n)+'</button>').join(" ")+'</div>':'<div class="muted">This is a final status.</div>';
+  document.getElementById("detail").innerHTML=
+   '<div class="rq-head"><div><h2>'+esc(r.title)+'</h2><div class="muted">'+(r.rfq_code?'RFQ '+esc(r.rfq_code)+' · ':"")+'Received '+esc(new Date(r.created_at).toLocaleDateString())+'</div></div><span class="pill rq-pill">'+esc(stLabel)+'</span></div>'
+   +rqStepper(st)+next
+   +'<div class="rq-facts">'+facts+'</div>'+(r.description?'<div class="rq-desc">'+esc(r.description)+'</div>':"")
+   +rqSec("Messages with buyer",msgHtml,openSec==="messages",(ms.messages||[]).length)
+   +rqSec("Supplier quotations",qHtml,sourcing,quotes.length)
+   +rqSec("Capability matches (internal)",mHtml,false,(mt.matches||[]).length)
+   +rqSec("Activity log",log,false)
+   +rqSec("Change status manually",manual,false);
  }catch(e){document.getElementById("message").textContent=e.message}
 }
+async function renderRfqExtras(){}   // superseded by the state-aware layout above
 
 
 async function loadOrders(){
@@ -651,39 +751,22 @@ async function sendBuyerQuote(id){
  try{const d=await api("/api/admin/requirements/"+encodeURIComponent(id)+"/buyer-quote",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({unitPrice:g("bqPrice"),costUnitPrice:g("bqCost"),marginPct:document.getElementById("bqMarkup")?g("bqMarkup"):"",currency:g("bqCur"),quantity:g("bqQty"),leadTimeDays:g("bqLead"),validUntil:g("bqValid"),terms:g("bqTerms"),note:g("bqNote")})});
   document.getElementById("message").textContent="Quote "+d.quoteNo+" sent to the buyer.";await loadBuyerRequirements();await openBuyerRequirementAdmin(id);}catch(e){document.getElementById("message").textContent=e.message}
 }
-async function renderRfqExtras(id,r){
- try{
-  const [q,mt,au,ms]=await Promise.all([api("/api/admin/procurement/queue"),api("/api/admin/requirements/"+encodeURIComponent(id)+"/capability-matches"),api("/api/admin/audit?entity=rfq&id="+encodeURIComponent(id)),api("/api/admin/requirements/"+encodeURIComponent(id)+"/messages").catch(()=>({messages:[]}))]);
-  const thread=(ms.messages||[]).map(m=>'<div style="padding:8px 10px;background:#f1f8fa;border-radius:9px;margin-top:6px;font-size:13px"><b>'+esc(m.subject)+'</b>'+(m.body?'<div style="white-space:pre-wrap">'+esc(m.body)+'</div>':'')+'<div class="muted">'+esc(new Date(m.created_at).toLocaleString())+' · '+esc(m.created_by||"")+' · '+esc(m.kind)+'</div></div>').join("");
-  const it=(q.items||[]).find(x=>x.id===id)||{rfq_state:r.rfq_state||"submitted",allowedNext:[]};
-  const btns=(it.allowedNext||[]).map(n=>'<button onclick="setRfqState(\''+esc(id)+'\',\''+esc(n)+'\')">'+esc(q.states[n]||n)+'</button>').join(" ");
-  const rows=(mt.matches||[]).slice(0,10).map(m=>'<tr><td><b>'+esc(m.capabilityCode||"")+'</b></td><td>'+esc(m.supplierName)+'</td><td>'+esc(m.productName)+'</td><td>'+esc(m.availableCapacity==null?(m.capacityBand||"n/a"):m.availableCapacity+" "+m.capacityUnit)+'</td><td>'+esc(m.leadTimeDays==null?"-":m.leadTimeDays+"d")+'</td><td>'+esc(m.score)+(m.stale?" (stale)":"")+'</td><td class="muted">'+esc((m.reasons||[]).join(", "))+'</td></tr>').join("");
-  const log=(au.entries||[]).slice(0,10).map(e=>'<div class="muted">'+esc(new Date(e.created_at).toLocaleString())+' · '+esc(e.actor||"")+' · '+esc(e.action)+'</div>').join("");
-  document.getElementById("detail").insertAdjacentHTML("beforeend",'<h3 style="margin-top:22px">RFQ '+esc(r.rfq_code||"")+' · '+esc(q.states[it.rfq_state]||it.rfq_state)+'</h3>'+(btns?'<div class="actions">Move to: '+btns+'</div>':'<div class="muted">Final state.</div>')+(!["converted","lost","rejected","closed","cancelled","buyer_approved"].includes(it.rfq_state)?'<h3 style="margin-top:22px">Quote to buyer (one SupplyDesk price)</h3><div class="muted" style="margin-bottom:6px">Buyer sees only this price. Supplier name and cost are never shown.</div><div class="toolbar"><input id="bqCost" type="number" step="0.0001" min="0" placeholder="Supplier cost / unit (optional)" oninput="calcMarkup()">'+(role()==="super_admin"?'<input id="bqMarkup" type="number" step="0.01" min="0" max="90" placeholder="Margin % on selling price" oninput="calcMarkup()">':'')+'<input id="bqPrice" type="number" step="0.0001" min="0" placeholder="Unit price to buyer"><select id="bqCur"><option>INR</option><option>USD</option><option>EUR</option><option>GBP</option><option>AED</option></select><input id="bqQty" placeholder="Quantity" value="'+esc((r.quantity||"")+(r.unit?" "+r.unit:""))+'"><input id="bqLead" type="number" min="0" placeholder="Lead time (days)"><input id="bqValid" type="date"></div><textarea id="bqTerms" placeholder="Terms (payment, delivery)" style="min-height:50px"></textarea><textarea id="bqNote" placeholder="Note to buyer" style="min-height:50px"></textarea><div class="actions"><button class="primary" onclick="sendBuyerQuote(\''+esc(id)+'\')">Send quote to buyer</button></div>':'')+'<h3 style="margin-top:22px">Best capability matches (internal)</h3>'+(rows?'<table style="width:100%;font-size:12px"><tr><th>ID</th><th>Supplier</th><th>Product</th><th>Free capacity</th><th>Lead</th><th>Score</th><th>Why</th></tr>'+rows+'</table>':'<div class="muted">No matching capability found.</div>')+'<h3 style="margin-top:22px">Message to buyer</h3><div class="muted" style="margin-bottom:6px">Sent by email and shown in the buyer dashboard.</div><input id="bmSubject" placeholder="Subject (optional)" style="width:100%;margin-bottom:6px"><textarea id="bmText" placeholder="Write to the buyer..." style="min-height:70px"></textarea><div class="actions"><button class="primary" onclick="sendBuyerMessage(\''+esc(id)+'\')">Send message</button></div><div id="bmThread">'+(thread||'<div class="muted">No messages sent yet.</div>')+'</div><h3 style="margin-top:22px">Audit trail</h3>'+(log||'<div class="muted">No entries.</div>'));
- }catch(e){/* extras are optional; main detail already shown */}
-}
 async function sendBuyerMessage(id){
  const m=document.getElementById("bmText").value.trim(),s=document.getElementById("bmSubject").value.trim();
  if(!m){document.getElementById("message").textContent="Write a message first.";return}
  try{const d=await api("/api/admin/requirements/"+encodeURIComponent(id)+"/message",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:m,subject:s})});
-  document.getElementById("message").textContent=d.emailed?"Message sent (email + buyer dashboard).":"Saved to buyer dashboard. Email could not be sent.";await openBuyerRequirementAdmin(id);}catch(e){document.getElementById("message").textContent=e.message}
+  document.getElementById("message").textContent=d.emailed?"Message sent (email + buyer dashboard).":"Saved to buyer dashboard. Email could not be sent.";await openBuyerRequirementAdmin(id,undefined,"messages");}catch(e){document.getElementById("message").textContent=e.message}
 }
 async function setRfqState(id,state){
  const note=prompt("Note (optional) for "+state+":","");if(note===null)return;
  try{await api("/api/admin/requirements/"+encodeURIComponent(id)+"/state",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({state,note})});await loadBuyerRequirements();await openBuyerRequirementAdmin(id);}catch(e){document.getElementById("message").textContent=e.message}
-}
-async function renderQueueSummary(){
- try{const q=await api("/api/admin/procurement/queue");const el=document.getElementById("list");if(!el)return;
-  const chips=Object.entries(q.counts).map(([k,v])=>'<span class="pill">'+esc(q.states[k]||k)+': '+v+'</span>').join(" ");
-  const flagged=(q.items||[]).filter(x=>x.flag).length;
-  el.insertAdjacentHTML("afterbegin",'<div class="status" id="queueSummary"><b>Procurement queue</b> '+chips+(flagged?' · <b>'+flagged+' need attention</b>':'')+'</div>');}catch(e){}
 }
 async function reviewRequirement(id,action){
  const ids=[...document.querySelectorAll(".reqSup:checked")].map(x=>x.value);
  if(action==="share_suppliers"&&!ids.length){document.getElementById("message").textContent="Select at least one supplier.";return}
  const msg=action==="share_suppliers"?"Send this requirement to "+ids.length+" supplier(s)? They will be emailed.":action==="supplydesk"?"Mark as handled by SupplyDesk (SupplyDesk billing)? The buyer will be emailed.":"Reject this requirement? The buyer will be emailed.";
  if(!confirm(msg))return;
- try{const d=await api("/api/admin/requirements/"+encodeURIComponent(id)+"/review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,supplierIds:ids,adminNotes:document.getElementById("reqAdminNotes").value,buyerNote:document.getElementById("reqBuyerNote").value})});
+ try{const d=await api("/api/admin/requirements/"+encodeURIComponent(id)+"/review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,supplierIds:ids,adminNotes:(document.getElementById("reqAdminNotes")?.value||""),buyerNote:(document.getElementById("reqBuyerNote")?.value||"")})});
   document.getElementById("message").textContent="Saved."+(action==="share_suppliers"?" Shared with "+d.sharedWith+" new supplier(s); "+d.supplierEmailsSent+" email(s) sent.":"");
   await loadBuyerRequirements();await openBuyerRequirementAdmin(id);
  }catch(e){document.getElementById("message").textContent=e.message}
