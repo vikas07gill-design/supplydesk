@@ -29,6 +29,13 @@
 .rq-row{display:flex;justify-content:space-between;gap:12px;padding:12px 8px;border-bottom:1px solid #edf2f4;cursor:pointer;border-radius:8px}.rq-row:hover{background:#f4fafb}.rq-row-t{font-weight:800;font-size:14px}.rq-row-s{text-align:right;white-space:nowrap}
 .rq-st{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800;background:#eef3f5;color:#41606b}.rq-st-action{background:#fff2d9;color:#8a5a00}.rq-st-waiting{background:#e3eefc;color:#1d4f9a}.rq-st-orders{background:#dff5e8;color:#17663a}.rq-st-closed{background:#eef0f2;color:#5b6870}
 .rq-flag{font-size:10.5px;font-weight:800;border-radius:6px;padding:2px 6px}.rq-flag.bad{background:#fde4e4;color:#a33}.rq-flag.warn{background:#fff2d9;color:#8a5a00}
+.rq-search,.toolbar .subbar input,.toolbar .subbar select,#detail select{border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;font-size:13px;background:#fff;color:var(--ink);height:40px;outline:none}
+.rq-search:focus,.toolbar .subbar input:focus,.toolbar .subbar select:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(8,127,140,.15)}
+.rq-search{width:100%;margin-bottom:10px;padding-left:36px;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23637680' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='7' cy='7' r='5'/%3E%3Cpath d='M11 11l4 4'/%3E%3C/svg%3E") 12px center no-repeat}
+.toolbar .subbar{padding:6px 0 4px;gap:10px;align-items:center}.toolbar .subbar input{min-width:260px;flex:1 1 260px}.toolbar .subbar select{min-width:170px;cursor:pointer}
+.toolbar .subbar button{height:40px}
+@media(max-width:700px){.toolbar .navgroup{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin;padding-bottom:10px}.toolbar .navgroup button{white-space:nowrap;flex:0 0 auto}.toolbar .navgroup .gl{flex:0 0 auto;min-width:0;margin-right:4px}.toolbar .subbar input,.toolbar .subbar select{min-width:0;flex:1 1 100%}.rq-tabs{overflow-x:auto;flex-wrap:nowrap}.rq-tab{white-space:nowrap}.rq-row{flex-direction:column;gap:6px}.rq-row-s{text-align:left}}
+#message.muted{margin:6px 0 10px;min-height:0}
 </style>
 <link rel="stylesheet" href="assets/depth.css"><script src="assets/depth.js" defer></script></head>
 <body>
