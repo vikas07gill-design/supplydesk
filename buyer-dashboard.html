@@ -44,7 +44,7 @@ main{padding:34px 0 60px}.hero{display:flex;justify-content:space-between;gap:20
 </main>
 <script>
 const token=localStorage.getItem("supplydesk_buyer_dashboard_token")||"";
-if(!token)location.href="index.html";
+if(!token)location.href="buyer-login.html";
 async function load(){
  try{
   const r=await fetch("/api/buyer-dashboard",{headers:{"x-buyer-dashboard-token":token}});
@@ -60,7 +60,7 @@ async function load(){
   const DEC={pending:["Under review","pending"],accepted:["Accepted","accepted"],partial:["Partially accepted","partial"],rejected:["Not available","rejected"]};
   rows.innerHTML=e.map(x=>{const d=DEC[x.decision]||DEC.pending;return '<tr><td><strong>'+esc(x.productName)+'</strong></td><td>'+esc(x.capabilityCode||"—")+'</td><td>'+esc(x.quantity||"—")+'</td><td><span class="dec dec-'+d[1]+'">'+esc(d[0])+'</span>'+(x.decision==="partial"&&x.approvedQuantity?'<div class="decnote"><b>Available to you:</b> '+esc(x.approvedQuantity)+'</div>':'')+(x.remark?'<div class="decnote">'+esc(x.remark)+'</div>':'')+'</td><td>'+new Date(x.createdAt).toLocaleDateString()+'</td></tr>'}).join("");
   empty.style.display=e.length?"none":"block";
- }catch(e){localStorage.removeItem("supplydesk_buyer_dashboard_token");location.href="index.html";}
+ }catch(e){localStorage.removeItem("supplydesk_buyer_dashboard_token");location.href="buyer-login.html";}
 }
 
 const REQ_LABELS={pending_review:"Under SupplyDesk review",open:"Shared with suppliers",fulfilling:"SupplyDesk is handling it",rejected:"Not accepted",closed:"Closed",cancelled:"Cancelled"};

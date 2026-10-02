@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Buyer Login | SupplyDesk</title>
+<style>
+:root{--ink:#092438;--muted:#6b808a;--line:#dbe8ed;--bg:#f4f9fc;--brand:#087f8c;--blue:#287bf4}*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#eef8fb,#f8fbfd);font-family:Inter,system-ui,sans-serif;color:var(--ink);min-height:100vh}
+.wrap{max-width:920px;margin:auto;padding:0 20px}nav{height:72px;background:#06182b;color:#fff;display:flex;align-items:center}.nav{display:flex;justify-content:space-between;align-items:center}
+.btn{border:1px solid var(--line);background:#fff;border-radius:11px;padding:11px 15px;font-weight:850;cursor:pointer;text-decoration:none;color:var(--ink);display:inline-block;font-size:14px}.primary{background:linear-gradient(135deg,#16b9d1,#287bf4);border:0;color:#fff}.btn[disabled]{opacity:.6;cursor:default}
+main{padding:44px 0 60px}.card{max-width:460px;margin:0 auto;background:#fff;border:1px solid var(--line);border-radius:18px;padding:26px;box-shadow:0 14px 40px rgba(9,36,56,.08)}
+.eyebrow{font-size:11px;color:#078f9c;font-weight:900;letter-spacing:.13em;text-transform:uppercase}h1{margin:6px 0 8px;font-size:28px;line-height:1.15}p.lead{margin:0 0 18px;color:var(--muted);font-size:14px;line-height:1.5}
+label{display:block;font-size:13px;font-weight:800;margin:14px 0 6px}input{width:100%;padding:12px 13px;border:1px solid var(--line);border-radius:11px;font:inherit;font-size:15px}input:focus{outline:2px solid #bfe3ee;border-color:#16b9d1}
+.row{display:flex;gap:8px}.row .btn{flex:none}.status{margin-top:14px;font-size:13px;padding:10px 12px;border-radius:10px;display:none}.status.ok{display:block;background:#e8f7ef;color:#116a3a}.status.err{display:block;background:#fdecec;color:#a4262c}
+.hint{font-size:12px;color:var(--muted);margin-top:8px}.foot{max-width:460px;margin:16px auto 0;text-align:center;font-size:13px;color:var(--muted)}.foot a{color:var(--brand);font-weight:800}
+.step2{display:none}main.wrap{padding-top:48px!important}nav .wrap.nav{width:100%;justify-content:space-between!important}
+</style><link rel="stylesheet" href="assets/depth.css"></head>
+<body><nav><div class="wrap nav"><a href="index.html" aria-label="SupplyDesk home"><img src="assets/supplydesk-logo-dark.svg" alt="SupplyDesk" style="width:180px;height:auto;display:block"></a><a class="btn" href="index.html">← Back to SupplyDesk</a></div></nav>
+<main class="wrap">
+<div class="card">
+  <div class="eyebrow" id="eyebrow">Buyer login</div>
+  <h1 id="title">Welcome back</h1>
+  <p class="lead" id="lead">Enter your email and we will send a 6-digit code. New here? The same step creates your free buyer account.</p>
+  <form id="f" autocomplete="on">
+    <label for="email">Work email</label>
+    <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="you@company.com" required>
+    <div class="step2" id="step2">
+      <label for="otp">6-digit code</label>
+      <input id="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456">
+      <div class="hint">Check your inbox and spam folder. The code is valid for 10 minutes.</div>
+    </div>
+    <div class="row" style="margin-top:18px">
+      <button type="submit" class="btn primary" id="go" style="flex:1">Send code</button>
+      <button type="button" class="btn" id="resend" style="display:none">Resend</button>
+    </div>
+  </form>
+  <div class="status" id="st" role="status"></div>
+</div>
+<div class="foot">Looking to source something? <a href="requirement.html">Post a requirement</a><br>Supplier partner? <a href="supplier-dashboard.html">Supplier login</a></div>
+</main>
+<script>
+const KEY="supplydesk_buyer_dashboard_token";
+const q=new URLSearchParams(location.search);
+if(q.get("mode")==="signup"){document.getElementById("eyebrow").textContent="Create buyer account";document.getElementById("title").textContent="Get started in a minute";document.getElementById("lead").textContent="Verify your email to create your free buyer account. Post requirements, request quotes and track orders in one place."}
+try{if(localStorage.getItem(KEY)){fetch("/api/buyer-dashboard",{headers:{"x-buyer-dashboard-token":localStorage.getItem(KEY)}}).then(r=>{if(r.ok)location.replace("buyer-dashboard.html");else localStorage.removeItem(KEY)}).catch(()=>{})}}catch{}
+const $=id=>document.getElementById(id),st=$("st");
+function show(msg,ok){st.textContent=msg;st.className="status "+(ok?"ok":"err")}
+let sent=false;
+async function post(url,body){const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"Something went wrong. Please try again.");return d}
+async function sendCode(){
+  const email=$("email").value.trim().toLowerCase();
+  if(!/^\S+@\S+\.\S+$/.test(email)){show("Enter a valid email address.",false);return}
+  const b=$("go");b.disabled=true;b.textContent="Sending...";
+  try{const d=await post("/api/buyer-email/request-otp",{email});sent=true;$("step2").style.display="block";$("resend").style.display="inline-block";$("email").readOnly=true;
+    if(d.testOtp)$("otp").value=d.testOtp;show(d.message||"Code sent. Check your email.",true);$("otp").focus();b.textContent="Verify & continue"}
+  catch(e){show(e.message,false);b.textContent="Send code"}finally{b.disabled=false}
+}
+async function verify(){
+  const email=$("email").value.trim().toLowerCase(),otp=$("otp").value.trim();
+  if(!/^\d{6}$/.test(otp)){show("Enter the 6-digit code from your email.",false);return}
+  const b=$("go");b.disabled=true;b.textContent="Verifying...";
+  try{const d=await post("/api/buyer-email/verify-otp",{email,otp});try{localStorage.setItem(KEY,d.dashboardToken)}catch{}show("Verified. Opening your dashboard...",true);location.href="buyer-dashboard.html"}
+  catch(e){show(e.message,false);b.textContent="Verify & continue";b.disabled=false}
+}
+$("f").addEventListener("submit",e=>{e.preventDefault();sent?verify():sendCode()});
+$("resend").addEventListener("click",async()=>{$("email").readOnly=false;sent=false;await sendCode()});
+</script></body></html>

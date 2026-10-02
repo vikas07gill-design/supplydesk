@@ -27,7 +27,7 @@ footer{padding:30px 0;border-top:1px solid var(--line);color:#7a8e98;font-size:1
 <nav><div class="wrap navin">
 <a class="brand-logo" href="index.html" aria-label="SupplyDesk home"><img class="brand-logo-img" src="assets/supplydesk-logo-dark.svg" alt="SupplyDesk" width="218" height="63"></a>
 <div class="links"><a href="search.html?type=product">Products</a><a href="requirement.html">Request Quote</a><a href="explore.html">Industries</a><a href="explore.html">Countries</a><a href="services.html">Resources</a></div>
-<div class="actions"><a class="btn ghost" href="supplier-dashboard.html">Login</a><a class="btn primary" href="supplier-register.html">Sign Up</a></div>
+<div class="actions"><a class="btn ghost" href="buyer-login.html">Login</a><a class="btn primary" href="buyer-login.html?mode=signup">Sign Up</a></div>
 </div></nav>
 
 <section class="hero">
@@ -71,7 +71,7 @@ footer{padding:30px 0;border-top:1px solid var(--line);color:#7a8e98;font-size:1
 
 <section class="section" style="padding-top:0"><div class="wrap"><div class="cta"><div class="cta-text"><span class="cta-eyebrow">Start sourcing</span><h2>Have a product to source?</h2><p>Start with SupplyDesk and turn a simple requirement into a direct business connection.</p><ul class="cta-points"><li>Verified suppliers</li><li>190+ countries</li><li>Quotations sent to your email</li></ul></div><div class="cta-actions"><a class="btn primary" href="#search">Start Searching →</a><a class="btn cta-ghost" href="requirement.html">Post your requirement</a></div></div></div></section>
 
-<footer><div class="wrap footerin"><div>© 2026 SupplyDesk · Global Supply Network</div><div class="footerlinks"><a href="search.html">Search</a><a href="services.html">Services</a><a href="supplier-register.html">Register Supplier</a><a href="#how">How it works</a></div></div></footer>
+<footer><div class="wrap footerin"><div>© 2026 SupplyDesk · Global Supply Network</div><div class="footerlinks"><a href="search.html">Search</a><a href="services.html">Services</a><a href="buyer-login.html">Buyer Login</a><a href="supplier-dashboard.html">Supplier Login</a><a href="#how">How it works</a></div></div></footer>
 <script>
 let searchType="product";
 document.querySelectorAll(".search-tab").forEach(tab=>tab.addEventListener("click",()=>{document.querySelectorAll(".search-tab").forEach(x=>x.classList.remove("active"));tab.classList.add("active");searchType=tab.dataset.searchType||"product";document.getElementById("product").placeholder=searchType==="supplier"?"Search suppliers or business names...":searchType==="category"?"Search industries or categories...":"Search products, suppliers or keywords...";}));
