@@ -118,24 +118,93 @@ const newPoNumber = () => _code("PO");
 
 // ---- Supplier purchase orders (Phase 3) ----
 const PO_STATES = {
-  issued:        { label: "Issued" },
-  accepted:      { label: "Accepted by supplier" },
-  declined:      { label: "Declined by supplier" },
-  in_production: { label: "In production" },
-  dispatched:    { label: "Dispatched" },
-  completed:     { label: "Completed" },
-  cancelled:     { label: "Cancelled" }
+  issued:             { label: "Issued" },
+  accepted:           { label: "Accepted by supplier" },
+  partially_accepted: { label: "Partially accepted by supplier" },
+  declined:           { label: "Rejected by supplier" },
+  in_production:      { label: "Production started" },
+  ready_for_qc:       { label: "Ready for QC" },
+  ready_for_dispatch: { label: "Ready for dispatch" },
+  dispatched:         { label: "Dispatched" },
+  completed:          { label: "Completed" },
+  cancelled:          { label: "Cancelled" }
 };
 const PO_TRANSITIONS = {
-  issued: ["accepted", "declined", "cancelled"],
+  issued: ["accepted", "partially_accepted", "declined", "cancelled"],
   accepted: ["in_production", "cancelled"],
-  in_production: ["dispatched", "cancelled"],
+  partially_accepted: ["in_production", "cancelled"],
+  in_production: ["ready_for_qc", "dispatched", "cancelled"],
+  ready_for_qc: ["ready_for_dispatch", "cancelled"],
+  ready_for_dispatch: ["dispatched", "cancelled"],
   dispatched: ["completed"],
   completed: [], declined: [], cancelled: []
 };
 const isPoState = (s) => Object.prototype.hasOwnProperty.call(PO_STATES, s);
 const canPoTransition = (from, to) => from === to || (PO_TRANSITIONS[from] || []).includes(to);
 const newSupplierPoNumber = () => _code("SPO");
+
+
+// ---- Order architecture: Buyer PO -> SupplyDesk order (SD) -> Supplier PO ----
+// 1. Every buyer order first goes through SupplyDesk review.
+const ORDER_REVIEW = {
+  pending_review:        { label: "Pending Review",        buyerLabel: "Order received. SupplyDesk is reviewing it" },
+  accepted:              { label: "Accepted",              buyerLabel: "Accepted by SupplyDesk" },
+  partially_accepted:    { label: "Partially Accepted",    buyerLabel: "Partially accepted by SupplyDesk" },
+  pending_clarification: { label: "Pending Clarification", buyerLabel: "SupplyDesk needs a clarification from you" },
+  rejected:              { label: "Rejected",              buyerLabel: "Not accepted by SupplyDesk" }
+};
+const isReviewState = (s) => Object.prototype.hasOwnProperty.call(ORDER_REVIEW, s);
+const REVIEW_DECISIONS = { accept: "accepted", partial: "partially_accepted", clarify: "pending_clarification", reject: "rejected" };
+const reviewOpen = (s) => s === "pending_review" || s === "pending_clarification";   // states in which SupplyDesk may still decide
+const reviewAccepted = (s) => s === "accepted" || s === "partially_accepted";        // states in which the order may be fulfilled
+
+// 2. The buyer-facing timeline. Buyers only ever see these labels, never a supplier.
+const STAGES = [
+  { key: "order_received",       label: "Order Received" },
+  { key: "supplydesk_accepted",  label: "SupplyDesk Accepted" },
+  { key: "production_confirmed", label: "Production Confirmed",  supplier: true },   // needs supplier acknowledgement
+  { key: "in_production",        label: "Material in Production", supplier: true },
+  { key: "production_completed", label: "Production Completed",  supplier: true },
+  { key: "qc_completed",         label: "QC Completed" },
+  { key: "ready_for_transport",  label: "Ready for Transport" },
+  { key: "transport_booked",     label: "Transport Booked" },
+  { key: "insurance_completed",  label: "Insurance Completed" },
+  { key: "in_transit",           label: "In Transit" },
+  { key: "out_for_delivery",     label: "Out for Delivery" },
+  { key: "delivered",            label: "Delivered" },
+  { key: "order_closed",         label: "Order Closed" }
+];
+const STAGE_KEYS = STAGES.map(s => s.key);
+const stageIndex = (k) => STAGE_KEYS.indexOf(k);
+const stageLabel = (k) => (STAGES[stageIndex(k)] || {}).label || k;
+const isStage = (k) => stageIndex(k) >= 0;
+// The older coarse order status is kept (invoices, margin, reports) and derived from the stage.
+function legacyStatusForStage(k) {
+  const i = stageIndex(k);
+  if (i >= stageIndex("delivered")) return "delivered";
+  if (i >= stageIndex("in_transit")) return "shipped";
+  if (i >= stageIndex("in_production")) return "in_production";
+  return "confirmed";
+}
+// Supplier progress -> how far the buyer timeline may move on its own. Lowest live PO wins.
+const PO_RANK = { issued: 0, accepted: 1, partially_accepted: 1, in_production: 2, ready_for_qc: 3, ready_for_dispatch: 4, dispatched: 4, completed: 4 };
+function autoStageFromPos(statuses) {
+  if (!statuses.length) return null;
+  const min = Math.min(...statuses.map(s => PO_RANK[s] == null ? 0 : PO_RANK[s]));
+  return min >= 3 ? "production_completed" : min === 2 ? "in_production" : min === 1 ? "production_confirmed" : null;
+}
+const poReadyForDispatch = (statuses) => statuses.length > 0 && statuses.every(s => (PO_RANK[s] || 0) >= 4);
+// SupplyDesk-driven steps: strictly the next stage, and never one that waits for supplier confirmation.
+function manualStageProblem(current, to, posStatuses) {
+  const ci = stageIndex(current), ti = stageIndex(to);
+  if (ti < 0) return "Unknown stage.";
+  if (STAGES[ti].supplier || to === "supplydesk_accepted" || to === "order_received") return "\"" + stageLabel(to) + "\" is set automatically (after the supplier confirms), not by hand.";
+  if (ti !== ci + 1) return "The next step is \"" + stageLabel(STAGE_KEYS[Math.min(ci + 1, STAGE_KEYS.length - 1)]) + "\".";
+  if (to === "qc_completed" && current !== "production_completed") return "QC can be completed only after production is completed.";
+  if (to === "ready_for_transport" && !poReadyForDispatch(posStatuses)) return "The supplier has not yet marked the goods ready for dispatch.";
+  return null;
+}
+const newSdNumber = () => _code("SD");
 
 
 // ---- Invoices & payments (Phase 5). Money is handled in integer minor units (paise/cents) to avoid float drift. ----
@@ -183,4 +252,5 @@ function buyerStep(state){
   if(["buyer_approved","converted"].includes(state))return 4;
   return 0;
 }
-module.exports = { STATES, TRANSITIONS, LEGACY_STATUS_TO_STATE, isState, canTransition, isTerminal, parseQuantity, scoreCapability, newRfqCode, ORDER_STATES, ORDER_TRANSITIONS, isOrderState, canOrderTransition, newQuoteNo, newPoNumber, PO_STATES, PO_TRANSITIONS, isPoState, canPoTransition, newSupplierPoNumber, toMinor, fromMinor, computeInvoice, invoiceStatus, PAYMENT_METHODS, newInvoiceNo, priceFromMarkup, priceFromMargin, marginOf, buyerStep };
+module.exports = { STATES, TRANSITIONS, LEGACY_STATUS_TO_STATE, isState, canTransition, isTerminal, parseQuantity, scoreCapability, newRfqCode, ORDER_STATES, ORDER_TRANSITIONS, isOrderState, canOrderTransition, newQuoteNo, newPoNumber, PO_STATES, PO_TRANSITIONS, isPoState, canPoTransition, newSupplierPoNumber, toMinor, fromMinor, computeInvoice, invoiceStatus, PAYMENT_METHODS, newInvoiceNo, priceFromMarkup, priceFromMargin, marginOf, buyerStep,
+  ORDER_REVIEW, isReviewState, REVIEW_DECISIONS, reviewOpen, reviewAccepted, STAGES, STAGE_KEYS, stageIndex, stageLabel, isStage, legacyStatusForStage, autoStageFromPos, poReadyForDispatch, manualStageProblem, newSdNumber, PO_RANK };

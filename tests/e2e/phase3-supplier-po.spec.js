@@ -21,6 +21,7 @@ test.describe("SupplyDesk issues a PO to the supplier", () => {
     const { requirementId } = await (await request.post("/api/buyer-requirements", { data: { dashboardToken: v.dashboardToken, buyerName: "Secret Buyer Co", buyerCompany: "Secret Buyer Co", buyerCountry: "India", title: "P3 " + Date.now(), description: "d", category: "Plastics & Polymers", subcategory: "Containers", quantity: "1000", unit: "pcs" } })).json();
     await request.post(`/api/admin/requirements/${requirementId}/buyer-quote`, { headers: ah, data: { unitPrice: 50, quantity: "1000 pcs" } });
     const acc = await (await request.post(`/api/buyer-requirements/${requirementId}/quote/respond`, { headers: bh, data: { decision: "accept" } })).json();
+    expect((await request.post(`/api/admin/orders/${acc.orderId}/review`, { headers: ah, data: { decision: "accept" } })).status()).toBe(200);   // SupplyDesk accepts the buyer order before it can be fulfilled
     return { orderId: acc.orderId, email, bh };
   }
   async function supplierHeaders(request) {
@@ -60,7 +61,8 @@ test.describe("SupplyDesk issues a PO to the supplier", () => {
     // illegal moves, decline needs reason, then the happy path
     expect((await request.patch(`/api/supplier-dashboard/purchase-orders/${supplierPoId}/status`, { headers: sh, data: { status: "completed" } })).status()).toBe(409);
     expect((await request.patch(`/api/supplier-dashboard/purchase-orders/${supplierPoId}/status`, { headers: sh, data: { status: "declined" } })).status()).toBe(400);
-    const expectedOrder = { accepted: "confirmed", in_production: "in_production", dispatched: "shipped", completed: "shipped" };
+    // Buyer-facing progress follows supplier confirmation. Dispatch/completion alone do not mean the buyer is "shipped": SupplyDesk still does QC and transport.
+    const expectedOrder = { accepted: "confirmed", in_production: "in_production", dispatched: "in_production", completed: "in_production" };
     for (const s of ["accepted", "in_production", "dispatched", "completed"]) {
       expect((await request.patch(`/api/supplier-dashboard/purchase-orders/${supplierPoId}/status`, { headers: sh, data: { status: s, note: "ok" } })).status()).toBe(200);
       expect(await orderStatus(), "buyer order after PO " + s).toBe(expectedOrder[s]);   // buyer order follows supplier progress

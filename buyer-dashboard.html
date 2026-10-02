@@ -24,6 +24,14 @@ main{padding:34px 0 60px}.hero{display:flex;justify-content:space-between;gap:20
 .qbox .big{font-size:20px;font-weight:850;letter-spacing:-.03em}
 .upd{margin-top:12px;border-top:1px dashed var(--line);padding-top:10px}.upd h4{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
 .upd .m{padding:8px 10px;background:#f4f9fc;border-radius:10px;margin-bottom:6px;font-size:12.5px}.upd .m b{display:block;font-size:13px}.upd .m small{color:var(--muted);display:block;margin-top:3px;white-space:pre-wrap}
+.ord{border:1px solid var(--line);border-radius:16px;padding:16px;margin-top:12px;background:#fff}
+.ord-h{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.ord-h strong{font-size:15px}
+.ord-bar{display:flex;gap:3px;margin:14px 0 6px}.ord-bar i{flex:1;height:5px;border-radius:5px;background:#e3edf1}.ord-bar i.on{background:var(--blue)}
+.ord-now{font-size:13px;color:var(--muted)}.ord-now b{color:var(--ink)}
+.ord-note{margin-top:10px;padding:10px 12px;border-radius:10px;font-size:13px;background:#eef6fb;border:1px solid #d3e6f2}.ord-note.warn{background:#fff8e8;border-color:#f3dca4}.ord-note.bad{background:#fdecec;border-color:#f3c3c3}.ord-note textarea{width:100%;margin:8px 0;padding:8px;border:1px solid var(--line);border-radius:8px;font:inherit;min-height:60px}
+.ord details{margin-top:10px}.ord summary{cursor:pointer;font-size:12.5px;font-weight:800;color:var(--blue)}
+.tl{list-style:none;margin:10px 0 0;padding:0}.tl li{position:relative;padding:0 0 12px 26px;font-size:13px;color:#8aa0a9}.tl li:before{content:"";position:absolute;left:6px;top:4px;width:10px;height:10px;border-radius:50%;background:#dbe7eb}.tl li:after{content:"";position:absolute;left:10px;top:16px;bottom:-2px;width:2px;background:#e8f0f3}.tl li:last-child:after{display:none}
+.tl li.done{color:var(--ink)}.tl li.done:before{background:#2bb673}.tl li.current{color:var(--ink);font-weight:850}.tl li.current:before{background:var(--blue);box-shadow:0 0 0 4px rgba(0,150,200,.18)}.tl small{display:block;font-weight:500;color:var(--muted);font-size:11.5px}
 @media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:700px){.hero{display:block}.hero h1{font-size:34px}.grid,.profile{grid-template-columns:1fr}}
 .dec{display:inline-block;padding:5px 11px;border-radius:99px;font-weight:800;font-size:12px}.dec-pending{background:#e9eef2;color:#46606b}.dec-accepted{background:#d9f5e3;color:#0c5a2a}.dec-partial{background:#fff1cc;color:#8a5200}.dec-rejected{background:#ffe1e1;color:#8a1c1c}.decnote{margin-top:6px;color:#46606b;font-size:12px;max-width:340px;line-height:1.5}
@@ -104,10 +112,26 @@ async function loadInvoices(){
  try{const r=await fetch("/api/buyer-invoices",{headers:{"x-buyer-dashboard-token":token}});const d=await r.json();const l=d.invoices||[];
   el.innerHTML=l.length?l.map(i=>'<div style="border:1px solid var(--line);border-radius:13px;padding:14px;margin-top:10px"><div style="display:flex;justify-content:space-between;gap:10px"><strong>'+esc(i.invoice_no)+' · '+esc(i.po_number)+'</strong><span class="pill">'+esc(i.status==="partially_paid"?"Partly paid":i.status==="paid"?"Paid":"Payment due")+'</span></div><div style="font-size:13px;margin-top:6px">'+fm(i.subtotal)+' + GST '+esc(i.gst_rate)+'% ('+fm(i.gst_amount)+') = <b>'+fm(i.total)+' '+esc(i.currency)+'</b></div><div style="font-size:12px;color:var(--muted);margin-top:4px">Paid '+fm(i.paid_amount)+' · Outstanding '+fm(i.outstanding)+(i.due_date?' · Due '+esc(String(i.due_date).slice(0,10)):'')+'</div>'+(i.payments||[]).map(p=>'<div style="font-size:12px;color:var(--muted)">'+esc(String(p.received_on).slice(0,10))+' · '+esc(p.amount)+' received'+(p.reference?' · '+esc(p.reference):'')+'</div>').join("")+'</div>').join(""):'<div class="empty">No invoices yet.</div>';}catch{el.innerHTML='<div class="empty">Could not load invoices.</div>';}
 }
+function ordCard(x){
+ const rs=x.reviewStatus,acc=rs==="accepted"||rs==="partially_accepted",tl=x.timeline||[],ci=Math.max(0,tl.findIndex(t=>t.state==="current"));
+ const cur=tl[ci]||{};
+ let note="";
+ if(rs==="pending_review")note='<div class="ord-note">SupplyDesk has received your order and is reviewing it. You will see the decision here and by email.</div>';
+ else if(rs==="pending_clarification")note='<div class="ord-note warn"><b>SupplyDesk needs a clarification</b><div style="margin-top:4px;white-space:pre-wrap">'+esc(x.review_note||"")+'</div><textarea id="clr-'+esc(x.id)+'" placeholder="Your reply"></textarea><button class="btn primary" onclick="clarifyOrder(\''+esc(x.id)+'\')">Send reply to SupplyDesk</button></div>';
+ else if(rs==="rejected")note='<div class="ord-note bad"><b>This order was not accepted.</b>'+(x.review_note?'<div style="margin-top:4px;white-space:pre-wrap">'+esc(x.review_note)+'</div>':'')+'</div>';
+ else if(rs==="partially_accepted")note='<div class="ord-note warn"><b>Partially accepted:</b> SupplyDesk will supply '+esc(x.quantity)+(x.requested_quantity?' of the '+esc(x.requested_quantity)+' you requested':'')+'.'+(x.review_note?'<div style="margin-top:4px;white-space:pre-wrap">'+esc(x.review_note)+'</div>':'')+'</div>';
+ const bar=(acc||rs==="pending_review"||rs==="pending_clarification")&&tl.length?'<div class="ord-bar">'+tl.map((t,i)=>'<i class="'+(i<=ci&&(acc||i===0)?"on":"")+'"></i>').join("")+'</div><div class="ord-now">'+(acc?'Step '+(ci+1)+' of '+tl.length+': ':'')+'<b>'+esc(acc?x.stageLabel:x.reviewBuyerLabel)+'</b></div>':'';
+ const list=acc&&tl.length?'<details><summary>View full order timeline</summary><ul class="tl">'+tl.map(t=>'<li class="'+t.state+'">'+esc(t.label)+(t.at&&t.state!=="todo"?'<small>'+esc(fmtDt(t.at))+(t.ref?' · Ref '+esc(t.ref):'')+'</small>':'')+'</li>').join("")+'</ul></details>':'';
+ return '<div class="ord"><div class="ord-h"><div><strong>'+esc(x.po_number)+' · '+esc(x.title)+'</strong><div class="rq-meta">'+esc(x.quantity)+' @ '+fm(x.unit_price)+' '+esc(x.currency)+(x.total_price?' · Total '+fm(x.total_price)+' '+esc(x.currency):'')+(x.sdRef&&acc?' · SupplyDesk ref '+esc(x.sdRef):'')+'</div></div><span class="pill">'+esc(acc?x.stageLabel:x.reviewLabel)+'</span></div>'+bar+note+list+'</div>';
+}
+async function clarifyOrder(id){
+ const t=document.getElementById("clr-"+id),note=(t&&t.value||"").trim();if(!note){alert("Write your reply first.");return;}
+ try{const r=await fetch("/api/buyer-orders/"+encodeURIComponent(id)+"/clarify",{method:"POST",headers:{"Content-Type":"application/json","x-buyer-dashboard-token":token},body:JSON.stringify({note})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Could not send.");await loadOrders();}catch(e){alert(e.message);}
+}
 async function loadOrders(){
  const el=document.getElementById("orders");if(!el)return;
  try{const r=await fetch("/api/buyer-orders",{headers:{"x-buyer-dashboard-token":token}});const d=await r.json();const o=d.orders||[];
-  el.innerHTML=o.length?o.map(x=>'<div style="border:1px solid var(--line);border-radius:13px;padding:14px;margin-top:10px"><div style="display:flex;justify-content:space-between;gap:10px"><strong>'+esc(x.po_number)+' · '+esc(x.title)+'</strong><span class="pill">'+esc(x.statusLabel)+'</span></div><div style="font-size:12px;color:var(--muted);margin-top:6px">'+esc(x.quantity)+' @ '+fm(x.unit_price)+' '+esc(x.currency)+(x.total_price?' · Total '+fm(x.total_price)+' '+esc(x.currency):'')+(x.notes?' · '+esc(x.notes):'')+'</div></div>').join(""):'<div class="empty">No orders yet.</div>';}catch{el.innerHTML='<div class="empty">Could not load orders.</div>';}
+  el.innerHTML=o.length?o.map(ordCard).join(""):'<div class="empty">No orders yet.</div>';}catch{el.innerHTML='<div class="empty">Could not load orders.</div>';}
 }
 async function loadRequirements(){
  const el=document.getElementById("requirements");if(!el)return[];

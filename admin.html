@@ -18,7 +18,7 @@
 .rq-opts{display:grid;gap:10px;margin:12px 0}.rq-opt{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px}.rq-opt h4{margin:0 0 4px;font-size:13px}.rq-opt p{margin:0 0 8px;font-size:12px;color:var(--muted)}.rq-opt button{margin-top:8px}
 .rq-opt details summary,.rq-next details summary{cursor:pointer;font-size:12px;font-weight:800;color:var(--brand)}
 .rq-list{max-height:180px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:4px 10px;background:#fff}.rq-list label{display:flex;gap:8px;align-items:center;padding:5px 0;font-size:12px}
-.rq-grid,.rq-grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.rq-form label,.rq-grid2 label{display:block;font-size:11px;font-weight:800;color:#52707a}.rq-form label small,.rq-grid2 label small{font-weight:500;color:var(--muted)}.rq-form input,.rq-form select,.rq-form textarea,.rq-grid2 textarea{width:100%;margin-top:4px;font-weight:400}.rq-wide{margin-top:10px}
+.rq-grid,.rq-grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.rq-form label,.rq-grid2 label{display:block;font-size:11px;font-weight:800;color:#52707a}.rq-form label small,.rq-grid2 label small{font-weight:500;color:var(--muted)}.rq-form input,.rq-form select,.rq-form textarea,.rq-grid2 textarea{width:100%;margin-top:4px;font-weight:400}.rq-wide{margin-top:10px}.rq-grid label,label.rq-wide{display:block;font-size:11px;font-weight:800;color:#52707a}.rq-grid label small,label.rq-wide small{font-weight:500;color:var(--muted)}.rq-grid input,.rq-grid select,label.rq-wide textarea,label.rq-wide input{width:100%;margin-top:4px;font-weight:400}
 .rq-facts{display:grid;grid-template-columns:1fr 1fr;gap:12px 18px;margin:6px 0 10px}.rq-facts label{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:#7a8e96;font-weight:800}.rq-facts span{font-size:13px}
 .rq-desc{font-size:13px;background:#f7fafb;border-radius:10px;padding:10px;margin-bottom:12px;white-space:pre-wrap}
 .rq-sec{border-top:1px solid var(--line);padding:2px 0}.rq-sec summary{cursor:pointer;padding:11px 0;font-weight:800;font-size:13px}.rq-sec summary em{font-style:normal;background:#e5f4f6;color:#075b66;border-radius:999px;padding:1px 8px;font-size:11px;margin-left:6px}.rq-sec-b{padding:0 0 12px}
@@ -29,6 +29,10 @@
 .rq-row{display:flex;justify-content:space-between;gap:12px;padding:12px 8px;border-bottom:1px solid #edf2f4;cursor:pointer;border-radius:8px}.rq-row:hover{background:#f4fafb}.rq-row-t{font-weight:800;font-size:14px}.rq-row-s{text-align:right;white-space:nowrap}
 .rq-st{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800;background:#eef3f5;color:#41606b}.rq-st-action{background:#fff2d9;color:#8a5a00}.rq-st-waiting{background:#e3eefc;color:#1d4f9a}.rq-st-orders{background:#dff5e8;color:#17663a}.rq-st-closed{background:#eef0f2;color:#5b6870}
 .rq-flag{font-size:10.5px;font-weight:800;border-radius:6px;padding:2px 6px}.rq-flag.bad{background:#fde4e4;color:#a33}.rq-flag.warn{background:#fff2d9;color:#8a5a00}
+.ord-chain{display:flex;align-items:center;gap:8px;margin:12px 0;padding:10px 12px;overflow-x:auto;white-space:nowrap;border:1px solid var(--line);border-radius:12px;background:#f7fbfc}.ord-chain small{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}.ord-chain b{font-size:13px}.ord-chain>span{color:var(--muted);font-size:18px}
+.stgs{display:flex;flex-wrap:wrap;gap:6px}.stg{font-size:11.5px;font-weight:700;padding:4px 9px;border-radius:999px;background:#eef3f5;color:#6a838d}.stg small{font-weight:600;opacity:.7}.stg.done{background:#e1f5ea;color:#1b6b43}.stg.now{background:var(--brand);color:#fff}
+.rq-alloc{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #edf2f4;font-size:13px}.rq-alloc input{width:120px}
+.rq-row input[type=checkbox]{flex:none}
 .rq-search,.toolbar .subbar input,.toolbar .subbar select,#detail select{border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;font-size:13px;background:#fff;color:var(--ink);height:40px;outline:none}
 .rq-search:focus,.toolbar .subbar input:focus,.toolbar .subbar select:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(8,127,140,.15)}
 .rq-search{width:100%;margin-bottom:10px;padding-left:36px;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23637680' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='7' cy='7' r='5'/%3E%3Cpath d='M11 11l4 4'/%3E%3C/svg%3E") 12px center no-repeat}
@@ -685,28 +689,124 @@ async function openBuyerRequirementAdmin(id,level,openSec){
 async function renderRfqExtras(){}   // superseded by the state-aware layout above
 
 
+// ---- Orders: Buyer PO -> SupplyDesk order (SD) -> Supplier PO. The buyer only ever deals with SupplyDesk. ----
+const ORD_GROUPS={review:"Needs review",assign:"To assign",progress:"In progress",done:"Delivered",closed:"Closed",sd:"SD orders"};
+let ordFilter="review",ordData={orders:[],stages:[]},sdList=[],ordSearch="",ordSel=new Set();
+const ordGroup=o=>o.status==="cancelled"||o.review_status==="rejected"?"closed":o.reviewOpen?"review":!o.sd_order_id?"assign":["delivered","order_closed"].includes(o.stage)?"done":"progress";
+const ordPill=o=>o.reviewOpen||o.review_status==="rejected"?o.reviewLabel:(o.status==="cancelled"?"Cancelled":o.stageLabel);
+function setOrdFilter(k){ordFilter=k;renderOrderList()}
+function ordToggle(id,on){on?ordSel.add(id):ordSel.delete(id);const b=document.getElementById("ordMake");if(b){b.disabled=!ordSel.size;b.textContent="Create SupplyDesk order from "+ordSel.size+" selected"}}
+function ordRowsHtml(){
+ const needle=ordSearch.trim().toLowerCase();
+ if(ordFilter==="sd")return (sdList.filter(s=>!needle||(s.sd_number+" "+s.title).toLowerCase().includes(needle)).map(s=>'<div class="rq-row" onclick="openSdOrder(\''+esc(s.id)+'\')"><div class="rq-row-main"><div class="rq-row-t">'+esc(s.sd_number)+' · '+esc(s.title)+'</div><div class="muted">'+esc(s.buyer_orders)+' buyer order(s) · '+esc(s.live_pos)+' live supplier PO(s)</div></div><div class="rq-row-s"><span class="rq-st">SupplyDesk order</span></div></div>').join("")||'<div class="muted" style="padding:14px 4px">No SupplyDesk orders yet. Accept a buyer order, then create one under "To assign".</div>');
+ return ordData.orders.filter(o=>ordGroup(o)===ordFilter&&(!needle||(o.po_number+" "+o.title+" "+(o.sd_number||"")+" "+(o.buyer_name||"")+" "+(o.rfq_code||"")).toLowerCase().includes(needle))).map(o=>{
+  const warn=o.allocated!=null&&o.sd_order_id&&o.covered===false?'<span class="rq-flag warn">Not fully allocated</span> ':"";
+  const pick=ordFilter==="assign"?'<input type="checkbox" '+(ordSel.has(o.id)?"checked ":"")+'onclick="event.stopPropagation();ordToggle(\''+esc(o.id)+'\',this.checked)" style="margin:3px 10px 0 0">':"";
+  return '<div class="rq-row" onclick="openOrderAdmin(\''+esc(o.id)+'\')">'+pick+'<div class="rq-row-main"><div class="rq-row-t">'+esc(o.po_number)+' · '+esc(o.title)+'</div><div class="muted">'+esc(o.buyer_name||"")+' · '+esc(o.quantity)+' @ '+esc(o.unit_price)+' '+esc(o.currency)+(o.sd_number?' · '+esc(o.sd_number):'')+'</div></div><div class="rq-row-s"><span class="rq-st rq-st-'+(ordFilter==="review"?"action":ordFilter==="progress"?"waiting":"")+'">'+esc(ordPill(o))+'</span><div class="muted">'+warn+esc(ageText(Math.floor((Date.now()-new Date(o.created_at).getTime())/3600000)))+'</div></div></div>';}).join("")||'<div class="muted" style="padding:14px 4px">Nothing here.</div>';
+}
+function renderOrderList(){
+ const cnt=k=>k==="sd"?sdList.length:ordData.orders.filter(o=>ordGroup(o)===k).length;
+ const tabs=Object.keys(ORD_GROUPS).map(k=>'<button class="rq-tab'+(ordFilter===k?" on":"")+'" onclick="setOrdFilter(\''+k+'\')">'+ORD_GROUPS[k]+' <em>'+cnt(k)+'</em></button>').join("");
+ const bar=ordFilter==="assign"?'<div class="rq-next" style="margin:8px 0"><div class="muted" style="margin-bottom:8px">Tick the accepted buyer orders SupplyDesk will fulfil together (one product run), then create one SupplyDesk order. A single order works too.</div><button class="primary" id="ordMake" '+(ordSel.size?"":"disabled ")+'onclick="makeSdOrder()">Create SupplyDesk order from '+ordSel.size+' selected</button></div>':"";
+ document.getElementById("list").innerHTML='<div class="rq-listhead"><b>Orders</b></div><input class="rq-search" placeholder="Search PO, SD no, product, buyer..." value="'+esc(ordSearch)+'" oninput="ordSearch=this.value;document.getElementById(\'ordRows\').innerHTML=ordRowsHtml()"><div class="rq-tabs">'+tabs+'</div>'+bar+'<div id="ordRows">'+ordRowsHtml()+'</div>';
+}
 async function loadOrders(){
- try{const d=await api("/api/admin/orders");document.getElementById("message").textContent="";
-  document.getElementById("detail").innerHTML="";
-  document.getElementById("list").innerHTML=(d.orders||[]).length?'<div class="row header"><div>PO</div><div>Buyer</div><div>Order</div><div>Status</div><div></div></div>'+d.orders.map(o=>'<div class="row"><div><b>'+esc(o.po_number)+'</b><div class="muted">'+esc(o.rfq_code||"")+'</div></div><div>'+esc(o.buyer_company||o.buyer_name||"")+'</div><div>'+esc(o.title)+'<div class="muted">'+esc(o.quantity)+' @ '+esc(o.unit_price)+' '+esc(o.currency)+(o.total_price?' = '+esc(o.total_price):'')+'</div></div><div><span class="pill">'+esc(o.statusLabel)+'</span></div><div>'+(o.allowedNext||[]).map(n=>'<button onclick="setOrderStatus(\''+esc(o.id)+'\',\''+esc(n)+'\')">'+esc(d.states[n]||n)+'</button>').join(" ")+'<button onclick="openSupplierPos(\''+esc(o.id)+'\')">Supplier POs</button><button onclick="openInvoice(\''+esc(o.id)+'\')">Invoice</button></div></div>').join(""):"<div class='muted'>No orders yet.</div>";
+ try{const [d,s]=await Promise.all([api("/api/admin/orders"),api("/api/admin/sd-orders")]);document.getElementById("message").textContent="";
+  ordData=d;sdList=s.sdOrders||[];ordSel=new Set([...ordSel].filter(id=>d.orders.some(o=>o.id===id&&ordGroup(o)==="assign")));
+  if(!d.orders.some(o=>ordGroup(o)===ordFilter)&&ordFilter!=="sd"){const first=Object.keys(ORD_GROUPS).find(k=>d.orders.some(o=>ordGroup(o)===k));if(first)ordFilter=first;}
+  document.getElementById("detail").innerHTML="";renderOrderList();
  }catch(e){document.getElementById("message").textContent=e.message}
 }
-
-async function openSupplierPos(orderId){
- try{const d=await api("/api/admin/orders/"+encodeURIComponent(orderId)+"/supplier-pos");
-  const rows=(d.supplierPos||[]).map(p=>'<tr><td><b>'+esc(p.po_number)+'</b></td><td>'+esc(p.trade_name||p.legal_name)+'</td><td>'+esc(p.quantity)+'</td><td>'+esc(p.unit_cost)+' '+esc(p.currency)+'</td><td>'+esc(p.statusLabel)+(p.supplier_note?'<div class="muted">'+esc(p.supplier_note)+'</div>':'')+'</td><td>'+(["issued","accepted","in_production"].includes(p.status)?'<button onclick="cancelSupplierPo(\''+esc(p.id)+'\',\''+esc(orderId)+'\')">Cancel</button>':'')+'</td></tr>').join("");
-  document.getElementById("detail").innerHTML='<h2>Supplier purchase orders</h2>'+(rows?'<table style="width:100%;font-size:13px"><tr><th>PO</th><th>Supplier</th><th>Qty</th><th>Unit cost</th><th>Status</th><th></th></tr>'+rows+'</table>':'<div class="muted">No supplier PO issued yet.</div>')+'<h3 style="margin-top:22px">Issue a purchase order</h3><div class="muted" style="margin-bottom:6px">Use the Capability ID from the RFQ matches. The supplier never sees the buyer or the buyer price.</div><div class="toolbar"><input id="spoCode" placeholder="Capability ID (SD-XXX-XXXX)"><input id="spoQty" placeholder="Quantity"><input id="spoCost" type="number" step="0.0001" min="0" placeholder="Unit cost"><select id="spoCur"><option>INR</option><option>USD</option><option>EUR</option><option>GBP</option><option>AED</option></select><input id="spoDate" type="date"></div><textarea id="spoTerms" placeholder="Terms (payment, packing, delivery)" style="min-height:50px"></textarea><div class="actions"><button class="primary" onclick="issueSupplierPo(\''+esc(orderId)+'\')">Issue PO to supplier</button></div>';
+async function makeSdOrder(){
+ if(!ordSel.size)return;
+ const title=ordSel.size>1?prompt("Name for this combined run (e.g. product + month):",""):"";if(title===null)return;
+ try{const d=await api("/api/admin/sd-orders",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({buyerOrderIds:[...ordSel],title})});
+  ordSel=new Set();await loadOrders();document.getElementById("message").textContent="SupplyDesk order "+d.sdNumber+" created. Now issue the supplier PO.";await openSdOrder(d.sdOrderId);
  }catch(e){document.getElementById("message").textContent=e.message}
 }
-async function issueSupplierPo(orderId){
- const g=x=>document.getElementById(x).value.trim();
- if(!confirm("Issue this purchase order? The supplier will be emailed."))return;
- try{const d=await api("/api/admin/orders/"+encodeURIComponent(orderId)+"/supplier-po",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({capabilityCode:g("spoCode"),quantity:g("spoQty"),unitCost:g("spoCost"),currency:g("spoCur"),deliveryBy:g("spoDate"),terms:g("spoTerms")})});
-  document.getElementById("message").textContent="PO "+d.poNumber+" issued.";await openSupplierPos(orderId);}catch(e){document.getElementById("message").textContent=e.message}
+async function ordPost(path,body,after){
+ try{await api(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});await after();}catch(e){document.getElementById("message").textContent=e.message}
 }
-async function cancelSupplierPo(id,orderId){
+function ordDecChange(){const v=document.getElementById("ordDec").value;document.getElementById("ordQtyBox").style.display=v==="partial"?"":"none"}
+async function ordReview(id){
+ const g=x=>document.getElementById(x).value.trim(),dec=g("ordDec");
+ if(dec==="reject"&&!confirm("Reject this buyer order? It will leave the pipeline."))return;
+ await ordPost("/api/admin/orders/"+encodeURIComponent(id)+"/review",{decision:dec,acceptedQuantity:g("ordAccQty"),note:g("ordNote")},async()=>{await loadOrders();await openOrderAdmin(id);document.getElementById("message").textContent="Decision saved. The buyer has been notified.";});
+}
+async function ordStage(id,stage){
+ const g=x=>(document.getElementById(x)||{value:""}).value.trim();
+ await ordPost("/api/admin/orders/"+encodeURIComponent(id)+"/stage",{stage,ref:g("ordRef"),note:g("ordStageNote")},async()=>{await loadOrders();await openOrderAdmin(id);document.getElementById("message").textContent="Buyer timeline updated and the buyer notified.";});
+}
+async function ordSingleSd(id){
+ await ordPost("/api/admin/sd-orders",{buyerOrderIds:[id]},async()=>{await loadOrders();await openOrderAdmin(id);});
+}
+const poStatusTxt=p=>esc(p.statusLabel||p.status)+(p.accepted_quantity?' ('+esc(p.accepted_quantity)+' accepted)':'');
+const poExtra=p=>[p.batch_no?'Batch '+esc(p.batch_no):'',p.production_started_at?'Started '+esc(String(p.production_started_at).slice(0,10)):'',p.expected_completion?'Expected '+esc(String(p.expected_completion).slice(0,10)):''].filter(Boolean).join(' · ');
+async function openOrderAdmin(id){
+ try{
+  const enc=encodeURIComponent(id),o=ordData.orders.find(x=>x.id===id);if(!o)throw Error("Order not found.");
+  const t=await api("/api/admin/orders/"+enc+"/trace");
+  const su=role()==="super_admin",acc=["accepted","partially_accepted"].includes(o.review_status),open=acc&&o.status!=="cancelled";
+  const chain='<div class="ord-chain"><div><small>Buyer PO</small><b>'+esc(o.po_number)+'</b></div><span>→</span><div><small>SupplyDesk order</small><b>'+(t.sdOrder?'<a href="#" onclick="openSdOrder(\''+esc(t.sdOrder.id)+'\');return false">'+esc(t.sdOrder.sd_number)+'</a>':'<span class="muted">not created</span>')+'</b></div><span>→</span><div><small>Supplier PO</small><b>'+((t.supplierPos||[]).length?t.supplierPos.map(p=>esc(p.po_number)).join(", "):'<span class="muted">not issued</span>')+'</b></div></div>';
+  const facts='<div class="rq-facts">'+rqFact("Buyer",esc(o.buyer_name||""))+rqFact("Quantity",esc(o.quantity)+(o.requested_quantity?' <span class="muted">(requested '+esc(o.requested_quantity)+')</span>':""))+rqFact("Buyer price",esc(o.unit_price)+" "+esc(o.currency)+(o.total_price?" · total "+esc(o.total_price):""))+rqFact("RFQ",esc(o.rfq_code||""))+'</div>';
+  let main="";
+  if(o.reviewOpen){
+   main='<div class="rq-next"><div class="rq-next-h">'+(o.review_status==="pending_clarification"?"Waiting for the buyer to answer your clarification":"Review this buyer order")+'</div><div class="muted" style="margin-bottom:8px">Accepting makes SupplyDesk responsible for the order. Only then can you assign suppliers.'+(o.review_note?' Last note: '+esc(o.review_note):'')+'</div>'
+    +'<div class="rq-grid"><label>Decision<select id="ordDec" onchange="ordDecChange()"><option value="accept">Accept</option><option value="partial">Partially accept</option><option value="clarify">Ask for clarification</option><option value="reject">Reject</option></select></label><label id="ordQtyBox" style="display:none">Quantity SupplyDesk will supply<input id="ordAccQty" placeholder="e.g. 250"></label></div>'
+    +'<label class="rq-wide">Note to buyer <small>(required unless accepting)</small><textarea id="ordNote" style="min-height:48px"></textarea></label><div class="actions"><button class="primary" onclick="ordReview(\''+esc(id)+'\')">Save decision and tell the buyer</button></div></div>';
+  }else if(o.review_status==="rejected"||o.status==="cancelled"){
+   main='<div class="rq-next done"><div class="rq-next-h">'+(o.review_status==="rejected"?"Rejected":"Cancelled")+'</div><div class="muted">'+esc(o.review_note||"This order is closed.")+'</div></div>';
+  }else if(!t.sdOrder){
+   main='<div class="rq-next"><div class="rq-next-h">Next: decide how to fulfil it</div><div class="muted" style="margin-bottom:8px">Create a SupplyDesk order for this buyer order alone, or go to <b>To assign</b> and tick several orders to combine them into one supplier run.</div><button class="primary" onclick="ordSingleSd(\''+esc(id)+'\')">Create SupplyDesk order (this order only)</button></div>';
+  }
+  let stage="";
+  if(open){
+   const chips=(ordData.stages||[]).map((s,i,a)=>{const ci=a.findIndex(x=>x.key===(o.stage||"supplydesk_accepted"));return '<span class="stg '+(i<ci?"done":i===ci?"now":"")+'">'+esc(s.label)+(s.supplier?' <small>supplier</small>':'')+'</span>'}).join("");
+   let nxt="";
+   if(o.nextStage){
+    if(o.nextBlocked){const sup=((ordData.stages||[]).find(x=>x.key===o.nextStage)||{}).supplier;nxt='<div class="muted" style="margin-top:10px">Next: <b>'+esc(o.nextStageLabel)+'</b>. '+(sup?'Waiting for the supplier to confirm in the backend. This step updates on its own.':esc(o.nextBlocked))+'</div>';}
+    else nxt='<div class="rq-next" style="margin-top:10px"><div class="rq-next-h">Next: '+esc(o.nextStageLabel)+'</div><div class="rq-grid"><label>Reference <small>(booking / policy / tracking, shown to the buyer)</small><input id="ordRef"></label><label>Note to buyer <small>(optional)</small><input id="ordStageNote"></label></div><div class="actions"><button class="primary" onclick="ordStage(\''+esc(id)+'\',\''+esc(o.nextStage)+'\')">Mark "'+esc(o.nextStageLabel)+'" and tell the buyer</button></div></div>';
+   }
+   stage='<div class="rq-sec-b" style="border-top:1px solid var(--line);margin-top:14px;padding-top:12px"><b>Buyer timeline</b><div class="muted" style="margin:4px 0 8px">Production steps (marked <i>supplier</i>) move on their own after the supplier confirms in the backend. The buyer never sees the supplier.</div><div class="stgs">'+chips+'</div>'+nxt+'</div>';
+  }
+  const pos=(t.supplierPos||[]).map(p=>'<div class="rq-q"><b>'+esc(p.po_number)+'</b> · '+(su?esc(p.trade_name||p.legal_name):'<span class="muted">'+esc(p.trade_name||"")+'</span>')+' · qty for this order <b>'+esc(p.line_quantity==null?"-":Number(p.line_quantity))+'</b> of PO '+esc(p.quantity)+' · '+poStatusTxt(p)+(poExtra(p)?'<div class="muted">'+poExtra(p)+'</div>':'')+'</div>').join("")||'<div class="muted">No supplier PO yet.</div>';
+  const ev=(t.events||[]).slice().reverse().map(e=>'<div class="rq-q"><b>'+esc(e.stageLabel||(e.kind==="backend"?"Backend":e.kind))+'</b>'+(e.ref?' · '+esc(e.ref):'')+(e.detail?'<div class="muted">'+esc(e.detail)+'</div>':'')+'<div class="muted">'+esc(fmtDtAdmin(e.at))+' · '+esc(e.by||"")+'</div></div>').join("")||'<div class="muted">No events.</div>';
+  const acts='<div class="actions"><button onclick="openInvoice(\''+esc(id)+'\')">Invoice &amp; payments</button>'+(o.status!=="cancelled"&&o.status!=="delivered"&&o.review_status!=="rejected"&&acc?'<button class="danger" onclick="setOrderStatus(\''+esc(id)+'\',\'cancelled\')">Cancel order</button>':"")+'</div>';
+  document.getElementById("detail").innerHTML='<div class="rq-head"><div><h2>'+esc(o.po_number)+' · '+esc(o.title)+'</h2><div class="muted">'+esc(o.buyer_name||"")+'</div></div><span class="rq-pill">'+esc(ordPill(o))+'</span></div>'+chain+facts+main+stage
+   +rqSec("Supplier POs for this order <small class='muted'>(backend only)</small>",pos,false,(t.supplierPos||[]).length)+rqSec("Order history",ev,false,(t.events||[]).length)+acts;
+  document.getElementById("detail").scrollIntoView({behavior:"smooth",block:"start"});
+ }catch(e){document.getElementById("message").textContent=e.message}
+}
+const fmtDtAdmin=s=>{try{return new Date(s).toLocaleString([],{dateStyle:"medium",timeStyle:"short"})}catch{return""}};
+async function openSdOrder(id){
+ try{
+  const d=await api("/api/admin/sd-orders/"+encodeURIComponent(id)),su=role()==="super_admin",sd=d.sdOrder;
+  const items='<table style="width:100%;font-size:13px"><tr><th>Buyer PO</th><th>Buyer</th><th>Needed</th><th>Allocated</th><th>Remaining</th><th>Stage</th></tr>'+d.items.map(i=>'<tr><td><a href="#" onclick="openOrderAdmin(\''+esc(i.buyer_order_id)+'\');return false"><b>'+esc(i.buyer_po)+'</b></a></td><td>'+esc(i.buyer_name||"")+'</td><td>'+esc(i.needed==null?i.quantity:i.needed)+'</td><td>'+esc(i.allocated)+'</td><td>'+esc(i.remaining==null?"-":i.remaining)+'</td><td>'+esc(i.stageLabel)+'</td></tr>').join("")+'</table>';
+  const pos=d.supplierPos.map(p=>'<div class="rq-q"><b>'+esc(p.po_number)+'</b> · '+esc(p.trade_name||p.legal_name||"")+' · '+esc(p.quantity)+' @ '+esc(p.unit_cost)+' '+esc(p.currency)+' · '+poStatusTxt(p)+(poExtra(p)?'<div class="muted">'+poExtra(p)+'</div>':'')+'<div class="muted">Contains: '+p.lines.map(l=>esc(l.buyerPo)+' × '+esc(l.quantity==null?"-":l.quantity)).join(" · ")+'</div>'+(["issued","accepted","partially_accepted","in_production","ready_for_qc","ready_for_dispatch"].includes(p.status)?'<div class="actions"><button onclick="cancelSupplierPo(\''+esc(p.id)+'\',\''+esc(id)+'\',true)">Cancel this PO</button></div>':'')+'</div>').join("")||'<div class="muted">No supplier PO issued yet.</div>';
+  const open=d.items.filter(i=>i.remaining==null?i.allocated===0:i.remaining>0);
+  const alloc=open.map(i=>'<label class="rq-alloc"><span><b>'+esc(i.buyer_po)+'</b> <span class="muted">remaining '+esc(i.remaining==null?"n/a":i.remaining)+'</span></span><input class="allocQty" data-id="'+esc(i.buyer_order_id)+'" type="number" min="0" step="any" value="'+esc(i.remaining==null?"":i.remaining)+'" placeholder="qty"></label>').join("");
+  const issue=open.length?'<div class="muted" style="margin-bottom:8px">One PO can carry several buyer orders (combine). Change the quantities to split a buyer order across suppliers: issue one PO now for part, and another for the rest. The supplier sees only the total, never the buyers.</div><div class="rq-list" style="max-height:none">'+alloc+'</div><div class="rq-grid" style="margin-top:8px"><label>Capability ID<input id="spoCode" placeholder="SD-XXX-XXXX"></label>'+(su?'<label>or Supplier ID <small>(Super Admin)</small><input id="spoSid"></label>':'')+'<label>Unit cost *<input id="spoCost" type="number" step="0.0001" min="0"></label><label>Currency<select id="spoCur"><option>INR</option><option>USD</option><option>EUR</option><option>GBP</option><option>AED</option></select></label><label>Deliver by<input id="spoDate" type="date"></label></div><label class="rq-wide">Terms (payment, packing, delivery)<textarea id="spoTerms" style="min-height:48px"></textarea></label><div class="actions"><button class="primary" onclick="issueSdPo(\''+esc(id)+'\')">Issue PO to supplier</button></div>':'<div class="muted">Everything in this SupplyDesk order is allocated to supplier POs.</div>';
+  const spare=ordData.orders.filter(o=>ordGroup(o)==="assign");
+  const add=spare.length?'<div class="rq-grid"><label>Add another accepted buyer order<select id="sdAddSel"><option value="">Choose…</option>'+spare.map(o=>'<option value="'+esc(o.id)+'">'+esc(o.po_number+" · "+o.title+" · "+o.quantity)+'</option>').join("")+'</select></label></div><div class="actions"><button onclick="addToSd(\''+esc(id)+'\')">Add to this SupplyDesk order</button></div>':'<div class="muted">No other accepted buyer orders are waiting to be assigned.</div>';
+  document.getElementById("detail").innerHTML='<div class="rq-head"><div><h2>'+esc(sd.sd_number)+' · '+esc(sd.title)+'</h2><div class="muted">SupplyDesk order · '+d.items.length+' buyer order(s) · '+d.supplierPos.length+' supplier PO(s)</div></div><span class="rq-pill">SupplyDesk order</span></div>'
+   +'<div class="rq-sec-b">'+items+'</div>'+rqSec("Issue a supplier PO",issue,d.supplierPos.length===0,null)+rqSec("Supplier POs",pos,d.supplierPos.length>0,d.supplierPos.length)+rqSec("Combine with another buyer order",add,false,null);
+  document.getElementById("detail").scrollIntoView({behavior:"smooth",block:"start"});
+ }catch(e){document.getElementById("message").textContent=e.message}
+}
+async function issueSdPo(id){
+ const g=x=>(document.getElementById(x)||{value:""}).value.trim();
+ const allocations=[...document.querySelectorAll(".allocQty")].filter(i=>i.value.trim()!=="").map(i=>({buyerOrderId:i.dataset.id,quantity:Number(i.value)}));
+ if(!allocations.length){document.getElementById("message").textContent="Enter a quantity for at least one buyer order.";return;}
+ if(!confirm("Issue this purchase order? The supplier will be emailed. The supplier will not see the buyers."))return;
+ await ordPost("/api/admin/sd-orders/"+encodeURIComponent(id)+"/supplier-pos",{capabilityCode:g("spoCode"),supplierId:g("spoSid"),unitCost:g("spoCost"),currency:g("spoCur"),deliveryBy:g("spoDate"),terms:g("spoTerms"),allocations},async()=>{document.getElementById("message").textContent="Supplier PO issued.";await loadOrders();await openSdOrder(id);});
+}
+async function addToSd(id){
+ const v=document.getElementById("sdAddSel").value;if(!v)return;
+ await ordPost("/api/admin/sd-orders/"+encodeURIComponent(id)+"/orders",{buyerOrderIds:[v]},async()=>{await loadOrders();await openSdOrder(id);});
+}
+async function cancelSupplierPo(id,refId,fromSd){
  const note=prompt("Reason (shown to supplier, optional):","");if(note===null)return;
- try{await api("/api/admin/supplier-pos/"+encodeURIComponent(id)+"/cancel",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({note})});await openSupplierPos(orderId);}catch(e){document.getElementById("message").textContent=e.message}
+ try{await api("/api/admin/supplier-pos/"+encodeURIComponent(id)+"/cancel",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({note})});await loadOrders();await (fromSd?openSdOrder(refId):openOrderAdmin(refId));}catch(e){document.getElementById("message").textContent=e.message}
 }
 
 async function openInvoice(orderId){
@@ -750,7 +850,7 @@ async function loadMarginReport(){
 }
 async function setOrderStatus(id,status){
  const note=prompt("Note for the buyer (optional):","");if(note===null)return;
- try{await api("/api/admin/orders/"+encodeURIComponent(id)+"/status",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,note})});await loadOrders();}catch(e){document.getElementById("message").textContent=e.message}
+ try{await api("/api/admin/orders/"+encodeURIComponent(id)+"/status",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,note})});await loadOrders();await openOrderAdmin(id);}catch(e){document.getElementById("message").textContent=e.message}
 }
 async function sendBuyerQuote(id){
  const g=x=>document.getElementById(x).value.trim();
@@ -954,7 +1054,7 @@ document.getElementById("status").onchange=loadApps;
 const TAB_HELP={
  requirements:["Buyer requirements","Pick a requirement to review it, message the buyer and send a quotation."],
  connections:["Connection requests","Pick a buyer request to see the supplier-side decision and notes."],
- orders:["Orders","Orders placed by buyers appear on the left. Open one to issue supplier POs and invoices."],
+ orders:["Orders","Buyer orders land under Needs review. Accept them, combine accepted orders into a SupplyDesk order, then issue the supplier PO. The buyer only ever sees SupplyDesk."],
  margin:["Margin report","Super Admin only."],
  suppliers:["Suppliers","Super Admin only. Supplier identity is never shown to buyers or Admin."],
  apps:["Select an application","Documents and legal details remain private to this admin area."],

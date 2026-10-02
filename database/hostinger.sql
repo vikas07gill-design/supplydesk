@@ -419,6 +419,12 @@ CREATE TABLE IF NOT EXISTS orders (
   status VARCHAR(20) NOT NULL DEFAULT 'confirmed',
   status_changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   notes VARCHAR(500) NULL,
+  review_status VARCHAR(24) NOT NULL DEFAULT 'accepted',
+  review_note VARCHAR(1500) NULL,
+  reviewed_at DATETIME NULL,
+  reviewed_by VARCHAR(120) NULL,
+  requested_quantity VARCHAR(60) NULL,
+  stage VARCHAR(30) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_orders_buyer (buyer_id, created_at),
   INDEX idx_orders_status (status, created_at)
@@ -427,7 +433,8 @@ CREATE TABLE IF NOT EXISTS orders (
 CREATE TABLE IF NOT EXISTS supplier_pos (
   id CHAR(36) PRIMARY KEY,
   po_number VARCHAR(24) NOT NULL UNIQUE,
-  order_id CHAR(36) NOT NULL,
+  order_id CHAR(36) NULL,
+  sd_order_id CHAR(36) NULL,
   supplier_id CHAR(36) NOT NULL,
   product_id CHAR(36) NULL,
   title VARCHAR(255) NOT NULL,
@@ -439,11 +446,57 @@ CREATE TABLE IF NOT EXISTS supplier_pos (
   terms TEXT NULL,
   status VARCHAR(20) NOT NULL DEFAULT 'issued',
   supplier_note VARCHAR(500) NULL,
+  accepted_quantity VARCHAR(60) NULL,
+  batch_no VARCHAR(60) NULL,
+  production_started_at DATETIME NULL,
+  expected_completion DATE NULL,
   status_changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_by VARCHAR(190) NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_spo_supplier (supplier_id, status, created_at),
   INDEX idx_spo_order (order_id, status)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS sd_orders (
+  id CHAR(36) PRIMARY KEY,
+  sd_number VARCHAR(24) NOT NULL UNIQUE,
+  title VARCHAR(255) NOT NULL,
+  note VARCHAR(1000) NULL,
+  created_by VARCHAR(190) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS sd_order_items (
+  id CHAR(36) PRIMARY KEY,
+  sd_order_id CHAR(36) NOT NULL,
+  buyer_order_id CHAR(36) NOT NULL UNIQUE,
+  quantity DECIMAL(16,2) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_sdi_sd (sd_order_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS supplier_po_lines (
+  id CHAR(36) PRIMARY KEY,
+  supplier_po_id CHAR(36) NOT NULL,
+  sd_order_id CHAR(36) NOT NULL,
+  buyer_order_id CHAR(36) NOT NULL,
+  quantity DECIMAL(16,2) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_spl (supplier_po_id, buyer_order_id),
+  INDEX idx_spl_buyer (buyer_order_id),
+  INDEX idx_spl_sd (sd_order_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS order_events (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  order_id CHAR(36) NOT NULL,
+  kind VARCHAR(20) NOT NULL,
+  stage VARCHAR(30) NULL,
+  ref VARCHAR(120) NULL,
+  detail VARCHAR(1000) NULL,
+  created_by VARCHAR(120) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  INDEX idx_oe_order (order_id, id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS invoices (

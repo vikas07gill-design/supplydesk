@@ -1510,31 +1510,111 @@ async function sendBrandedMail(to,subject,opts){
 const ORIGIN=()=>String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"");
 const REQ_STATUS_LABEL={pending_review:"Under SupplyDesk review",open:"Shared with suppliers",fulfilling:"SupplyDesk is handling your requirement",rejected:"Not accepted",closed:"Closed",cancelled:"Cancelled"};
 
-// Keep the buyer-facing order status in step with supplier POs (never moves backwards; delivery stays a manual SupplyDesk confirmation).
-//  confirmed -> in_production when any live PO is in production/dispatched/completed
-//  in_production -> shipped when every live PO (not declined/cancelled) is dispatched or completed
-async function syncOrderFromPos(conn,req,orderId){
-  const [[o]]=await conn.execute("SELECT o.id,o.rfq_id,o.po_number,o.status,o.title,b.email,b.name FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.id=? FOR UPDATE",[orderId]);
-  if(!o||!["confirmed","in_production"].includes(o.status))return null;
-  const [pos]=await conn.execute("SELECT status FROM supplier_pos WHERE order_id=? AND status NOT IN ('declined','cancelled')",[orderId]);
-  if(!pos.length)return null;
-  let to=null;
-  if(pos.every(p=>["dispatched","completed"].includes(p.status)))to="shipped";
-  else if(o.status==="confirmed"&&pos.some(p=>["in_production","dispatched","completed"].includes(p.status)))to="in_production";
-  if(!to||to===o.status||!RFQ.canOrderTransition(o.status,to))return null;
-  await conn.execute("UPDATE orders SET status=?,status_changed_at=NOW() WHERE id=?",[to,orderId]);
-  await audit(conn,req,"order.status_change","order",orderId,{status:o.status},{status:to,note:"auto: supplier progress"});
-  await logBuyerMessage(conn,o.rfq_id,"order","Order "+o.po_number+": "+RFQ.ORDER_STATES[to].buyerLabel,null,"SupplyDesk");
-  return {order:o,to};
+// ---- Order architecture helpers: Buyer PO -> SupplyDesk order (SD) -> Supplier PO (kept in supplier_po_lines, never shown to buyers) ----
+const LIVE_PO_SQL="p.status NOT IN ('declined','cancelled')";
+async function addOrderEvent(db,orderId,kind,stage,ref,detail,by){
+  await db.execute("INSERT INTO order_events (order_id,kind,stage,ref,detail,created_by) VALUES (?,?,?,?,?,?)",[orderId,kind,stage||null,ref?String(ref).slice(0,120):null,detail?String(detail).slice(0,1000):null,by?String(by).slice(0,120):null]);
 }
+// Live supplier-PO allocations of one buyer order (declined/cancelled POs are history, not capacity).
+async function orderAllocation(db,orderId){
+  const [pos]=await db.execute("SELECT p.id,p.po_number,p.status,p.quantity po_quantity,p.accepted_quantity,l.quantity line_qty FROM supplier_po_lines l JOIN supplier_pos p ON p.id=l.supplier_po_id WHERE l.buyer_order_id=? AND "+LIVE_PO_SQL,[orderId]);
+  let got=0,unnumbered=false;
+  for(const p of pos){
+    if(p.line_qty==null){unnumbered=true;continue;}
+    let q=Number(p.line_qty);
+    if(p.status==="partially_accepted"){const aq=RFQ.parseQuantity(p.accepted_quantity),pq=RFQ.parseQuantity(p.po_quantity);if(aq!=null&&pq)q=q*Math.min(1,aq/pq);}   // supplier only took part of it
+    got+=q;
+  }
+  return {pos,allocated:Math.round(got*100)/100,unnumbered};
+}
+const orderCovered=(need,alloc)=>need==null||alloc.unnumbered||alloc.allocated>=need-1e-9;
+
+// Move the buyer-facing stage forward (never backwards). Writes the timeline event, audit row and the buyer's dashboard message.
+async function setOrderStage(conn,req,o,to,{ref=null,detail=null,auto=false}={}){
+  await conn.execute("UPDATE orders SET stage=?,status=?,status_changed_at=NOW() WHERE id=?",[to,RFQ.legacyStatusForStage(to),o.id]);
+  await addOrderEvent(conn,o.id,auto?"auto":"stage",to,ref,detail,actorOf(req).id);
+  await audit(conn,req,"order.stage_change","order",o.id,{stage:o.stage},{stage:to,ref:ref||null,auto});
+  await logBuyerMessage(conn,o.rfq_id,"order","Order "+o.po_number+": "+RFQ.stageLabel(to),detail||(ref?"Reference: "+ref:null),"SupplyDesk");
+}
+// Supplier progress (backend only) moves the buyer timeline, and only after the supplier has actually confirmed.
+// Production Confirmed / Material in Production / Production Completed follow the slowest live supplier PO, and only
+// once the live POs cover the whole accepted quantity.
+async function syncOrderFromPos(conn,req,orderId){
+  const [[o]]=await conn.execute("SELECT o.id,o.rfq_id,o.po_number,o.status,o.stage,o.quantity,o.review_status,o.title,b.email,b.name FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.id=? FOR UPDATE",[orderId]);
+  if(!o||o.status==="cancelled"||!RFQ.reviewAccepted(o.review_status))return null;
+  const alloc=await orderAllocation(conn,orderId);
+  const to=RFQ.autoStageFromPos(alloc.pos.map(p=>p.status));
+  if(!to||!orderCovered(RFQ.parseQuantity(o.quantity),alloc))return null;
+  if(RFQ.stageIndex(to)<=RFQ.stageIndex(o.stage||"supplydesk_accepted"))return null;
+  await setOrderStage(conn,{},o,to,{auto:true,detail:null});
+  return {order:o,to,label:RFQ.stageLabel(to)};
+}
+async function syncOrdersOfPo(conn,req,poId){
+  const [lines]=await conn.execute("SELECT DISTINCT buyer_order_id FROM supplier_po_lines WHERE supplier_po_id=?",[poId]);
+  const out=[];
+  for(const l of lines){const r=await syncOrderFromPos(conn,req,l.buyer_order_id);if(r)out.push(r);}
+  return out;
+}
+const mailOrderUpdate=(o,label,note)=>sendBrandedMail(o.email,"SupplyDesk | Order "+o.po_number+": "+label,{preheader:label,title:"Order update",intro:"Hello "+(o.name||"Buyer")+", your order "+o.po_number+" ("+o.title+") is now: "+label+"."+(note?" "+note:""),bodyHtml:"",textLines:[o.po_number+": "+label],ctaText:"View order",ctaUrl:ORIGIN()+"/buyer-dashboard"});
+
+// Create one supplier PO for an SD order. allocations = [{buyerOrderId, quantity|null}], each buyer order stays traceable in supplier_po_lines.
+async function createSupplierPo(conn,req,{sdOrderId,code,sid,unitCost,currency,quantityText,deliveryBy,terms,allocations}){
+  const fail=(status,error)=>{const e=new Error(error);e.http=status;return e;};
+  const [[sd]]=await conn.execute("SELECT id,sd_number,title FROM sd_orders WHERE id=? FOR UPDATE",[sdOrderId]);
+  if(!sd)throw fail(404,"SupplyDesk order not found.");
+  const [items]=await conn.execute("SELECT i.buyer_order_id,o.po_number,o.quantity,o.status,o.review_status FROM sd_order_items i JOIN orders o ON o.id=i.buyer_order_id WHERE i.sd_order_id=? FOR UPDATE",[sdOrderId]);
+  const byId=new Map(items.map(i=>[i.buyer_order_id,i]));
+  let alloc=allocations;
+  if(!alloc||!alloc.length){   // default: everything still unallocated
+    alloc=[];
+    for(const i of items){const need=RFQ.parseQuantity(i.quantity),a=await orderAllocation(conn,i.buyer_order_id);
+      if(need==null){if(!a.pos.length)alloc.push({buyerOrderId:i.buyer_order_id,quantity:null});}
+      else if(need-a.allocated>1e-9)alloc.push({buyerOrderId:i.buyer_order_id,quantity:Math.round((need-a.allocated)*100)/100});}
+    if(!alloc.length)throw fail(409,"Every buyer order in this SupplyDesk order is already fully allocated to supplier POs.");
+  }
+  const seen=new Set();let sum=0,numbered=true;
+  for(const a of alloc){
+    const it=byId.get(a.buyerOrderId);
+    if(!it)throw fail(400,"A buyer order in the allocation does not belong to this SupplyDesk order.");
+    if(seen.has(a.buyerOrderId))throw fail(400,"A buyer order appears twice in the allocation.");
+    seen.add(a.buyerOrderId);
+    if(it.status==="cancelled"||!RFQ.reviewAccepted(it.review_status))throw fail(409,"Buyer order "+it.po_number+" is not open for fulfilment.");
+    if(!PO_LIVE_ORDER_STATES.includes(it.status))throw fail(409,"Buyer order "+it.po_number+" is "+RFQ.ORDER_STATES[it.status].label+"; no new supplier PO can be issued.");
+    const need=RFQ.parseQuantity(it.quantity);
+    if(a.quantity==null){numbered=false;continue;}
+    if(!Number.isFinite(a.quantity)||a.quantity<=0)throw fail(400,"Enter a valid quantity for "+it.po_number+".");
+    if(need!=null){const cur=await orderAllocation(conn,a.buyerOrderId);
+      if(a.quantity>need-cur.allocated+1e-9)throw fail(409,"Only "+Math.max(0,Math.round((need-cur.allocated)*100)/100)+" of "+it.po_number+" is still unallocated.");}
+    sum+=a.quantity;
+  }
+  const quantity=quantityText||(numbered?String(Math.round(sum*100)/100):null);
+  if(!quantity)throw fail(400,"Quantity is required.");
+  const qty=RFQ.parseQuantity(quantity),total=qty?money(qty*unitCost):null;
+  let sup;
+  if(code){[[sup]]=await conn.execute("SELECT s.id,s.business_email,p.id product_id FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id WHERE p.capability_code=? AND p.status='approved' AND s.verified=1 AND s.published=1 LIMIT 1",[code]);}
+  else{[[sup]]=await conn.execute("SELECT id,business_email,NULL product_id FROM supplier_profiles WHERE id=? AND verified=1 AND published=1",[sid]);}
+  if(!sup)throw fail(404,"No verified supplier found for that capability.");
+  const [[dup]]=await conn.execute("SELECT id FROM supplier_pos WHERE sd_order_id=? AND supplier_id=? AND status NOT IN ('declined','cancelled') LIMIT 1",[sdOrderId,sup.id]);
+  if(dup)throw fail(409,"This supplier already has an active PO for this order.");
+  const pid=crypto.randomUUID();let po;
+  for(let a=0;a<8;a++){po=RFQ.newSupplierPoNumber();try{
+    await conn.execute("INSERT INTO supplier_pos (id,po_number,order_id,sd_order_id,supplier_id,product_id,title,quantity,unit_cost,currency,total_cost,delivery_by,terms,created_by) VALUES (?,?,NULL,?,?,?,?,?,?,?,?,?,?,?)",[pid,po,sdOrderId,sup.id,sup.product_id||null,sd.title,quantity,unitCost,currency,total,deliveryBy,terms,actorOf(req).id]);break;}
+    catch(e){if(e?.code!=="ER_DUP_ENTRY"||a===7)throw e;}}
+  for(const a of alloc)await conn.execute("INSERT INTO supplier_po_lines (id,supplier_po_id,sd_order_id,buyer_order_id,quantity) VALUES (?,?,?,?,?)",[crypto.randomUUID(),pid,sdOrderId,a.buyerOrderId,a.quantity==null?null:a.quantity]);
+  await audit(conn,req,"supplier_po.issued","supplier_po",pid,null,{poNumber:po,sdNumber:sd.sd_number,buyerOrders:alloc.map(a=>({order:byId.get(a.buyerOrderId).po_number,quantity:a.quantity})),supplierRef:isSuper(req)?sup.id:supplierAlias(sup.id),quantity,unitCost,currency});
+  for(const a of alloc)await addOrderEvent(conn,a.buyerOrderId,"backend",null,null,"Supplier PO "+po+" issued under "+sd.sd_number,actorOf(req).id);
+  return {pid,po,sd,sup,quantity};
+}
+const supplierPoMail=(sup,po,title,quantity)=>sendBrandedMail(sup.business_email,"SupplyDesk | New purchase order "+po,{preheader:"New purchase order",title:"New purchase order",intro:"SupplyDesk has issued purchase order "+po+" for "+title+" ("+quantity+"). Please review and accept, partially accept or decline it in your Supplier Dashboard.",bodyHtml:"",textLines:["PO "+po],ctaText:"Open Supplier Dashboard",ctaUrl:ORIGIN()+"/supplier-dashboard#purchase-orders"});
+
 // Margin report: Super Admin only. Revenue = accepted SupplyDesk price; cost = supplier PO cost (active POs) or the cost noted on the quote.
 app.get("/api/super-admin/margin-report",requireSuperAdmin,async(req,res)=>{
   try{
     const [rows]=await pool.execute(`SELECT o.id,o.po_number,o.title,o.quantity,o.unit_price,o.currency,o.total_price,o.status,o.created_at,b.company buyer_company,b.name buyer_name,
         q.cost_unit_price,q.markup_pct,
-        (SELECT COALESCE(SUM(po.total_cost),0) FROM supplier_pos po WHERE po.order_id=o.id AND po.status NOT IN ('declined','cancelled')) po_cost,
-        (SELECT COUNT(*) FROM supplier_pos po WHERE po.order_id=o.id AND po.status NOT IN ('declined','cancelled')) po_count
-      FROM orders o JOIN buyers b ON b.id=o.buyer_id LEFT JOIN rfq_quotes q ON q.id=o.rfq_quote_id WHERE o.status<>'cancelled' ORDER BY o.created_at DESC LIMIT 300`);
+        (SELECT COALESCE(SUM(COALESCE(l.quantity*po.unit_cost,po.total_cost)),0) FROM supplier_po_lines l JOIN supplier_pos po ON po.id=l.supplier_po_id WHERE l.buyer_order_id=o.id AND po.status NOT IN ('declined','cancelled')) po_cost,
+        (SELECT COUNT(*) FROM supplier_po_lines l JOIN supplier_pos po ON po.id=l.supplier_po_id WHERE l.buyer_order_id=o.id AND po.status NOT IN ('declined','cancelled')) po_count
+      FROM orders o JOIN buyers b ON b.id=o.buyer_id LEFT JOIN rfq_quotes q ON q.id=o.rfq_quote_id WHERE o.status<>'cancelled' AND o.review_status IN ('accepted','partially_accepted') ORDER BY o.created_at DESC LIMIT 300`);
     const items=rows.map(r=>{
       const revenue=r.total_price==null?null:Number(r.total_price);
       const qty=RFQ.parseQuantity(r.quantity);
@@ -1559,8 +1639,9 @@ app.post("/api/admin/orders/:id/invoice",requireAdmin,async(req,res)=>{
   const conn=await pool.getConnection();
   try{
     await conn.beginTransaction();
-    const [[o]]=await conn.execute("SELECT o.id,o.po_number,o.title,o.status,o.buyer_id,o.currency,o.total_price,b.email,b.name FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.id=? FOR UPDATE",[id]);
+    const [[o]]=await conn.execute("SELECT o.id,o.po_number,o.title,o.status,o.review_status,o.buyer_id,o.currency,o.total_price,b.email,b.name FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.id=? FOR UPDATE",[id]);
     if(!o){await conn.rollback();return res.status(404).json({error:"Order not found."});}
+    if(!RFQ.reviewAccepted(o.review_status)){await conn.rollback();return res.status(409).json({error:"SupplyDesk has not accepted this buyer order yet; it cannot be invoiced."});}
     if(o.status==="cancelled"){await conn.rollback();return res.status(409).json({error:"A cancelled order cannot be invoiced."});}
     const [[dup]]=await conn.execute("SELECT id FROM invoices WHERE order_id=? AND status<>'void' LIMIT 1",[id]);
     if(dup){await conn.rollback();return res.status(409).json({error:"This order already has an active invoice. Void it first to issue a new one."});}
@@ -1641,6 +1722,7 @@ app.get("/api/buyer-invoices",requireBuyerDashboard,async(req,res)=>{
 // ---- Supplier purchase orders (Phase 3): SupplyDesk -> supplier. The supplier never sees buyer identity or buyer price. ----
 const PO_LIVE_ORDER_STATES=["confirmed","in_production"];
 
+// Legacy single-order entry point: wraps the buyer order in its own SD order (if it has none) and issues one PO for it.
 app.post("/api/admin/orders/:id/supplier-po",requireAdmin,async(req,res)=>{
   const id=clean(req.params.id,80),b=req.body||{};
   const unitCost=Number(b.unitCost),currency=(clean(b.currency,10)||"INR").toUpperCase(),quantity=clean(b.quantity,60);
@@ -1650,33 +1732,25 @@ app.post("/api/admin/orders/:id/supplier-po",requireAdmin,async(req,res)=>{
   if(!quantity)return res.status(400).json({error:"Quantity is required."});
   if(deliveryBy&&(!/^\d{4}-\d{2}-\d{2}$/.test(deliveryBy)||new Date(deliveryBy)<new Date(new Date().toDateString())))return res.status(400).json({error:"Delivery date must be today or later."});
   if(!code&&!(sid&&isSuper(req)))return res.status(400).json({error:"Choose a capability (capability ID)."});
-  const qty=RFQ.parseQuantity(quantity),total=qty?money(qty*unitCost):null;
   const conn=await pool.getConnection();
   try{
     await conn.beginTransaction();
-    const [[o]]=await conn.execute("SELECT id,po_number,title,status FROM orders WHERE id=? FOR UPDATE",[id]);
+    const [[o]]=await conn.execute("SELECT id,po_number,title,quantity,status,review_status,created_at FROM orders WHERE id=? FOR UPDATE",[id]);
     if(!o){await conn.rollback();return res.status(404).json({error:"Order not found."});}
+    if(!RFQ.reviewAccepted(o.review_status)){await conn.rollback();return res.status(409).json({error:"Accept this buyer order first. SupplyDesk has not accepted it yet."});}
     if(!PO_LIVE_ORDER_STATES.includes(o.status)){await conn.rollback();return res.status(409).json({error:"This order is "+RFQ.ORDER_STATES[o.status].label+"; no new supplier PO can be issued."});}
-    let sup;
-    if(code){[[sup]]=await conn.execute("SELECT s.id,s.business_email,p.id product_id FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id WHERE p.capability_code=? AND p.status='approved' AND s.verified=1 AND s.published=1 LIMIT 1",[code]);}
-    else{[[sup]]=await conn.execute("SELECT id,business_email,NULL product_id FROM supplier_profiles WHERE id=? AND verified=1 AND published=1",[sid]);}
-    if(!sup){await conn.rollback();return res.status(404).json({error:"No verified supplier found for that capability."});}
-    const [[dup]]=await conn.execute("SELECT id FROM supplier_pos WHERE order_id=? AND supplier_id=? AND status NOT IN ('declined','cancelled') LIMIT 1",[id,sup.id]);
-    if(dup){await conn.rollback();return res.status(409).json({error:"This supplier already has an active PO for this order."});}
-    const pid=crypto.randomUUID();let po;
-    for(let a=0;a<8;a++){po=RFQ.newSupplierPoNumber();try{
-      await conn.execute("INSERT INTO supplier_pos (id,po_number,order_id,supplier_id,product_id,title,quantity,unit_cost,currency,total_cost,delivery_by,terms,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",[pid,po,id,sup.id,sup.product_id||null,o.title,quantity,unitCost,currency,total,deliveryBy,terms,actorOf(req).id]);break;}
-      catch(e){if(e?.code!=="ER_DUP_ENTRY"||a===7)throw e;}}
-    await audit(conn,req,"supplier_po.issued","supplier_po",pid,null,{poNumber:po,orderId:id,supplierRef:isSuper(req)?sup.id:supplierAlias(sup.id),quantity,unitCost,currency});
+    let [[it]]=await conn.execute("SELECT sd_order_id FROM sd_order_items WHERE buyer_order_id=?",[id]);
+    if(!it)it={sd_order_id:await createSdOrder(conn,req,[o],o.title,null)};
+    const r=await createSupplierPo(conn,req,{sdOrderId:it.sd_order_id,code,sid,unitCost,currency,quantityText:quantity,deliveryBy,terms,allocations:[{buyerOrderId:id,quantity:RFQ.parseQuantity(quantity)}]});
     await conn.commit();
-    try{await sendBrandedMail(sup.business_email,"SupplyDesk | New purchase order "+po,{preheader:"New purchase order",title:"New purchase order",intro:"SupplyDesk has issued purchase order "+po+" for "+o.title+" ("+quantity+"). Please review and accept or decline it in your Supplier Dashboard.",bodyHtml:"",textLines:["PO "+po],ctaText:"Open Supplier Dashboard",ctaUrl:ORIGIN()+"/supplier-dashboard#purchase-orders"});}catch(e){console.error("Supplier PO mail failed:",e);}
-    res.status(201).json({ok:true,poNumber:po,supplierPoId:pid});
-  }catch(error){await conn.rollback();console.error("Supplier PO failed:",error);res.status(500).json({error:"Could not issue the purchase order."});}
+    try{await supplierPoMail(r.sup,r.po,o.title,r.quantity);}catch(e){console.error("Supplier PO mail failed:",e);}
+    res.status(201).json({ok:true,poNumber:r.po,supplierPoId:r.pid,sdNumber:r.sd.sd_number});
+  }catch(error){await conn.rollback();if(error.http)return res.status(error.http).json({error:error.message});console.error("Supplier PO failed:",error);res.status(500).json({error:"Could not issue the purchase order."});}
   finally{conn.release();}
 });
 
 app.get("/api/admin/orders/:id/supplier-pos",requireAdmin,async(req,res)=>{
-  try{const [rows]=await pool.execute("SELECT po.id,po.po_number,po.supplier_id,po.quantity,po.unit_cost,po.currency,po.total_cost,po.delivery_by,po.terms,po.status,po.supplier_note,po.status_changed_at,po.created_at,s.legal_name,s.trade_name,s.country,s.city FROM supplier_pos po JOIN supplier_profiles s ON s.id=po.supplier_id WHERE po.order_id=? ORDER BY po.created_at DESC",[clean(req.params.id,80)]);
+  try{const [rows]=await pool.execute("SELECT po.id,po.po_number,po.sd_order_id,po.supplier_id,po.quantity,po.unit_cost,po.currency,po.total_cost,po.delivery_by,po.terms,po.status,po.supplier_note,po.accepted_quantity,po.batch_no,po.production_started_at,po.expected_completion,po.status_changed_at,po.created_at,l.quantity line_quantity,s.legal_name,s.trade_name,s.country,s.city FROM supplier_po_lines l JOIN supplier_pos po ON po.id=l.supplier_po_id JOIN supplier_profiles s ON s.id=po.supplier_id WHERE l.buyer_order_id=? ORDER BY po.created_at DESC",[clean(req.params.id,80)]);
     res.json({supplierPos:rows.map(r=>({...maskSupplierRow(req,r),statusLabel:RFQ.PO_STATES[r.status]?.label||r.status})),detailsRestricted:!isSuper(req)});}
   catch(error){console.error(error);res.status(500).json({error:"Could not load supplier purchase orders."});}
 });
@@ -1691,8 +1765,7 @@ app.patch("/api/admin/supplier-pos/:id/cancel",requireAdmin,async(req,res)=>{
     if(!RFQ.canPoTransition(po.status,"cancelled")||po.status==="cancelled"){await conn.rollback();return res.status(409).json({error:"A "+RFQ.PO_STATES[po.status].label+" purchase order cannot be cancelled."});}
     await conn.execute("UPDATE supplier_pos SET status='cancelled',status_changed_at=NOW(),supplier_note=COALESCE(?,supplier_note) WHERE id=?",[note,id]);
     await audit(conn,req,"supplier_po.cancelled","supplier_po",id,{status:po.status},{status:"cancelled",note});
-    const [[lk]]=await conn.execute("SELECT order_id FROM supplier_pos WHERE id=?",[id]);
-    await syncOrderFromPos(conn,req,lk.order_id);
+    await syncOrdersOfPo(conn,req,id);
     await conn.commit();
     try{await sendBrandedMail(po.business_email,"SupplyDesk | Purchase order "+po.po_number+" cancelled",{preheader:"PO cancelled",title:"Purchase order cancelled",intro:"Purchase order "+po.po_number+" has been cancelled by SupplyDesk."+(note?" "+note:""),bodyHtml:"",textLines:[po.po_number+" cancelled"],ctaText:"Open Supplier Dashboard",ctaUrl:ORIGIN()+"/supplier-dashboard"});}catch(e){console.error(e);}
     res.json({ok:true});
@@ -1700,33 +1773,55 @@ app.patch("/api/admin/supplier-pos/:id/cancel",requireAdmin,async(req,res)=>{
   finally{conn.release();}
 });
 
-// Supplier side: only the PO itself (no buyer, no buyer price).
+// Supplier side: only the PO itself (no buyer, no buyer PO number, no buyer price).
 app.get("/api/supplier-dashboard/purchase-orders",requireSupplierDashboard,async(req,res)=>{
-  try{const [rows]=await pool.execute("SELECT id,po_number,title,quantity,unit_cost,currency,total_cost,delivery_by,terms,status,supplier_note,status_changed_at,created_at FROM supplier_pos WHERE supplier_id=? ORDER BY created_at DESC LIMIT 200",[req.supplier.id]);
+  try{const [rows]=await pool.execute("SELECT id,po_number,title,quantity,accepted_quantity,unit_cost,currency,total_cost,delivery_by,terms,status,supplier_note,batch_no,production_started_at,expected_completion,status_changed_at,created_at FROM supplier_pos WHERE supplier_id=? ORDER BY created_at DESC LIMIT 200",[req.supplier.id]);
     res.json({purchaseOrders:rows.map(r=>({...r,statusLabel:RFQ.PO_STATES[r.status]?.label||r.status,allowedNext:(RFQ.PO_TRANSITIONS[r.status]||[]).filter(n=>n!=="cancelled")}))});}
   catch(error){console.error(error);res.status(500).json({error:"Could not load purchase orders."});}
 });
 
+const isoDate=(v)=>{v=clean(v,10);return /^\d{4}-\d{2}-\d{2}$/.test(v)&&!Number.isNaN(new Date(v).getTime())?v:null;};
+// Supplier acknowledgement: accept / partially accept / reject, production start, expected completion, ready for QC, ready for dispatch.
+// Only after these does SupplyDesk move the buyer-facing timeline (syncOrdersOfPo).
 app.patch("/api/supplier-dashboard/purchase-orders/:id/status",requireSupplierDashboard,async(req,res)=>{
-  const id=clean(req.params.id,80),to=clean(req.body?.status,20),note=clean(req.body?.note,500)||null;
-  if(!["accepted","declined","in_production","dispatched","completed"].includes(to))return res.status(400).json({error:"Choose a valid status."});
-  if(to==="declined"&&!note)return res.status(400).json({error:"Please add a reason for declining."});
+  const id=clean(req.params.id,80),to=clean(req.body?.status,24),note=clean(req.body?.note,500)||null;
+  const acceptedQty=clean(req.body?.acceptedQuantity,60)||null,batchNo=clean(req.body?.batchNo,60)||null;
+  const expected=req.body?.expectedCompletion?isoDate(req.body.expectedCompletion):null;
+  if(!["accepted","partially_accepted","declined","in_production","ready_for_qc","ready_for_dispatch","dispatched","completed"].includes(to))return res.status(400).json({error:"Choose a valid status."});
+  if(to==="declined"&&!note)return res.status(400).json({error:"Please add a reason for rejecting."});
+  if(req.body?.expectedCompletion&&!expected)return res.status(400).json({error:"Enter a valid expected completion date."});
+  if(to==="partially_accepted"&&(!acceptedQty||!(RFQ.parseQuantity(acceptedQty)>0)))return res.status(400).json({error:"Enter the quantity you can supply."});
   const conn=await pool.getConnection();
   try{
     await conn.beginTransaction();
-    const [[po]]=await conn.execute("SELECT id,po_number,status FROM supplier_pos WHERE id=? AND supplier_id=? FOR UPDATE",[id,req.supplier.id]);
+    const [[po]]=await conn.execute("SELECT id,po_number,status,quantity FROM supplier_pos WHERE id=? AND supplier_id=? FOR UPDATE",[id,req.supplier.id]);
     if(!po){await conn.rollback();return res.status(404).json({error:"Purchase order not found."});}
     if(po.status===to){await conn.rollback();return res.json({ok:true,changed:false});}
     if(!RFQ.canPoTransition(po.status,to)){await conn.rollback();return res.status(409).json({error:"Cannot move this purchase order from "+RFQ.PO_STATES[po.status].label+" to "+RFQ.PO_STATES[to].label+"."});}
-    await conn.execute("UPDATE supplier_pos SET status=?,status_changed_at=NOW(),supplier_note=COALESCE(?,supplier_note) WHERE id=?",[to,note,id]);
-    await audit(conn,{supplier:req.supplier},"supplier_po.status_change","supplier_po",id,{status:po.status},{status:to,note});
-    const [[link]]=await conn.execute("SELECT order_id FROM supplier_pos WHERE id=?",[id]);
-    const synced=await syncOrderFromPos(conn,{supplier:req.supplier},link.order_id);
+    if(to==="partially_accepted"){const aq=RFQ.parseQuantity(acceptedQty),pq=RFQ.parseQuantity(po.quantity);if(pq&&aq>=pq){await conn.rollback();return res.status(400).json({error:"For the full quantity choose Accept. Partial must be below "+pq+"."});}}
+    await conn.execute("UPDATE supplier_pos SET status=?,status_changed_at=NOW(),supplier_note=COALESCE(?,supplier_note),accepted_quantity=COALESCE(?,accepted_quantity),batch_no=COALESCE(?,batch_no),expected_completion=COALESCE(?,expected_completion),production_started_at=IF(?='in_production',COALESCE(production_started_at,NOW()),production_started_at) WHERE id=?",[to,note,to==="partially_accepted"?acceptedQty:null,batchNo,expected,to,id]);
+    await audit(conn,{supplier:req.supplier},"supplier_po.status_change","supplier_po",id,{status:po.status},{status:to,note,acceptedQuantity:acceptedQty,batchNo,expectedCompletion:expected});
+    const synced=await syncOrdersOfPo(conn,req,id);
     await conn.commit();
-    if(synced){try{const l=RFQ.ORDER_STATES[synced.to].buyerLabel;await sendBrandedMail(synced.order.email,"SupplyDesk | Order "+synced.order.po_number+": "+l,{preheader:l,title:"Order update",intro:"Hello "+(synced.order.name||"Buyer")+", your order "+synced.order.po_number+" ("+synced.order.title+") is now: "+l+".",bodyHtml:"",textLines:[synced.order.po_number+": "+l],ctaText:"View order",ctaUrl:ORIGIN()+"/buyer-dashboard"});}catch(e){console.error("Order sync mail failed:",e);}}
-    res.json({ok:true,changed:true,status:to,orderStatus:synced?synced.to:undefined});
+    for(const s of synced){try{await mailOrderUpdate(s.order,s.label);}catch(e){console.error("Order sync mail failed:",e);}}
+    res.json({ok:true,changed:true,status:to,orderStatus:synced.length?RFQ.legacyStatusForStage(synced[0].to):undefined,buyerStages:synced.map(s=>s.to)});
   }catch(error){await conn.rollback();console.error(error);res.status(500).json({error:"Could not update the purchase order."});}
   finally{conn.release();}
+});
+// Supplier updates the expected completion date / batch number without changing the PO status.
+app.patch("/api/supplier-dashboard/purchase-orders/:id/schedule",requireSupplierDashboard,async(req,res)=>{
+  const id=clean(req.params.id,80),batchNo=clean(req.body?.batchNo,60)||null;
+  const expected=req.body?.expectedCompletion?isoDate(req.body.expectedCompletion):null;
+  if(req.body?.expectedCompletion&&!expected)return res.status(400).json({error:"Enter a valid expected completion date."});
+  if(!expected&&!batchNo)return res.status(400).json({error:"Enter an expected completion date or a batch number."});
+  try{
+    const [[po]]=await pool.execute("SELECT id,status FROM supplier_pos WHERE id=? AND supplier_id=?",[id,req.supplier.id]);
+    if(!po)return res.status(404).json({error:"Purchase order not found."});
+    if(["declined","cancelled","completed"].includes(po.status))return res.status(409).json({error:"This purchase order is closed."});
+    await pool.execute("UPDATE supplier_pos SET expected_completion=COALESCE(?,expected_completion),batch_no=COALESCE(?,batch_no) WHERE id=?",[expected,batchNo,id]);
+    await audit(pool,{supplier:req.supplier},"supplier_po.schedule","supplier_po",id,null,{expectedCompletion:expected,batchNo});
+    res.json({ok:true});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not save the schedule."});}
 });
 
 // ---- Commercial flow (Phase 2): SupplyDesk quote -> buyer decision -> order ----
@@ -1818,33 +1913,125 @@ app.post("/api/buyer-requirements/:id/quote/respond",requireBuyerDashboard,async
     await moveRfq(conn,actor,id,"buyer_approved",note||"buyer accepted quote");
     const oid=crypto.randomUUID();let po;
     for(let a=0;a<8;a++){po=RFQ.newPoNumber();try{
-      await conn.execute("INSERT INTO orders (id,po_number,rfq_id,rfq_quote_id,buyer_id,title,quantity,unit_price,currency,total_price) VALUES (?,?,?,?,?,?,?,?,?,?)",[oid,po,id,q.id,req.buyer.id,r.title,q.quantity,q.unit_price,q.currency,q.total_price]);break;}
+      await conn.execute("INSERT INTO orders (id,po_number,rfq_id,rfq_quote_id,buyer_id,title,quantity,unit_price,currency,total_price,review_status,stage) VALUES (?,?,?,?,?,?,?,?,?,?,'pending_review','order_received')",[oid,po,id,q.id,req.buyer.id,r.title,q.quantity,q.unit_price,q.currency,q.total_price]);break;}
       catch(e){if(e?.code!=="ER_DUP_ENTRY"||a===7)throw e;}}
     await moveRfq(conn,actor,id,"converted","order "+po);
-    await logBuyerMessage(conn,id,"order","Order "+po+" confirmed","Thank you. SupplyDesk will keep you updated on production and delivery here.","SupplyDesk");
+    await addOrderEvent(conn,oid,"stage","order_received",null,null,"buyer");
+    await logBuyerMessage(conn,id,"order","Order "+po+" received","Thank you. SupplyDesk is reviewing your order and will confirm it here shortly.","SupplyDesk");
     await audit(conn,actor,"order.created","order",oid,null,{poNumber:po,quoteNo:q.quote_no,quantity:q.quantity,unitPrice:q.unit_price,currency:q.currency});
     await conn.commit();
-    try{await sendBrandedMail(req.buyer.email,"SupplyDesk | Order confirmed "+po,{preheader:"Order confirmed",title:"Order confirmed",intro:"Thank you. Your order "+po+" for "+r.title+" is confirmed. SupplyDesk will keep you updated.",bodyHtml:"",textLines:["Order "+po],ctaText:"View order",ctaUrl:ORIGIN()+"/buyer-dashboard"});}catch(e){console.error("Order mail failed:",e);}
+    try{await sendBrandedMail(req.buyer.email,"SupplyDesk | Order received "+po,{preheader:"Order received",title:"Order received",intro:"Thank you. SupplyDesk has received your order "+po+" for "+r.title+" and is reviewing it. We will confirm acceptance here and by email.",bodyHtml:"",textLines:["Order "+po],ctaText:"View order",ctaUrl:ORIGIN()+"/buyer-dashboard"});}catch(e){console.error("Order mail failed:",e);}
     res.status(201).json({ok:true,decision:"accepted",poNumber:po,orderId:oid});
   }catch(error){await conn.rollback();if(error instanceof RfqError)return res.status(error.status).json({error:error.message});console.error("Quote response failed:",error);res.status(500).json({error:"Could not record your response."});}
   finally{conn.release();}
 });
 
+// Buyer's view of an order. Buyers see SupplyDesk and a fixed timeline; supplier data never enters this response.
+async function buyerOrderViews(buyerId){
+  const [rows]=await pool.execute("SELECT o.id,o.po_number,o.rfq_id,o.title,o.quantity,o.requested_quantity,o.unit_price,o.currency,o.total_price,o.status,o.review_status,o.review_note,o.stage,o.status_changed_at,o.notes,o.created_at,(SELECT s.sd_number FROM sd_order_items i JOIN sd_orders s ON s.id=i.sd_order_id WHERE i.buyer_order_id=o.id) sd_ref FROM orders o WHERE o.buyer_id=? ORDER BY o.created_at DESC LIMIT 100",[buyerId]);
+  const ids=rows.map(r=>r.id);
+  const [events]=ids.length?await pool.query("SELECT order_id,kind,stage,ref,detail,created_at FROM order_events WHERE order_id IN (?) AND kind IN ('stage','auto','review') ORDER BY id",[ids]):[[]];
+  return rows.map(o=>{
+    const review=o.review_status||"accepted",ev=events.filter(e=>e.order_id===o.id);
+    const accepted=RFQ.reviewAccepted(review),cur=o.stage||"supplydesk_accepted",ci=RFQ.stageIndex(cur);
+    const timeline=accepted||review==="pending_review"||review==="pending_clarification"?RFQ.STAGES.map((st,i)=>{
+      const e=ev.filter(x=>x.stage===st.key).pop();
+      return {key:st.key,label:st.label,state:i<ci?"done":i===ci?"current":"todo",at:e?e.created_at:(i===0?o.created_at:null),ref:e&&e.ref||null};
+    }):[];
+    const {sd_ref,...rest}=o;
+    const stageLabel=RFQ.stageLabel(cur);
+    return {...rest,sdRef:sd_ref||null,reviewStatus:review,reviewLabel:(RFQ.ORDER_REVIEW[review]||{}).label||review,reviewBuyerLabel:(RFQ.ORDER_REVIEW[review]||{}).buyerLabel||review,stage:cur,stageLabel,timeline,
+      statusLabel:accepted?stageLabel:(RFQ.ORDER_REVIEW[review]||{}).buyerLabel||review};
+  });
+}
 app.get("/api/buyer-orders",requireBuyerDashboard,async(req,res)=>{
-  try{const [rows]=await pool.execute("SELECT id,po_number,rfq_id,title,quantity,unit_price,currency,total_price,status,status_changed_at,notes,created_at FROM orders WHERE buyer_id=? ORDER BY created_at DESC LIMIT 100",[req.buyer.id]);
-    res.json({orders:rows.map(o=>({...o,statusLabel:(RFQ.ORDER_STATES[o.status]||{}).buyerLabel||o.status}))});}
+  try{res.json({orders:await buyerOrderViews(req.buyer.id)});}
   catch(error){console.error(error);res.status(500).json({error:"Could not load orders."});}
 });
+// Buyer answers a SupplyDesk clarification question; the order goes back to review.
+app.post("/api/buyer-orders/:id/clarify",requireBuyerDashboard,async(req,res)=>{
+  const id=clean(req.params.id,80),note=clean(req.body?.note,1500);
+  if(!note)return res.status(400).json({error:"Write your reply first."});
+  const conn=await pool.getConnection();
+  try{
+    await conn.beginTransaction();
+    const [[o]]=await conn.execute("SELECT id,rfq_id,po_number,review_status FROM orders WHERE id=? AND buyer_id=? FOR UPDATE",[id,req.buyer.id]);
+    if(!o){await conn.rollback();return res.status(404).json({error:"Order not found."});}
+    if(o.review_status!=="pending_clarification"){await conn.rollback();return res.status(409).json({error:"SupplyDesk is not waiting for a clarification on this order."});}
+    await conn.execute("UPDATE orders SET review_status='pending_review' WHERE id=?",[id]);
+    await addOrderEvent(conn,id,"review","order_received",null,"Buyer reply: "+note,"buyer");
+    await audit(conn,{buyer:req.buyer},"order.clarification_reply","order",id,{review:"pending_clarification"},{review:"pending_review",note});
+    await logBuyerMessage(conn,o.rfq_id,"buyer_reply","Your reply on order "+o.po_number,note,"buyer");
+    await conn.commit();
+    res.json({ok:true,reviewStatus:"pending_review"});
+  }catch(error){await conn.rollback();console.error(error);res.status(500).json({error:"Could not send your reply."});}
+  finally{conn.release();}
+});
 
+// Admin list: buyer identity masked for non-Super Admins; supplier identity never appears here.
 app.get("/api/admin/orders",requireAdmin,async(req,res)=>{
-  try{const [rows]=await pool.execute("SELECT o.id,o.po_number,o.rfq_id,o.title,o.quantity,o.unit_price,o.currency,o.total_price,o.status,o.status_changed_at,o.notes,o.created_at,b.name buyer_name,b.company buyer_company,o.buyer_id,r.rfq_code FROM orders o JOIN buyers b ON b.id=o.buyer_id JOIN buyer_requirements r ON r.id=o.rfq_id ORDER BY o.created_at DESC LIMIT 300");
-    res.json({orders:rows.map(o=>maskBuyerRow(req,{...o,statusLabel:(RFQ.ORDER_STATES[o.status]||{}).label||o.status,allowedNext:RFQ.ORDER_TRANSITIONS[o.status]||[]})),states:Object.fromEntries(Object.entries(RFQ.ORDER_STATES).map(([k,v])=>[k,v.label]))});}
+  try{const [rows]=await pool.execute("SELECT o.id,o.po_number,o.rfq_id,o.title,o.quantity,o.requested_quantity,o.unit_price,o.currency,o.total_price,o.status,o.review_status,o.review_note,o.stage,o.status_changed_at,o.notes,o.created_at,b.name buyer_name,b.company buyer_company,o.buyer_id,r.rfq_code,(SELECT s.sd_number FROM sd_order_items i JOIN sd_orders s ON s.id=i.sd_order_id WHERE i.buyer_order_id=o.id) sd_number,(SELECT i.sd_order_id FROM sd_order_items i WHERE i.buyer_order_id=o.id) sd_order_id,(SELECT COUNT(*) FROM supplier_po_lines l JOIN supplier_pos p ON p.id=l.supplier_po_id WHERE l.buyer_order_id=o.id AND p.status NOT IN ('declined','cancelled')) live_pos FROM orders o JOIN buyers b ON b.id=o.buyer_id JOIN buyer_requirements r ON r.id=o.rfq_id ORDER BY o.created_at DESC LIMIT 300");
+    const out=[];
+    for(const o of rows){
+      const review=o.review_status||"accepted",accepted=RFQ.reviewAccepted(review),cur=o.stage||"supplydesk_accepted";
+      let nextStage=null,nextBlocked=null,allocated=null,covered=null;
+      if(accepted&&o.status!=="cancelled"){
+        const alloc=await orderAllocation(pool,o.id);allocated=alloc.allocated;covered=orderCovered(RFQ.parseQuantity(o.quantity),alloc);
+        const ni=RFQ.stageIndex(cur)+1;
+        if(ni<RFQ.STAGES.length){nextStage=RFQ.STAGES[ni].key;nextBlocked=RFQ.manualStageProblem(cur,nextStage,alloc.pos.map(p=>p.status));}
+      }
+      out.push(maskBuyerRow(req,{...o,statusLabel:(RFQ.ORDER_STATES[o.status]||{}).label||o.status,reviewLabel:(RFQ.ORDER_REVIEW[review]||{}).label||review,reviewOpen:RFQ.reviewOpen(review),stageLabel:RFQ.stageLabel(cur),nextStage,nextStageLabel:nextStage?RFQ.stageLabel(nextStage):null,nextBlocked,allocated,covered,allowedNext:RFQ.ORDER_TRANSITIONS[o.status]||[]}));
+    }
+    res.json({orders:out,states:Object.fromEntries(Object.entries(RFQ.ORDER_STATES).map(([k,v])=>[k,v.label])),stages:RFQ.STAGES.map(s=>({key:s.key,label:s.label,supplier:!!s.supplier})),reviewStates:Object.fromEntries(Object.entries(RFQ.ORDER_REVIEW).map(([k,v])=>[k,v.label]))});}
   catch(error){console.error(error);res.status(500).json({error:"Could not load orders."});}
 });
 
+// 1. SupplyDesk reviews the buyer order: accept / partially accept / ask for clarification / reject.
+app.post("/api/admin/orders/:id/review",requireAdmin,async(req,res)=>{
+  const id=clean(req.params.id,80),decision=clean(req.body?.decision,12),note=clean(req.body?.note,1500)||null,accQty=clean(req.body?.acceptedQuantity,60)||null;
+  const to=RFQ.REVIEW_DECISIONS[decision];
+  if(!to)return res.status(400).json({error:"Choose accept, partial, clarify or reject."});
+  if(to!=="accepted"&&!note)return res.status(400).json({error:"Add a note so the buyer understands the decision."});
+  const conn=await pool.getConnection();
+  try{
+    await conn.beginTransaction();
+    const [[o]]=await conn.execute("SELECT o.id,o.rfq_id,o.po_number,o.title,o.status,o.stage,o.quantity,o.unit_price,o.review_status,b.email,b.name FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.id=? FOR UPDATE",[id]);
+    if(!o){await conn.rollback();return res.status(404).json({error:"Order not found."});}
+    if(o.status==="cancelled"||!RFQ.reviewOpen(o.review_status||"accepted")){await conn.rollback();return res.status(409).json({error:"This order is already "+(RFQ.ORDER_REVIEW[o.review_status]||{label:o.status}).label+"; it cannot be reviewed again."});}
+    const by=actorOf(req).id;
+    let qtyNote=null;
+    if(to==="partially_accepted"){
+      const want=RFQ.parseQuantity(o.quantity),got=RFQ.parseQuantity(accQty);
+      if(want==null){await conn.rollback();return res.status(400).json({error:"This order's quantity is not a plain number, so it cannot be partially accepted. Accept, reject or ask for clarification."});}
+      if(!got||got>=want){await conn.rollback();return res.status(400).json({error:"Enter the quantity SupplyDesk will supply (more than 0 and less than "+want+")."});}
+      const total=money(got*Number(o.unit_price));
+      await conn.execute("UPDATE orders SET requested_quantity=COALESCE(requested_quantity,quantity),quantity=?,total_price=? WHERE id=?",[String(got),total,id]);
+      qtyNote="Accepted quantity "+got+" of "+want+".";
+    }
+    await conn.execute("UPDATE orders SET review_status=?,review_note=?,reviewed_at=NOW(),reviewed_by=? WHERE id=?",[to,note,by,id]);
+    if(RFQ.reviewAccepted(to)){
+      await conn.execute("UPDATE orders SET stage='supplydesk_accepted',status='confirmed',status_changed_at=NOW() WHERE id=?",[id]);
+      await addOrderEvent(conn,id,"stage","supplydesk_accepted",null,note,by);
+    }else if(to==="rejected"){
+      await conn.execute("UPDATE orders SET status='cancelled',status_changed_at=NOW() WHERE id=?",[id]);
+      await addOrderEvent(conn,id,"review",null,null,"Rejected: "+note,by);
+    }else await addOrderEvent(conn,id,"review",null,null,"Clarification requested: "+note,by);
+    await audit(conn,req,"order.reviewed","order",id,{review:o.review_status||"pending_review"},{review:to,acceptedQuantity:to==="partially_accepted"?accQty:null,note});
+    const label=RFQ.ORDER_REVIEW[to].label;
+    await logBuyerMessage(conn,o.rfq_id,"order","Order "+o.po_number+": "+label,[qtyNote,note].filter(Boolean).join("\n")||null,by);
+    await conn.commit();
+    const lead={accepted:"SupplyDesk has accepted your order.",partially_accepted:"SupplyDesk has accepted part of your order.",pending_clarification:"SupplyDesk needs a clarification before it can accept your order.",rejected:"SupplyDesk is unable to accept this order."}[to];
+    try{await sendBrandedMail(o.email,"SupplyDesk | Order "+o.po_number+": "+label,{preheader:label,title:"Order "+label.toLowerCase(),intro:"Hello "+(o.name||"Buyer")+", "+lead,bodyHtml:(qtyNote||note)?'<div style="margin:18px 0;padding:16px;background:#f4f9fc;border:1px solid #dbe8ed;border-radius:12px;font-size:15px;white-space:pre-wrap">'+escapeEmailHtml([qtyNote,note].filter(Boolean).join("\n"))+'</div>':"",textLines:[o.po_number+": "+label,qtyNote||"",note||""].filter(Boolean),ctaText:"View order",ctaUrl:ORIGIN()+"/buyer-dashboard"});}catch(e){console.error("Order review mail failed:",e);}
+    res.json({ok:true,reviewStatus:to});
+  }catch(error){await conn.rollback();console.error("Order review failed:",error);res.status(500).json({error:"Could not save the review."});}
+  finally{conn.release();}
+});
+
+// Coarse status: now only used to cancel an order. All progress runs through the stage controls / supplier confirmation.
 app.patch("/api/admin/orders/:id/status",requireAdmin,async(req,res)=>{
   const id=clean(req.params.id,80),to=clean(req.body?.status,20),note=clean(req.body?.note,500)||null;
   if(!RFQ.isOrderState(to))return res.status(400).json({error:"Unknown order status."});
+  if(to!=="cancelled")return res.status(409).json({error:"Order progress now follows supplier confirmation and the stage controls (Order timeline). Only cancelling is done here."});
   const conn=await pool.getConnection();
   try{
     await conn.beginTransaction();
@@ -1854,12 +2041,145 @@ app.patch("/api/admin/orders/:id/status",requireAdmin,async(req,res)=>{
     if(!RFQ.canOrderTransition(o.status,to)){await conn.rollback();return res.status(409).json({error:"Cannot move this order from "+RFQ.ORDER_STATES[o.status].label+" to "+RFQ.ORDER_STATES[to].label+"."});}
     await conn.execute("UPDATE orders SET status=?,status_changed_at=NOW(),notes=COALESCE(?,notes) WHERE id=?",[to,note,id]);
     await audit(conn,req,"order.status_change","order",id,{status:o.status},{status:to,note});
+    await addOrderEvent(conn,id,"review",null,null,"Cancelled"+(note?": "+note:""),actorOf(req).id);
     await logBuyerMessage(conn,o.rfq_id,"order","Order "+o.po_number+": "+RFQ.ORDER_STATES[to].buyerLabel,note||null,actorOf(req).id);
     await conn.commit();
-    try{await sendBrandedMail(o.email,"SupplyDesk | Order "+o.po_number+": "+RFQ.ORDER_STATES[to].buyerLabel,{preheader:RFQ.ORDER_STATES[to].buyerLabel,title:"Order update",intro:"Hello "+(o.name||"Buyer")+", your order "+o.po_number+" ("+o.title+") is now: "+RFQ.ORDER_STATES[to].buyerLabel+"."+(note?" "+note:""),bodyHtml:"",textLines:[o.po_number+": "+RFQ.ORDER_STATES[to].buyerLabel],ctaText:"View order",ctaUrl:ORIGIN()+"/buyer-dashboard"});}catch(e){console.error("Order update mail failed:",e);}
+    try{await mailOrderUpdate(o,RFQ.ORDER_STATES[to].buyerLabel,note);}catch(e){console.error("Order update mail failed:",e);}
     res.json({ok:true,changed:true,status:to});
   }catch(error){await conn.rollback();console.error(error);res.status(500).json({error:"Could not update the order."});}
   finally{conn.release();}
+});
+
+// SupplyDesk-driven timeline steps (QC, transport, insurance, transit, delivery, closure). One step at a time, in order.
+// Production steps are NOT settable here: they move only after the supplier confirms.
+app.post("/api/admin/orders/:id/stage",requireAdmin,async(req,res)=>{
+  const id=clean(req.params.id,80),to=clean(req.body?.stage,30),ref=clean(req.body?.ref,120)||null,note=clean(req.body?.note,500)||null;
+  if(!RFQ.isStage(to))return res.status(400).json({error:"Unknown stage."});
+  const conn=await pool.getConnection();
+  try{
+    await conn.beginTransaction();
+    const [[o]]=await conn.execute("SELECT o.id,o.rfq_id,o.po_number,o.status,o.stage,o.review_status,o.title,b.email,b.name FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.id=? FOR UPDATE",[id]);
+    if(!o){await conn.rollback();return res.status(404).json({error:"Order not found."});}
+    if(o.status==="cancelled"||!RFQ.reviewAccepted(o.review_status)){await conn.rollback();return res.status(409).json({error:"This order is not open for fulfilment."});}
+    const cur=o.stage||"supplydesk_accepted";
+    if(cur===to){await conn.rollback();return res.json({ok:true,changed:false});}
+    const alloc=await orderAllocation(conn,id);
+    const problem=RFQ.manualStageProblem(cur,to,alloc.pos.map(p=>p.status));
+    if(problem){await conn.rollback();return res.status(409).json({error:problem});}
+    await setOrderStage(conn,req,o,to,{ref,detail:note});
+    await conn.commit();
+    try{await mailOrderUpdate(o,RFQ.stageLabel(to),note||(ref?"Reference: "+ref:null));}catch(e){console.error("Stage mail failed:",e);}
+    res.json({ok:true,changed:true,stage:to,status:RFQ.legacyStatusForStage(to)});
+  }catch(error){await conn.rollback();console.error("Stage change failed:",error);res.status(500).json({error:"Could not update the order stage."});}
+  finally{conn.release();}
+});
+
+// ---- SupplyDesk orders (SD): one or many accepted buyer orders, fulfilled by one or many supplier POs ----
+async function createSdOrder(db,req,orders,title,note){
+  const sdId=crypto.randomUUID();let sdNo;
+  for(let a=0;a<8;a++){sdNo=RFQ.newSdNumber();try{await db.execute("INSERT INTO sd_orders (id,sd_number,title,note,created_by) VALUES (?,?,?,?,?)",[sdId,sdNo,String(title).slice(0,255),note,actorOf(req).id]);break;}catch(e){if(e?.code!=="ER_DUP_ENTRY"||a===7)throw e;}}
+  for(const o of orders)await db.execute("INSERT INTO sd_order_items (id,sd_order_id,buyer_order_id,quantity) VALUES (?,?,?,?)",[crypto.randomUUID(),sdId,o.id,RFQ.parseQuantity(o.quantity)]);
+  await audit(db,req,"sd_order.created","sd_order",sdId,null,{sdNumber:sdNo,buyerOrders:orders.map(o=>o.po_number)});
+  for(const o of orders)await addOrderEvent(db,o.id,"backend",null,null,"Placed in SupplyDesk order "+sdNo,actorOf(req).id);
+  return sdId;
+}
+async function loadAcceptedOrders(conn,ids){
+  const [rows]=await conn.query("SELECT id,po_number,title,quantity,status,review_status FROM orders WHERE id IN (?) FOR UPDATE",[ids]);
+  if(rows.length!==ids.length)throw Object.assign(new Error("One of the buyer orders was not found."),{http:404});
+  for(const o of rows){
+    if(!RFQ.reviewAccepted(o.review_status)||o.status==="cancelled")throw Object.assign(new Error("Buyer order "+o.po_number+" is not accepted by SupplyDesk, so it cannot be fulfilled."),{http:409});
+    const [[ex]]=await conn.execute("SELECT s.sd_number FROM sd_order_items i JOIN sd_orders s ON s.id=i.sd_order_id WHERE i.buyer_order_id=?",[o.id]);
+    if(ex)throw Object.assign(new Error("Buyer order "+o.po_number+" is already in SupplyDesk order "+ex.sd_number+"."),{http:409});
+  }
+  return rows;
+}
+const idList=(v)=>[...new Set((Array.isArray(v)?v:[]).map(x=>clean(x,80)).filter(Boolean))].slice(0,50);
+app.post("/api/admin/sd-orders",requireAdmin,async(req,res)=>{
+  const ids=idList(req.body?.buyerOrderIds),title=clean(req.body?.title,255),note=clean(req.body?.note,1000)||null;
+  if(!ids.length)return res.status(400).json({error:"Choose at least one accepted buyer order."});
+  const conn=await pool.getConnection();
+  try{
+    await conn.beginTransaction();
+    const orders=await loadAcceptedOrders(conn,ids);
+    const sdId=await createSdOrder(conn,req,orders,title||(orders.length===1?orders[0].title:orders[0].title+" (+"+(orders.length-1)+" more)"),note);
+    const [[sd]]=await conn.execute("SELECT sd_number FROM sd_orders WHERE id=?",[sdId]);
+    await conn.commit();
+    res.status(201).json({ok:true,sdOrderId:sdId,sdNumber:sd.sd_number});
+  }catch(error){await conn.rollback();if(error.http)return res.status(error.http).json({error:error.message});console.error("SD order failed:",error);res.status(500).json({error:"Could not create the SupplyDesk order."});}
+  finally{conn.release();}
+});
+// Add more accepted buyer orders to an existing SD order (to combine them into the same supplier PO run).
+app.post("/api/admin/sd-orders/:id/orders",requireAdmin,async(req,res)=>{
+  const id=clean(req.params.id,80),ids=idList(req.body?.buyerOrderIds);
+  if(!ids.length)return res.status(400).json({error:"Choose at least one accepted buyer order."});
+  const conn=await pool.getConnection();
+  try{
+    await conn.beginTransaction();
+    const [[sd]]=await conn.execute("SELECT id,sd_number FROM sd_orders WHERE id=? FOR UPDATE",[id]);
+    if(!sd){await conn.rollback();return res.status(404).json({error:"SupplyDesk order not found."});}
+    const orders=await loadAcceptedOrders(conn,ids);
+    for(const o of orders){await conn.execute("INSERT INTO sd_order_items (id,sd_order_id,buyer_order_id,quantity) VALUES (?,?,?,?)",[crypto.randomUUID(),id,o.id,RFQ.parseQuantity(o.quantity)]);await addOrderEvent(conn,o.id,"backend",null,null,"Placed in SupplyDesk order "+sd.sd_number,actorOf(req).id);}
+    await audit(conn,req,"sd_order.orders_added","sd_order",id,null,{buyerOrders:orders.map(o=>o.po_number)});
+    await conn.commit();
+    res.json({ok:true,sdNumber:sd.sd_number,added:orders.length});
+  }catch(error){await conn.rollback();if(error.http)return res.status(error.http).json({error:error.message});console.error(error);res.status(500).json({error:"Could not add the orders."});}
+  finally{conn.release();}
+});
+async function sdOrderDetail(req,id){
+  const [[sd]]=await pool.execute("SELECT id,sd_number,title,note,created_by,created_at FROM sd_orders WHERE id=?",[id]);
+  if(!sd)return null;
+  const [items]=await pool.execute("SELECT o.id buyer_order_id,o.po_number buyer_po,o.quantity,o.requested_quantity,o.status,o.stage,o.review_status,o.buyer_id,b.name buyer_name,b.company buyer_company FROM sd_order_items i JOIN orders o ON o.id=i.buyer_order_id JOIN buyers b ON b.id=o.buyer_id WHERE i.sd_order_id=? ORDER BY i.created_at",[id]);
+  const outItems=[];
+  for(const it of items){const a=await orderAllocation(pool,it.buyer_order_id),need=RFQ.parseQuantity(it.quantity);
+    outItems.push(maskBuyerRow(req,{...it,stageLabel:RFQ.stageLabel(it.stage||"supplydesk_accepted"),needed:need,allocated:a.allocated,remaining:need==null?null:Math.max(0,Math.round((need-a.allocated)*100)/100)}));}
+  const [pos]=await pool.execute("SELECT po.id,po.po_number,po.supplier_id,po.quantity,po.accepted_quantity,po.unit_cost,po.currency,po.total_cost,po.status,po.batch_no,po.production_started_at,po.expected_completion,po.delivery_by,po.supplier_note,po.created_at,s.legal_name,s.trade_name,s.country,s.city FROM supplier_pos po JOIN supplier_profiles s ON s.id=po.supplier_id WHERE po.sd_order_id=? ORDER BY po.created_at",[id]);
+  const [lines]=pos.length?await pool.query("SELECT l.supplier_po_id,l.buyer_order_id,l.quantity,o.po_number buyer_po FROM supplier_po_lines l JOIN orders o ON o.id=l.buyer_order_id WHERE l.supplier_po_id IN (?)",[pos.map(p=>p.id)]):[[]];
+  return {sdOrder:sd,items:outItems,supplierPos:pos.map(p=>({...maskSupplierRow(req,p),statusLabel:RFQ.PO_STATES[p.status]?.label||p.status,lines:lines.filter(l=>l.supplier_po_id===p.id).map(l=>({buyerOrderId:l.buyer_order_id,buyerPo:l.buyer_po,quantity:l.quantity==null?null:Number(l.quantity)}))})),detailsRestricted:!isSuper(req)};
+}
+app.get("/api/admin/sd-orders",requireAdmin,async(req,res)=>{
+  try{const [rows]=await pool.execute("SELECT s.id,s.sd_number,s.title,s.created_at,(SELECT COUNT(*) FROM sd_order_items i WHERE i.sd_order_id=s.id) buyer_orders,(SELECT COUNT(*) FROM supplier_pos p WHERE p.sd_order_id=s.id AND p.status NOT IN ('declined','cancelled')) live_pos FROM sd_orders s ORDER BY s.created_at DESC LIMIT 200");res.json({sdOrders:rows});}
+  catch(error){console.error(error);res.status(500).json({error:"Could not load SupplyDesk orders."});}
+});
+app.get("/api/admin/sd-orders/:id",requireAdmin,async(req,res)=>{
+  try{const d=await sdOrderDetail(req,clean(req.params.id,80));if(!d)return res.status(404).json({error:"SupplyDesk order not found."});res.json(d);}
+  catch(error){console.error(error);res.status(500).json({error:"Could not load the SupplyDesk order."});}
+});
+// Issue one supplier PO for an SD order. allocations: [{buyerOrderId, quantity}] (omit = everything still unallocated). Combine = many buyer orders in one PO; split = several POs for one order.
+app.post("/api/admin/sd-orders/:id/supplier-pos",requireAdmin,async(req,res)=>{
+  const id=clean(req.params.id,80),b=req.body||{};
+  const unitCost=Number(b.unitCost),currency=(clean(b.currency,10)||"INR").toUpperCase();
+  const deliveryBy=clean(b.deliveryBy,10)||null,terms=clean(b.terms,2000)||null;
+  const code=clean(b.capabilityCode,30).toUpperCase(),sid=clean(b.supplierId,80);
+  if(!Number.isFinite(unitCost)||unitCost<=0)return res.status(400).json({error:"Enter a valid unit cost."});
+  if(deliveryBy&&(!/^\d{4}-\d{2}-\d{2}$/.test(deliveryBy)||new Date(deliveryBy)<new Date(new Date().toDateString())))return res.status(400).json({error:"Delivery date must be today or later."});
+  if(!code&&!(sid&&isSuper(req)))return res.status(400).json({error:"Choose a capability (capability ID)."});
+  let allocations=null;
+  if(Array.isArray(b.allocations)&&b.allocations.length)allocations=b.allocations.slice(0,50).map(a=>({buyerOrderId:clean(a?.buyerOrderId,80),quantity:a?.quantity===""||a?.quantity==null?null:Number(a.quantity)}));
+  const conn=await pool.getConnection();
+  try{
+    await conn.beginTransaction();
+    const r=await createSupplierPo(conn,req,{sdOrderId:id,code,sid,unitCost,currency,quantityText:null,deliveryBy,terms,allocations});
+    await conn.commit();
+    try{await supplierPoMail(r.sup,r.po,r.sd.title,r.quantity);}catch(e){console.error("Supplier PO mail failed:",e);}
+    res.status(201).json({ok:true,poNumber:r.po,supplierPoId:r.pid,sdNumber:r.sd.sd_number,quantity:r.quantity});
+  }catch(error){await conn.rollback();if(error.http)return res.status(error.http).json({error:error.message});console.error("SD supplier PO failed:",error);res.status(500).json({error:"Could not issue the purchase order."});}
+  finally{conn.release();}
+});
+
+// Full backend trace of one buyer PO: Buyer PO -> SupplyDesk order -> supplier PO(s) -> batch -> shipment -> delivery. Supplier identity is Super Admin only.
+app.get("/api/admin/orders/:id/trace",requireAdmin,async(req,res)=>{
+  try{
+    const id=clean(req.params.id,80);
+    const [[o]]=await pool.execute("SELECT o.id,o.po_number,o.title,o.quantity,o.requested_quantity,o.status,o.review_status,o.stage,o.created_at,o.buyer_id,b.name buyer_name,b.company buyer_company FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.id=?",[id]);
+    if(!o)return res.status(404).json({error:"Order not found."});
+    const [[sd]]=await pool.execute("SELECT s.id,s.sd_number FROM sd_order_items i JOIN sd_orders s ON s.id=i.sd_order_id WHERE i.buyer_order_id=?",[id]);
+    const [pos]=await pool.execute("SELECT po.id,po.po_number,po.supplier_id,po.status,po.quantity,po.accepted_quantity,po.batch_no,po.production_started_at,po.expected_completion,po.delivery_by,l.quantity line_quantity,s.legal_name,s.trade_name FROM supplier_po_lines l JOIN supplier_pos po ON po.id=l.supplier_po_id JOIN supplier_profiles s ON s.id=po.supplier_id WHERE l.buyer_order_id=? ORDER BY po.created_at",[id]);
+    const [events]=await pool.execute("SELECT kind,stage,ref,detail,created_by,created_at FROM order_events WHERE order_id=? ORDER BY id",[id]);
+    const shipment=events.filter(e=>["transport_booked","insurance_completed","in_transit","out_for_delivery","delivered"].includes(e.stage)).map(e=>({stage:e.stage,label:RFQ.stageLabel(e.stage),ref:e.ref,at:e.created_at}));
+    res.json({buyerOrder:{...maskBuyerRow(req,o),stageLabel:RFQ.stageLabel(o.stage||"supplydesk_accepted"),reviewLabel:(RFQ.ORDER_REVIEW[o.review_status]||{}).label},sdOrder:sd||null,
+      supplierPos:pos.map(p=>({...maskSupplierRow(req,p),statusLabel:RFQ.PO_STATES[p.status]?.label||p.status})),shipment,delivered:RFQ.stageIndex(o.stage||"")>=RFQ.stageIndex("delivered"),
+      events:events.map(e=>({kind:e.kind,stage:e.stage,stageLabel:e.stage?RFQ.stageLabel(e.stage):null,ref:e.ref,detail:e.detail,by:/^supplier:/.test(e.created_by||"")?"supplier":e.created_by,at:e.created_at})),detailsRestricted:!isSuper(req)});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not load the order trace."});}
 });
 
 // ---- Procurement (Phase 1B) ----
@@ -1929,7 +2249,7 @@ app.get("/api/admin/audit",requireAdmin,async(req,res)=>{
     const [rows]=entity&&entityId
       ?await pool.execute("SELECT id,actor,actor_role,action,entity,entity_id,old_value,new_value,created_at FROM audit_log WHERE entity=? AND entity_id=? ORDER BY id DESC LIMIT 200",[entity,entityId])
       :await pool.execute("SELECT id,actor,actor_role,action,entity,entity_id,old_value,new_value,created_at FROM audit_log ORDER BY id DESC LIMIT 200");
-    res.json({entries:isSuper(req)?rows:rows.map(e=>{const o=/^buyer:/.test(e.actor||"")?{...e,actor:"buyer"}:{...e};if(o.entity==="supplier"){o.old_value=null;o.new_value=null;}return o;})});
+    res.json({entries:isSuper(req)?rows:rows.map(e=>{const o=/^buyer:/.test(e.actor||"")?{...e,actor:"buyer"}:/^supplier:/.test(e.actor||"")?{...e,actor:"supplier"}:{...e};if(o.entity==="supplier"){o.old_value=null;o.new_value=null;}return o;})});
   }catch(error){console.error("Audit read failed:",error);res.status(500).json({error:"Could not load the audit trail."});}
 });
 
@@ -3149,6 +3469,7 @@ async function ensureDashboardSchema() {
   await ensureRequirementSchema();
   await ensureCapacitySchema();
   await ensureRfqSchema();
+  await ensureOrderFlowSchema();
   await ensureAdminAuthSchema();
   await migrateLegacyCategories();
 
@@ -3402,6 +3723,82 @@ async function ensureRfqSchema() {
       try { await pool.execute("UPDATE buyer_requirements SET rfq_state=COALESCE(rfq_state,?),rfq_code=COALESCE(rfq_code,?),state_changed_at=COALESCE(state_changed_at,NOW()) WHERE id=?",[RFQ.LEGACY_STATUS_TO_STATE[r.status]||"submitted",RFQ.newRfqCode(),r.id]); break; }
       catch (e) { if(e?.code!=="ER_DUP_ENTRY") throw e; }
     }
+  }
+}
+
+// ---- Order architecture: Buyer PO -> SupplyDesk order (SD) -> Supplier PO. Idempotent; never drops the supplier relationship. ----
+async function ensureOrderFlowSchema() {
+  const addCol = async (table, ddl) => {
+    try { await pool.query("ALTER TABLE "+table+" ADD COLUMN "+ddl); }
+    catch (e) { if(!["ER_DUP_FIELDNAME","ER_DUP_COLUMN"].includes(e?.code)) throw e; }
+  };
+  // Buyer PO review. Existing rows default to 'accepted' (they were already running); new orders insert 'pending_review' explicitly.
+  await addCol("orders","review_status VARCHAR(24) NOT NULL DEFAULT 'accepted'");
+  await addCol("orders","review_note VARCHAR(1500) NULL");
+  await addCol("orders","reviewed_at DATETIME NULL");
+  await addCol("orders","reviewed_by VARCHAR(120) NULL");
+  await addCol("orders","requested_quantity VARCHAR(60) NULL");
+  await addCol("orders","stage VARCHAR(30) NULL");
+  await pool.query("UPDATE orders SET stage=CASE status WHEN 'in_production' THEN 'in_production' WHEN 'shipped' THEN 'in_transit' WHEN 'delivered' THEN 'delivered' ELSE 'supplydesk_accepted' END WHERE stage IS NULL");
+  await pool.execute(`CREATE TABLE IF NOT EXISTS sd_orders (
+    id CHAR(36) PRIMARY KEY,
+    sd_number VARCHAR(24) NOT NULL UNIQUE,
+    title VARCHAR(255) NOT NULL,
+    note VARCHAR(1000) NULL,
+    created_by VARCHAR(190) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB`);
+  // Which buyer orders a SupplyDesk order contains (a buyer order sits in exactly one SD order).
+  await pool.execute(`CREATE TABLE IF NOT EXISTS sd_order_items (
+    id CHAR(36) PRIMARY KEY,
+    sd_order_id CHAR(36) NOT NULL,
+    buyer_order_id CHAR(36) NOT NULL UNIQUE,
+    quantity DECIMAL(16,2) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_sdi_sd (sd_order_id)
+  ) ENGINE=InnoDB`);
+  // Permanent supplier-PO <-> buyer-order allocation: each buyer order stays individually traceable inside a combined PO.
+  await pool.execute(`CREATE TABLE IF NOT EXISTS supplier_po_lines (
+    id CHAR(36) PRIMARY KEY,
+    supplier_po_id CHAR(36) NOT NULL,
+    sd_order_id CHAR(36) NOT NULL,
+    buyer_order_id CHAR(36) NOT NULL,
+    quantity DECIMAL(16,2) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_spl (supplier_po_id, buyer_order_id),
+    INDEX idx_spl_buyer (buyer_order_id),
+    INDEX idx_spl_sd (sd_order_id)
+  ) ENGINE=InnoDB`);
+  await addCol("supplier_pos","sd_order_id CHAR(36) NULL");
+  await addCol("supplier_pos","accepted_quantity VARCHAR(60) NULL");
+  await addCol("supplier_pos","batch_no VARCHAR(60) NULL");
+  await addCol("supplier_pos","production_started_at DATETIME NULL");
+  await addCol("supplier_pos","expected_completion DATE NULL");
+  try { await pool.query("ALTER TABLE supplier_pos MODIFY order_id CHAR(36) NULL"); } catch (e) { console.warn("supplier_pos.order_id relax skipped:", e?.message); }
+  // Buyer-facing history of every stage change, with transport/insurance/tracking references.
+  await pool.execute(`CREATE TABLE IF NOT EXISTS order_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    order_id CHAR(36) NOT NULL,
+    kind VARCHAR(20) NOT NULL,
+    stage VARCHAR(30) NULL,
+    ref VARCHAR(120) NULL,
+    detail VARCHAR(1000) NULL,
+    created_by VARCHAR(120) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    INDEX idx_oe_order (order_id, id)
+  ) ENGINE=InnoDB`);
+  // Backfill: link every pre-existing supplier PO to an SD order and an allocation line (idempotent).
+  const [legacy] = await pool.query("SELECT po.id,po.order_id,po.quantity,po.title,po.created_by,o.quantity oq FROM supplier_pos po JOIN orders o ON o.id=po.order_id WHERE po.sd_order_id IS NULL AND po.order_id IS NOT NULL");
+  for (const po of legacy) {
+    let [[item]] = await pool.execute("SELECT sd_order_id FROM sd_order_items WHERE buyer_order_id=?",[po.order_id]);
+    if (!item) {
+      const sdId = crypto.randomUUID();
+      for (let a=0;a<8;a++) { try { await pool.execute("INSERT INTO sd_orders (id,sd_number,title,created_by) VALUES (?,?,?,?)",[sdId,RFQ.newSdNumber(),po.title,po.created_by||"system"]); break; } catch (e) { if(e?.code!=="ER_DUP_ENTRY"||a===7) throw e; } }
+      await pool.execute("INSERT INTO sd_order_items (id,sd_order_id,buyer_order_id,quantity) VALUES (?,?,?,?)",[crypto.randomUUID(),sdId,po.order_id,RFQ.parseQuantity(po.oq)]);
+      item = { sd_order_id: sdId };
+    }
+    await pool.execute("UPDATE supplier_pos SET sd_order_id=? WHERE id=?",[item.sd_order_id,po.id]);
+    await pool.execute("INSERT IGNORE INTO supplier_po_lines (id,supplier_po_id,sd_order_id,buyer_order_id,quantity) VALUES (?,?,?,?,?)",[crypto.randomUUID(),po.id,item.sd_order_id,po.order_id,RFQ.parseQuantity(po.quantity)]);
   }
 }
 
