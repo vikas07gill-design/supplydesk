@@ -7,7 +7,6 @@ const STATES = {
   sourcing:        { label: "Sourcing from suppliers",   buyerLabel: "SupplyDesk is sourcing" },
   quotes_received: { label: "Supplier quotes received",  buyerLabel: "SupplyDesk is reviewing quotes" },
   costing:         { label: "Costing / SupplyDesk quote", buyerLabel: "SupplyDesk is preparing your quote" },
-  // Reserved for Phase 2 (commercial flow). Defined now so transitions stay in one place.
   quote_sent:      { label: "Quote sent to buyer",       buyerLabel: "Quote ready" },
   buyer_approved:  { label: "Buyer approved",            buyerLabel: "Approved by you" },
   converted:       { label: "Converted to order",        buyerLabel: "Order created" },
@@ -23,7 +22,7 @@ const TRANSITIONS = {
   sourcing:        ["quotes_received", "costing", "closed", "cancelled"],
   quotes_received: ["costing", "closed", "cancelled"],
   costing:         ["sourcing", "quote_sent", "closed", "cancelled"],
-  quote_sent:      ["buyer_approved", "lost", "cancelled"],
+  quote_sent:      ["buyer_approved", "lost", "costing", "cancelled"],
   buyer_approved:  ["converted", "cancelled"],
   converted: [], lost: [], rejected: [], closed: [], cancelled: []
 };
@@ -91,4 +90,29 @@ function newRfqCode(now = new Date()) {
   return "RFQ-" + now.getUTCFullYear() + String(now.getUTCMonth() + 1).padStart(2, "0") + "-" + tail;
 }
 
-module.exports = { STATES, TRANSITIONS, LEGACY_STATUS_TO_STATE, isState, canTransition, isTerminal, parseQuantity, scoreCapability, newRfqCode };
+
+// ---- Orders (Phase 2) ----
+const ORDER_STATES = {
+  confirmed:     { label: "Confirmed",     buyerLabel: "Order confirmed" },
+  in_production: { label: "In production", buyerLabel: "Being produced" },
+  shipped:       { label: "Shipped",       buyerLabel: "Shipped" },
+  delivered:     { label: "Delivered",     buyerLabel: "Delivered" },
+  cancelled:     { label: "Cancelled",     buyerLabel: "Cancelled" }
+};
+const ORDER_TRANSITIONS = {
+  confirmed: ["in_production", "cancelled"],
+  in_production: ["shipped", "cancelled"],
+  shipped: ["delivered"],
+  delivered: [], cancelled: []
+};
+const isOrderState = (s) => Object.prototype.hasOwnProperty.call(ORDER_STATES, s);
+const canOrderTransition = (from, to) => from === to || (ORDER_TRANSITIONS[from] || []).includes(to);
+const _code = (prefix) => {
+  const d = new Date(), a = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let x = ""; for (let i = 0; i < 4; i++) x += a[Math.floor(Math.random() * a.length)];
+  return `${prefix}-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}-${x}`;
+};
+const newQuoteNo = () => _code("SQ");
+const newPoNumber = () => _code("PO");
+
+module.exports = { STATES, TRANSITIONS, LEGACY_STATUS_TO_STATE, isState, canTransition, isTerminal, parseQuantity, scoreCapability, newRfqCode, ORDER_STATES, ORDER_TRANSITIONS, isOrderState, canOrderTransition, newQuoteNo, newPoNumber };
