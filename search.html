@@ -73,7 +73,7 @@ function capHtml(x){
   const lab={available:'Available',limited:'Limited capacity',full:'Fully booked',unknown:'Capacity being reconfirmed'};
   return '<div class="capline">'+(c.band?'<span class="capchip">Capacity '+esc(c.band)+(c.unit?' '+esc(c.unit):'')+'/month</span>':'')+
     '<span class="capchip cap-'+esc(c.status||'unknown')+'">'+esc(lab[c.status]||lab.unknown)+'</span>'+
-    (c.leadTimeDays?'<span class="capchip">Lead time '+esc(c.leadTimeDays)+' days</span>':'')+'</div>';
+    (c.leadTimeDays?'<span class="capchip">Delivery '+esc(c.leadTimeMaxDays&&c.leadTimeMaxDays>c.leadTimeDays?c.leadTimeDays+'\u2013'+c.leadTimeMaxDays:c.leadTimeDays)+' days</span>':'')+'</div>';
 }
 function esc(v){
   return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

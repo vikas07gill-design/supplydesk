@@ -1,63 +1,64 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Supplier Registration | SupplyDesk</title><meta name="description" content="Register your business on SupplyDesk.">
+<title>Create Supplier Account | SupplyDesk</title><meta name="description" content="Create your SupplyDesk supplier account in a minute. Complete your business profile after login.">
 <style>
 :root{--ink:#0d2430;--muted:#647780;--line:#dbe7eb;--bg:#f5fafb;--card:#fff;--brand:#087f8c;--dark:#092a38}.wrap{max-width:980px;margin:auto;padding:0 20px}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,sans-serif}a{text-decoration:none;color:inherit}nav{height:70px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center}.nav{width:100%;display:flex;justify-content:space-between;align-items:center}.brand-logo{display:flex;align-items:center;gap:10px}.brand-mark{width:43px;height:43px;border-radius:14px;display:grid;place-items:center;color:#fff;background:linear-gradient(145deg,#087f8c,#176aa5)}.brand-mark svg{width:31px}.brand-word{font-size:23px;font-weight:900;letter-spacing:-.055em}.brand-word b{color:var(--brand)}.btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);background:#fff;border-radius:10px;padding:10px 15px;font-weight:800;cursor:pointer}.primary{background:var(--brand);border-color:var(--brand);color:#fff}.hero{padding:44px 0 28px}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.13em;color:var(--brand);font-weight:900}.hero h1{font-size:42px;letter-spacing:-.05em;margin:10px 0 8px}.hero p{color:var(--muted);line-height:1.6;margin:0}.card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:25px;margin-bottom:14px}.card h2{margin:0 0 17px;font-size:20px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.field label{display:block;font-size:12px;font-weight:800;margin-bottom:7px}.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:11px 12px;font:inherit;background:#fbfdfe}.field textarea{min-height:90px;resize:vertical}.full{grid-column:1/-1}.help{font-size:11px;color:var(--muted);margin-top:6px}.check{display:flex;gap:8px;align-items:flex-start;font-size:12px;color:#526770;line-height:1.5}.actions{display:flex;justify-content:space-between;align-items:center;gap:12px}.note{background:#eaf7f5;border:1px solid #c7e8e2;border-radius:13px;padding:14px;color:#31555a;font-size:12px;line-height:1.6;margin-bottom:15px}.hidden{display:none}.status{display:none;background:#eaf7f5;border:1px solid #bfe4df;color:#24545b;border-radius:14px;padding:16px;margin-top:14px}.request-link{font-size:12px;color:var(--brand);font-weight:800;cursor:pointer}footer{padding:30px 0;color:#7b8c94;font-size:12px}@media(max-width:650px){.grid{grid-template-columns:1fr}.hero h1{font-size:34px}.actions{display:block}.actions .btn{width:100%;margin-top:8px}}
 </style><style>/* SupplyDesk premium UI */body{background:radial-gradient(circle at 90% 0%,rgba(39,131,255,.08),transparent 23%),linear-gradient(180deg,#eef7fb,#f8fbfd 58%,#edf8f8)}nav{background:rgba(5,20,35,.92)!important;border-bottom-color:rgba(255,255,255,.08)!important;box-shadow:0 8px 30px rgba(3,24,40,.14)}nav .brand-word{color:#fff!important}nav .brand-word b{color:#45d9ea!important}nav .btn{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.14);color:#fff}.hero{position:relative;overflow:hidden;background:radial-gradient(circle at 86% 25%,rgba(39,139,255,.2),transparent 25%),linear-gradient(135deg,#06172a,#0a3453);color:#fff}.hero:after{content:"";position:absolute;width:320px;height:320px;right:-115px;top:-140px;border:1px solid rgba(74,225,236,.2);border-radius:50%}.hero p{color:#b8cad5}.hero .eyebrow{color:#62e4e5}.card{border-radius:20px;box-shadow:0 10px 30px rgba(13,63,84,.04);transition:.2s}.card:hover{box-shadow:0 18px 42px rgba(13,63,84,.08);border-color:#b4e2e4}.field input,.field select,.field textarea{border-radius:12px;transition:.2s}.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:#55cbd3;box-shadow:0 0 0 4px rgba(23,198,181,.08)}.note{background:linear-gradient(135deg,#e8fbfa,#edf6ff);border-color:#c5e8e7}.primary{background:linear-gradient(135deg,#16b9d1,#287bf4);border-color:transparent;box-shadow:0 10px 25px rgba(39,132,238,.2)}</style><script src="/assets/taxonomy.js"></script><link rel="stylesheet" href="assets/depth.css"><script src="assets/depth.js" defer></script></head><body>
 <nav><div class="wrap nav"><a class="brand-logo" href="index.html" aria-label="SupplyDesk home"><img src="assets/supplydesk-logo-dark.svg" alt="SupplyDesk" style="width:180px;height:auto;display:block"></a><span style="display:flex;gap:8px;align-items:center"><a href="supplier-dashboard.html" class="btn">Supplier Dashboard</a><a href="supplier-update.html" class="btn">Already listed? Update Profile</a><a href="categories.html" class="btn">View Categories</a></span></div></nav>
-<section class="hero"><div class="wrap"><div class="eyebrow">Verified business onboarding</div><h1>Become a SupplyDesk supply partner.</h1><p>Submit your legal details, supply categories and capacity. SupplyDesk verifies every partner before it is approved. Buyers deal with SupplyDesk, so your business details stay confidential.</p></div></section>
-<form class="wrap" id="form">
-<div class="card"><h2>1. Business details</h2><div class="grid">
-<div class="field"><label>Legal business name *</label><input required name="legalName"></div><div class="field"><label>Trade / brand name</label><input name="tradeName"></div>
-<div class="field"><label>Business type *</label><select required name="businessType"><option value="">Select</option><option>Manufacturer</option><option>Wholesaler</option><option>Distributor</option><option>Trader</option><option>Service Provider</option><option>Other</option></select></div><div class="field"><label>Year established</label><input type="number" min="1800" max="2100" name="year"></div>
-<div class="field"><label>Country *</label><input required name="country"></div><div class="field"><label>City *</label><input required name="city"></div>
-<div class="field full"><label>Registered / business address *</label><textarea required name="address"></textarea></div>
-<div class="field"><label>Business email *</label><input required type="email" name="email"></div><div class="field"><label>Business phone *</label><input required name="phone"></div>
-<div class="field"><label>Contact person *</label><input required name="contact"></div><div class="field"><label>Designation</label><input name="designation"></div>
-</div></div>
-<div class="card"><h2>2. Registration & legal information</h2><div class="grid">
-<div class="field"><label>Registration / company number</label><input name="regNo"></div><div class="field"><label>Tax / VAT / GST number</label><input name="taxNo"></div>
-<div class="field"><label>Import / export number, if applicable</label><input name="tradeNo"></div><div class="field"><label>Website</label><input type="url" name="website" placeholder="https://"></div>
-<div class="field full"><label>Additional licence / certification details</label><textarea name="certs" placeholder="Add relevant licence or certification information"></textarea></div>
-</div><div class="help">Fields are intentionally country-neutral. SupplyDesk can add country-specific registration requirements during verification.</div></div>
-<div class="card"><h2>3. Categories</h2><div class="grid">
-<div class="field"><label>Category *</label><select required id="category" name="category"></select></div><div class="field"><label>Sub-category *</label><select required id="subcategory" name="subcategory"></select></div>
-<div class="field full"><a class="request-link" id="requestToggle">+ My category or sub-category is not listed</a></div>
-<div class="field full hidden" id="requestBox"><label>Requested category / sub-category</label><textarea id="requestText" placeholder="Example: Packaging & Printing → PET Bottles"></textarea><div class="help">Your request will be included with the supplier submission for SupplyDesk review.</div></div>
-</div></div>
-<div class="card"><h2>4. Supporting documents & photos</h2><div class="note"><strong>For verification:</strong> upload business registration, tax registration, relevant licences/certificates, address proof and business/facility photos. Files are uploaded securely to the SupplyDesk server for private admin verification. Legal documents are not published on the public website.</div><div class="grid">
-<div class="field"><label>Business registration document</label><input name="registrationDoc" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"></div><div class="field"><label>Tax registration document</label><input name="taxDoc" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"></div>
-<div class="field"><label>Licence / certificate</label><input name="licenceDoc" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"></div><div class="field"><label>Address proof</label><input name="addressProof" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"></div>
-<div class="field full"><label>Business / factory / office photos</label><input name="businessPhotos" type="file" multiple accept=".jpg,.jpeg,.png,.webp"><div class="help">Maximum 8 photos. Each file can be up to 10 MB.</div></div>
-</div></div>
-<div class="card"><input name="website_confirm" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px" aria-hidden="true"><div class="check"><input type="checkbox" required> <span>I confirm that the information submitted is accurate and I authorize SupplyDesk to review the submitted business information and supporting documents for partner verification.</span></div><div class="actions"><span class="help">No registration fee is requested on this form.</span><button class="btn primary" type="submit">Submit for Verification →</button></div><div class="status" id="status"></div></div>
+<section class="hero"><div class="wrap"><div class="eyebrow">Supply partner account</div><h1>Create your supplier account in a minute.</h1><p>Only five details and an email code. You go straight to your Supplier Dashboard and complete your business profile step by step. SupplyDesk verifies your business later, before any live order is shared with you.</p></div></section>
+<form class="wrap" id="form" autocomplete="on" novalidate>
+<div class="card"><h2>Account details</h2><div class="grid">
+<div class="field"><label for="company">Company name *</label><input id="company" name="company" autocomplete="organization" maxlength="180" required></div>
+<div class="field"><label for="contact">Contact person *</label><input id="contact" name="contact" autocomplete="name" maxlength="180" required></div>
+<div class="field"><label for="email">Business email *</label><input id="email" name="email" type="email" inputmode="email" autocomplete="email" maxlength="255" required></div>
+<div class="field"><label for="phone">Mobile number *</label><input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="40" required></div>
+<div class="field"><label for="country">Country *</label><input id="country" name="country" autocomplete="country-name" maxlength="100" required></div>
+<div class="field hidden" id="otpBox"><label for="otp">6-digit email code *</label><input id="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456"><div class="help">Check your inbox and spam folder. Valid for 10 minutes.</div></div>
+</div>
+<input name="website_confirm" id="website_confirm" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px" aria-hidden="true">
+<div class="note" style="margin-top:14px"><strong>No documents needed now.</strong> Your email code only confirms your mailbox. It is not business verification. After login you will add your business details, registration, products, capacity, certifications, documents and photos. SupplyDesk reviews them and tells you your status.</div>
+<div class="actions"><span class="help">Already have an account? <a href="supplier-dashboard.html">Supplier login</a></span><span><button class="btn" type="button" id="resend" style="display:none">Resend code</button> <button class="btn primary" type="submit" id="go">Send verification code →</button></span></div><div class="status" id="status" role="status"></div></div>
 </form><footer><div class="wrap">SupplyDesk · Global Procurement Partner</div></footer>
 <script>
-const catalog=SD_TAX.groups;
-const subs=SD_TAX.subs;
-const cat=document.getElementById('category'),sub=document.getElementById('subcategory');
-Object.entries(catalog).forEach(([group,items])=>{const o=document.createElement('optgroup');o.label=group;items.forEach(x=>{const op=document.createElement('option');op.value=x;op.textContent=x;o.appendChild(op)});cat.appendChild(o)});
-function fillSub(){sub.innerHTML='<option value="">Select sub-category</option>'; (subs[cat.value]||['Other / General']).forEach(x=>{const o=document.createElement('option');o.value=x;o.textContent=x;sub.appendChild(o)})}fillSub();cat.onchange=fillSub;
-document.getElementById('requestToggle').onclick=()=>document.getElementById('requestBox').classList.toggle('hidden');
-document.getElementById('form').onsubmit=async e=>{
-e.preventDefault();
-const form=e.currentTarget;
-const s=document.getElementById('status');
-const btn=form.querySelector('button[type="submit"]');
-s.style.display='block';
-s.innerHTML='<strong>Submitting...</strong><br>Please wait while your application and files are securely uploaded.';
-btn.disabled=true; btn.textContent='Submitting...';
-try{
- const response=await fetch('/api/supplier-applications',{method:'POST',body:new FormData(form)});
- const data=await response.json().catch(()=>({}));
- if(!response.ok) throw new Error(data.error||'Submission failed. Please try again.');
- s.innerHTML='<strong>Application submitted ✓</strong><br>'+data.message+'<br><span class="help">Application reference: '+data.applicationId+'</span>';
- form.querySelectorAll('input,select,textarea,button').forEach(el=>el.disabled=true);
- window.scrollTo({top:s.offsetTop-30,behavior:'smooth'});
-}catch(err){
- s.innerHTML='<strong>We could not submit the application.</strong><br>'+err.message+'<br><span class="help">Please check your details and try again.</span>';
- btn.disabled=false; btn.textContent='Submit for Verification →';
+const KEY="supplydesk_supplier_dashboard_token";
+const $=id=>document.getElementById(id),st=$("status");
+let sent=false;
+function show(msg,ok){st.style.display="block";st.innerHTML=msg;st.style.color=ok?"#116a3a":"#a4262c"}
+async function post(url,body){const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const d=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(d.error||"Something went wrong. Please try again.");e.code=d.code;throw e}return d}
+function fields(){
+  const v=i=>$(i).value.trim();
+  const b={company:v("company"),contact:v("contact"),email:v("email").toLowerCase(),phone:v("phone"),country:v("country"),website_confirm:$("website_confirm").value};
+  if(!b.company)return{error:"Enter your company name."};
+  if(!b.contact)return{error:"Enter the contact person's name."};
+  if(!/^\S+@\S+\.\S+$/.test(b.email))return{error:"Enter a valid business email."};
+  if(!/^[+()\d][\d\s().-]{6,24}$/.test(b.phone))return{error:"Enter a valid mobile number."};
+  if(!b.country)return{error:"Enter your country."};
+  return{b};
 }
-};
-if(location.hash==='#category-request')document.getElementById('requestBox').classList.remove('hidden');
+const lock=(on)=>["company","contact","email","phone","country"].forEach(i=>{$(i).readOnly=on});
+async function sendCode(){
+  const f=fields();if(f.error){show(f.error,false);return}
+  const btn=$("go");btn.disabled=true;btn.textContent="Sending...";
+  try{
+    const d=await post("/api/supplier-signup/request-otp",f.b);
+    sent=true;lock(true);$("otpBox").classList.remove("hidden");$("resend").style.display="inline-block";
+    if(d.testOtp)$("otp").value=d.testOtp;
+    show(d.message||"Code sent. Check your email.",true);$("otp").focus();btn.textContent="Verify & create account →";
+  }catch(e){
+    show(e.code==="account_exists"?e.message+' <a href="supplier-dashboard.html">Go to Supplier login</a>':e.message,false);btn.textContent="Send verification code →";
+  }finally{btn.disabled=false}
+}
+async function verify(){
+  const otp=$("otp").value.trim();
+  if(!/^\d{6}$/.test(otp)){show("Enter the 6-digit code from your email.",false);return}
+  const btn=$("go");btn.disabled=true;btn.textContent="Creating account...";
+  try{
+    const d=await post("/api/supplier-signup/verify-otp",{email:$("email").value.trim().toLowerCase(),otp});
+    try{sessionStorage.setItem(KEY,d.token)}catch{}
+    show("Account created ✓ Opening your Supplier Dashboard...",true);
+    location.href="supplier-dashboard.html";
+  }catch(e){show(e.message,false);btn.textContent="Verify & create account →";btn.disabled=false}
+}
+$("form").addEventListener("submit",e=>{e.preventDefault();sent?verify():sendCode()});
+$("resend").addEventListener("click",()=>{lock(false);sent=false;sendCode()});
 </script></body></html>

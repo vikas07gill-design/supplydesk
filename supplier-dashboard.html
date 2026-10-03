@@ -64,6 +64,7 @@ header{background:rgba(5,20,35,.92);color:#fff;border-bottom:1px solid rgba(255,
 <p>Enter your registered business email. We will send a 6-digit OTP. No password or dashboard link is required.</p>
 <div class="field"><label>Registered business email</label><input id="loginEmail" type="email" placeholder="business@example.com"></div><button class="btn primary" style="width:100%" type="button" id="loginBtn" onclick="requestOtp()">Send 6-Digit OTP →</button>
 <div id="loginStatus" class="notice hidden" aria-live="polite"></div>
+<p style="margin-top:12px;font-size:13px;color:var(--muted)">New supplier? <a href="supplier-register.html"><strong>Create a free supplier account</strong></a> in a minute: no documents needed to start.</p>
 <div id="buildInfo" style="font-size:11px;color:#087f8c;font-weight:800;margin-top:10px;text-align:center"></div>
 <div id="diagnosticBox" class="notice" style="margin-top:12px;background:#f7fbfc;border:1px solid #dbe7eb">
   <strong>SupplyDesk System Check</strong>
@@ -106,10 +107,11 @@ header{background:rgba(5,20,35,.92);color:#fff;border-bottom:1px solid rgba(255,
 
   <div class="dashboard-tabs">
     <div class="wrap tabs-inner" role="tablist" aria-label="Supplier dashboard sections">
+      <button class="tab-btn" data-tab="onboarding" onclick="switchTab('onboarding')">Complete profile</button>
       <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
       <button class="tab-btn" data-tab="business" onclick="switchTab('business')">Business Profile</button>
       <button class="tab-btn" data-tab="products" onclick="switchTab('products')">My Products</button>
-      <button class="tab-btn" data-tab="requests" onclick="switchTab('requests')">Customer Requests</button><button class="tab-btn" data-tab="requirements" onclick="switchTab('requirements')">Buyer Requirements</button><button class="tab-btn" data-tab="purchase-orders" onclick="switchTab('purchase-orders')">Purchase Orders</button>
+      <button class="tab-btn" data-tab="requests" onclick="switchTab('requests')">Customer Requests</button><button class="tab-btn" data-tab="requirements" onclick="switchTab('requirements')">Sourcing Requests</button><button class="tab-btn" data-tab="purchase-orders" onclick="switchTab('purchase-orders')">Purchase Orders</button>
       <button class="tab-btn" data-tab="company" onclick="switchTab('company')">Company Details</button>
       <button class="tab-btn" data-tab="documents" onclick="switchTab('documents')">Documents</button>
     </div>
@@ -124,6 +126,13 @@ header{background:rgba(5,20,35,.92);color:#fff;border-bottom:1px solid rgba(255,
     </div>
 
     <div id="dashboardStatus"></div>
+
+    <section id="tab-onboarding" class="tab-panel">
+      <div class="card" id="onbCard">
+        <div class="section-toolbar"><div><div class="kicker">Profile completion</div><h2 class="section-title">Complete your supplier profile</h2><p class="section-subtitle">Your account is ready. Finish these 8 steps at your own pace, then submit for SupplyDesk verification. Your email code confirmed your mailbox only; it is not business verification.</p></div></div>
+        <div id="onbRoot"><div class="empty">Loading your onboarding...</div></div>
+      </div>
+    </section>
 
     <section id="tab-overview" class="tab-panel active">
       <div class="overview-grid">
@@ -224,8 +233,8 @@ header{background:rgba(5,20,35,.92);color:#fff;border-bottom:1px solid rgba(255,
 
     <section id="tab-requirements" class="tab-panel">
   <div class="card">
-    <div class="section-toolbar"><div><div class="kicker">New sourcing opportunities</div><h2 class="section-title">Buyer Requirements</h2><p class="section-subtitle">See requirements matched to your category and send a quotation directly to the buyer. Buyer contact details stay private until the buyer chooses to connect.</p></div><button class="btn" onclick="loadRequirements()">Refresh</button></div>
-    <div id="requirementsList"><div class="empty">Loading buyer requirements...</div></div>
+    <div class="section-toolbar"><div><div class="kicker">New sourcing opportunities</div><h2 class="section-title">SupplyDesk Sourcing Requests</h2><p class="section-subtitle">SupplyDesk requirements matched to your category. Send your quotation to SupplyDesk, your customer. Every request is raised by SupplyDesk.</p></div><button class="btn" onclick="loadRequirements()">Refresh</button></div>
+    <div id="requirementsList"><div class="empty">Loading sourcing requests...</div></div>
   </div>
 </section>
 
@@ -394,6 +403,7 @@ async function loadDashboard(){
     renderProducts(d.products||[]);
     renderConnections(d.connections||[]);
     renderProfileSummary(s);
+    loadOnboarding().then(()=>{if(!s.eligible&&!location.hash.slice(1))switchTab("onboarding");});
     if(d.pendingUpdate){
       document.getElementById("dashboardStatus").innerHTML='<div class="notice">A profile update is currently <strong>'+esc(d.pendingUpdate.status)+'</strong>. Your public profile stays unchanged until SupplyDesk reviews it.</div>';
     } else {
@@ -534,6 +544,7 @@ function switchTab(tab){
   document.querySelectorAll(".tab-btn").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab));
   document.querySelectorAll(".tab-panel").forEach(p=>p.classList.toggle("active",p.id==="tab-"+tab));
   if(history.replaceState)history.replaceState({},document.title,"supplier-dashboard.html#"+tab);
+  if(tab==="onboarding")loadOnboarding();
   if(tab==="requirements")loadRequirements();
   if(tab==="purchase-orders")loadPurchaseOrders();
   window.scrollTo({top:0,behavior:"smooth"});
@@ -567,18 +578,18 @@ async function poSchedule(id){
 let requirementCache=[];
 async function loadRequirements(){
   const el=document.getElementById("requirementsList"); if(!el)return;
-  el.innerHTML='<div class="empty">Loading buyer requirements...</div>';
+  el.innerHTML='<div class="empty">Loading sourcing requests...</div>';
   try{
     const d=await api("/api/supplier-dashboard/requirements"); requirementCache=d.requirements||[];
-    if(!requirementCache.length){el.innerHTML='<div class="empty">No matching buyer requirements are available right now.</div>';return;}
-    el.innerHTML=requirementCache.map(r=>'<div class="connection" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div><b>'+esc(r.title)+'</b><small>'+esc(r.requirement_type||"product")+' · '+esc(r.category||"Open category")+(r.subcategory?" · "+esc(r.subcategory):"")+'</small></div><span class="badge">'+(r.quote_id?"Quoted":"Open")+'</span></div><small>Quantity: '+esc(r.quantity||"Not specified")+(r.unit?" "+esc(r.unit):"")+' · Delivery: '+esc((r.delivery_city||"")+" "+(r.delivery_country||""))+'</small><small>'+esc(r.description)+'</small><small>'+((r.target_price!==null&&r.target_price!=="")?"Target price: "+esc(r.target_price)+" "+esc(r.currency):"Target price: Not specified")+(r.required_by?" · Required by: "+esc(new Date(r.required_by).toLocaleDateString()):"")+'</small><div class="product-actions"><button class="btn primary" onclick="openRequirementQuote(\''+esc(r.id)+'\')">'+(r.quote_id?"Update Quotation":"Send Quotation")+' →</button></div></div>').join("");
+    if(!requirementCache.length){el.innerHTML='<div class="empty">No matching sourcing requests are available right now.</div>';return;}
+    el.innerHTML=requirementCache.map(r=>'<div class="connection" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div><b>'+esc(r.title)+'</b><small>'+esc(r.requirement_type||"product")+' · '+esc(r.category||"Open category")+(r.subcategory?" · "+esc(r.subcategory):"")+'</small></div><span class="badge">'+(r.quote_id?"Quoted":"Open")+'</span></div><small>Quantity: '+esc(r.quantity||"Not specified")+(r.unit?" "+esc(r.unit):"")+'</small><small>'+esc(r.description)+'</small><small>'+(r.required_by?"Required by: "+esc(new Date(r.required_by).toLocaleDateString()):"")+'</small><div class="product-actions"><button class="btn primary" onclick="openRequirementQuote(\''+esc(r.id)+'\')">'+(r.quote_id?"Update Quotation":"Send Quotation")+' →</button></div></div>').join("");
   }catch(e){el.innerHTML='<div class="empty">'+esc(e.message)+'</div>';}
 }
 function openRequirementQuote(id){
   const r=requirementCache.find(x=>x.id===id); if(!r)return;
   const old=document.getElementById("requirementQuoteModal"); if(old)old.remove();
   const modal=document.createElement("div");modal.id="requirementQuoteModal";modal.style.cssText="position:fixed;inset:0;background:rgba(4,20,35,.55);z-index:100;padding:20px;overflow:auto";
-  modal.innerHTML='<div style="max-width:680px;margin:5vh auto;background:#fff;border-radius:18px;padding:22px"><div style="display:flex;justify-content:space-between;gap:10px"><div><div class="kicker">Quotation</div><h2 class="section-title" style="margin-bottom:4px">'+esc(r.title)+'</h2><small>'+esc(r.quantity||"Quantity not specified")+' '+esc(r.unit||"")+' · '+esc(r.delivery_city||"")+' '+esc(r.delivery_country||"")+'</small></div><button class="btn" onclick="document.getElementById(\'requirementQuoteModal\').remove()">Close</button></div><div class="profile-grid" style="margin-top:18px"><label>Unit price *<input id="qPrice" type="number" min="0" step="0.0001" value="'+esc(r.quote_unit_price||"")+'"></label><label>Currency<select id="qCurrency"><option>USD</option><option>EUR</option><option>GBP</option><option>INR</option><option>AED</option><option>CNY</option></select></label><label>Quantity available<input id="qAvailable" placeholder="e.g. 20,000"></label><label>MOQ<input id="qMoq" placeholder="e.g. 5,000"></label><label>Lead time<input id="qLead" placeholder="e.g. 15 days"></label><label>Payment terms<input id="qPayment" placeholder="30/70, LC, etc."></label><label>Incoterm<input id="qIncoterm" placeholder="FOB / CIF / EXW"></label><label>Quote valid until<input id="qValid" type="date"></label><label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input id="qSample" type="checkbox" style="width:auto"> Sample available</label><label style="grid-column:1/-1">Notes<textarea id="qNotes" style="min-height:100px" placeholder="Quality, customization, certifications, packing or other commercial terms"></textarea></label></div><div id="qStatus" class="notice hidden" style="margin-top:12px"></div><div style="display:flex;justify-content:flex-end;margin-top:15px"><button class="btn primary" onclick="submitRequirementQuote(\''+esc(r.id)+'\')">Send Quotation to Buyer →</button></div></div>';
+  modal.innerHTML='<div style="max-width:680px;margin:5vh auto;background:#fff;border-radius:18px;padding:22px"><div style="display:flex;justify-content:space-between;gap:10px"><div><div class="kicker">Quotation</div><h2 class="section-title" style="margin-bottom:4px">'+esc(r.title)+'</h2><small>'+esc(r.quantity||"Quantity not specified")+' '+esc(r.unit||"")+'</small></div><button class="btn" onclick="document.getElementById(\'requirementQuoteModal\').remove()">Close</button></div><div class="profile-grid" style="margin-top:18px"><label>Unit price *<input id="qPrice" type="number" min="0" step="0.0001" value="'+esc(r.quote_unit_price||"")+'"></label><label>Currency<select id="qCurrency"><option>USD</option><option>EUR</option><option>GBP</option><option>INR</option><option>AED</option><option>CNY</option></select></label><label>Quantity available<input id="qAvailable" placeholder="e.g. 20,000"></label><label>MOQ<input id="qMoq" placeholder="e.g. 5,000"></label><label>Lead time<input id="qLead" placeholder="e.g. 15 days"></label><label>Payment terms<input id="qPayment" placeholder="30/70, LC, etc."></label><label>Incoterm<input id="qIncoterm" placeholder="FOB / CIF / EXW"></label><label>Quote valid until<input id="qValid" type="date"></label><label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input id="qSample" type="checkbox" style="width:auto"> Sample available</label><label style="grid-column:1/-1">Notes<textarea id="qNotes" style="min-height:100px" placeholder="Quality, customization, certifications, packing or other commercial terms"></textarea></label></div><div id="qStatus" class="notice hidden" style="margin-top:12px"></div><div style="display:flex;justify-content:flex-end;margin-top:15px"><button class="btn primary" onclick="submitRequirementQuote(\''+esc(r.id)+'\')">Send Quotation to Buyer →</button></div></div>';
   document.body.appendChild(modal);
 }
 async function submitRequirementQuote(id){
@@ -777,6 +788,129 @@ document.getElementById("profileForm").onsubmit=async e=>{
     btn.textContent="Submit Changes for Review";
   }
 };
+
+// ---------------------------------------------------------------------------
+// Progressive onboarding wizard (8 steps). Account access never depends on verification.
+// ---------------------------------------------------------------------------
+let onb=null,onbStep=null;
+const ONB_HELP={
+  account_verified:"Account created. Complete your profile and submit it for business verification.",
+  business_verification_pending:"SupplyDesk is verifying your business. You can keep adding products and capacity meanwhile.",
+  business_verified:"Your business is verified. SupplyDesk is reviewing your products and capacity next.",
+  capability_verification_pending:"SupplyDesk is verifying your product capabilities and capacity.",
+  capability_verified:"Your capabilities are verified. Final SupplyDesk approval and the supplier agreement are pending.",
+  supplydesk_approved:"You are approved. SupplyDesk can now send you live purchase orders.",
+  rejected:"Your application was not approved. See the note from SupplyDesk below.",
+  needs_resubmission:"SupplyDesk needs a correction. Update the details below and submit again."
+};
+const BIZ_TYPES=["Manufacturer","Wholesaler","Distributor","Trader","Service Provider","Other"];
+async function loadOnboarding(){
+  const root=document.getElementById("onbRoot");if(!root)return;
+  try{onb=await api("/api/supplier-dashboard/onboarding");}
+  catch(e){root.innerHTML='<div class="notice error">'+esc(e.message)+'</div>';return;}
+  if(!onbStep||onbStep<1||onbStep>8)onbStep=onb.current;
+  const tab=document.querySelector('.tab-btn[data-tab="onboarding"]');
+  if(tab)tab.textContent=onb.eligible?"Profile":"Complete profile ("+onb.completedCount+"/8)";
+  renderOnboardingBanner();
+  renderOnboarding();
+}
+function renderOnboardingBanner(){
+  const el=document.getElementById("dashboardStatus");if(!el||!onb)return;
+  const base=(dashboardData&&dashboardData.pendingUpdate)?el.innerHTML:"";
+  if(onb.eligible){el.innerHTML=base;return;}
+  const bad=["rejected","needs_resubmission"].includes(onb.status);
+  el.innerHTML=base+'<div class="notice '+(bad?"error":"")+'" id="onbBanner"><strong>'+esc(onb.statusLabel)+'.</strong> '+esc(ONB_HELP[onb.status]||"")+(onb.note?' <em>SupplyDesk note: '+esc(onb.note)+'</em>':'')+' <strong>Live buyer orders are shared only after SupplyDesk approval.</strong> <a href="#" onclick="switchTab(\'onboarding\');return false">Open profile steps →</a></div>';
+}
+function onbInput(id,label,val,extra){return '<div class="field"><label for="'+id+'">'+label+'</label><input id="'+id+'" value="'+esc(val||"")+'" '+(extra||"")+'></div>';}
+function onbFiles(types){
+  const list=(onb.files||[]).filter(f=>types.includes(f.file_type));
+  if(!list.length)return '<div class="notice">Nothing uploaded yet.</div>';
+  return list.map(f=>'<div class="connection" style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin:6px 0"><span><b>'+esc(f.original_name)+'</b> <small>'+esc(f.file_type.replace(/_/g," "))+' · '+Math.max(1,Math.round(f.file_size/1024))+' KB</small></span>'+(onb.locked&&onb.status!=="needs_resubmission"?'':'<button class="btn" onclick="onbDeleteFile(\''+esc(f.id)+'\')">Remove</button>')+'</div>').join("");
+}
+function renderOnboarding(){
+  const root=document.getElementById("onbRoot");if(!root||!onb)return;
+  const readOnly=onb.eligible;
+  const pct=Math.round(onb.completedCount/8*100);
+  const steps=onb.steps.map(s=>'<button type="button" class="tab-btn'+(s.n===onbStep?" active":"")+'" style="text-align:left;display:flex;gap:8px;align-items:center;width:100%;margin:3px 0" onclick="onbGo('+s.n+')"><span aria-hidden="true">'+(s.complete?"✅":"⬜")+'</span><span>'+s.n+'. '+esc(s.title)+'</span></button>').join("");
+  root.innerHTML='<div class="notice'+(["rejected","needs_resubmission"].includes(onb.status)?" error":"")+'"><strong>Status: '+esc(onb.statusLabel)+'</strong> · '+esc(ONB_HELP[onb.status]||"")+(onb.note?'<br><em>SupplyDesk note: '+esc(onb.note)+'</em>':'')+'</div>'+
+   '<div style="background:#e6f0f2;border-radius:99px;height:10px;overflow:hidden;margin:6px 0 14px"><div style="height:100%;width:'+pct+'%;background:var(--brand)"></div></div>'+
+   '<div style="display:grid;grid-template-columns:minmax(200px,260px) 1fr;gap:16px" class="onb-grid"><div>'+steps+'</div><div id="onbPane"></div></div>'+
+   '<div class="notice" style="margin-top:14px" id="onbSubmit"></div><div id="onbMsg" class="notice hidden" aria-live="polite"></div>';
+  const g=document.querySelector(".onb-grid");if(g&&window.innerWidth<720)g.style.gridTemplateColumns="1fr";
+  renderOnbPane();renderOnbSubmit();
+}
+function onbGo(n){onbStep=n;renderOnboarding();}
+function onbMsg(text,ok){const m=document.getElementById("onbMsg");if(!m)return;m.textContent=text;m.className="notice "+(ok?"success":"error");}
+function renderOnbSubmit(){
+  const el=document.getElementById("onbSubmit");if(!el)return;
+  if(onb.eligible){el.innerHTML="You are approved. Changes to your public profile go through <strong>Business Profile → Request update</strong> so SupplyDesk can review them.";return;}
+  if(onb.canSubmit){el.innerHTML='<strong>Ready to submit.</strong> SupplyDesk will verify your business. You can still add products, capacity and photos afterwards. <div class="actions"><button class="btn primary" onclick="onbSubmit()">Submit for business verification →</button></div>';return;}
+  if(onb.locked){el.innerHTML="Submitted. SupplyDesk will update your status here. You will keep full access to your dashboard.";return;}
+  el.innerHTML='<strong>Before you can submit:</strong> complete '+(onb.missingForSubmit.length?esc(onb.missingForSubmit.join(", ")):"the required steps")+'. Steps 4, 5, 6 and 8 can be finished later but speed up approval.';
+}
+function renderOnbPane(){
+  const pane=document.getElementById("onbPane");if(!pane)return;
+  const d=onb.data;
+  const lockNote=onb.eligible?'<div class="notice">Approved profile. Use Business Profile → Request update for changes.</div>':"";
+  let h="";
+  if(onbStep===1){
+    const b=d.business,cats=Object.entries(SD_TAX.groups).map(([g,items])=>'<optgroup label="'+esc(g)+'">'+items.map(x=>'<option'+(x===b.category?" selected":"")+'>'+esc(x)+'</option>').join("")+'</optgroup>').join("");
+    h='<h3>1. Business details</h3><div class="profile-grid">'+onbInput("ob_legal","Legal business name *",b.legalName)+onbInput("ob_trade","Trade / brand name",b.tradeName)+
+      '<div class="field"><label for="ob_type">Business type *</label><select id="ob_type"><option value="">Select</option>'+BIZ_TYPES.map(t=>'<option'+(t===b.businessType?" selected":"")+'>'+t+'</option>').join("")+'</select></div>'+
+      onbInput("ob_year","Year established",b.yearEstablished,'inputmode="numeric" maxlength="4"')+onbInput("ob_country","Country *",b.country)+onbInput("ob_city","City *",b.city)+
+      '<div class="field full"><label for="ob_addr">Registered / business address *</label><textarea id="ob_addr">'+esc(b.address)+'</textarea></div>'+
+      onbInput("ob_web","Website",b.website,'placeholder="https://"')+onbInput("ob_desig","Your designation",b.designation)+
+      '<div class="field"><label for="ob_cat">Main category *</label><select id="ob_cat" onchange="onbFillSub()"><option value="">Select</option>'+cats+'</select></div><div class="field"><label for="ob_sub">Sub-category *</label><select id="ob_sub"></select></div></div>'+
+      '<div class="actions"><button class="btn primary" onclick="onbSaveBusiness()">Save & continue →</button></div>';
+  }else if(onbStep===2){
+    const l=d.legal;
+    h='<h3>2. Legal / registration details</h3><p class="section-subtitle">Country-neutral. Add at least a registration number or a tax / VAT / GST number. SupplyDesk may ask for more during verification.</p><div class="profile-grid">'+onbInput("ob_reg","Registration / company number",l.registrationNumber)+onbInput("ob_tax","Tax / VAT / GST number",l.taxNumber)+onbInput("ob_ie","Import / export number, if applicable",l.importExportNumber)+'</div><div class="actions"><button class="btn primary" onclick="onbSaveLegal()">Save & continue →</button></div>';
+  }else if(onbStep===3){
+    h='<h3>3. Products & capabilities</h3><p class="section-subtitle">Add each product or capability you can supply. SupplyDesk reviews every listing before it is used. You have <strong>'+onb.products.total+'</strong> listed.</p><div class="actions"><button class="btn primary" onclick="switchTab(\'products\');openProduct()">＋ Add a product</button><button class="btn" onclick="switchTab(\'products\')">View my products</button></div>';
+  }else if(onbStep===4||onbStep===5){
+    const items=(dashboardData?.products||[]).filter(p=>p.status!=="archived");
+    h='<h3>'+(onbStep===4?"4. Capacity":"5. Lead time")+'</h3><p class="section-subtitle">'+(onbStep===4?"Enter monthly capacity and what is currently available for each product. SupplyDesk verifies capacity before it is counted.":"Enter your usual production + dispatch lead time (days) for each product.")+'</p>'+
+      (items.length?items.map(p=>'<div class="connection" style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin:6px 0"><span><b>'+esc(p.product_name)+'</b><br><small>'+(onbStep===4?(p.monthly_capacity?"Monthly "+Number(p.monthly_capacity).toLocaleString()+" "+esc(p.capacity_unit||p.unit||"")+(p.capacity_verified?"":" · awaiting verification"):"Capacity not entered"):(p.lead_time_days?p.lead_time_days+" days":"Lead time not entered"))+'</small></span><button class="btn" onclick="editCap(\''+esc(p.id)+'\')">Edit</button></div>').join(""):'<div class="notice">Add a product first (step 3).</div>');
+  }else if(onbStep===6){
+    const c=d.certifications;
+    h='<h3>6. Certifications</h3><div class="field full"><label for="ob_cert">Certifications & licences (ISO, CE, BIS, FDA, etc.)</label><textarea id="ob_cert" placeholder="List certificate names, numbers and validity">'+esc(c.text)+'</textarea></div><label style="display:flex;gap:8px;align-items:center;margin:8px 0"><input type="checkbox" id="ob_nocert" style="width:auto"'+(c.none?" checked":"")+'> We do not hold certifications yet</label><div class="actions"><button class="btn primary" onclick="onbSaveCerts()">Save text</button></div><div class="field"><label for="ob_certfile">Upload certificate copies (PDF/JPG/PNG, up to 5)</label><input id="ob_certfile" type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp"></div><div class="actions"><button class="btn" onclick="onbUpload([[\'ob_certfile\',\'certificationDocs\']])">Upload</button></div>'+onbFiles(["certification"]);
+  }else if(onbStep===7){
+    h='<h3>7. Business documents</h3><p class="section-subtitle">PDF, JPG, PNG or WEBP up to 10 MB each. Uploading again replaces the earlier file of that type.</p><div class="profile-grid"><div class="field"><label>Business registration</label><input id="ob_f1" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"></div><div class="field"><label>Tax registration</label><input id="ob_f2" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"></div><div class="field"><label>Licence / certificate</label><input id="ob_f3" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"></div><div class="field"><label>Address proof</label><input id="ob_f4" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"></div></div><div class="actions"><button class="btn primary" onclick="onbUpload([[\'ob_f1\',\'registrationDoc\'],[\'ob_f2\',\'taxDoc\'],[\'ob_f3\',\'licenceDoc\'],[\'ob_f4\',\'addressProof\']])">Upload documents</button></div>'+onbFiles(["business_registration","tax_registration","licence_certificate","address_proof"]);
+  }else{
+    h='<h3>8. Factory / business photos</h3><div class="field"><label for="ob_ph">Photos of your factory, workshop, warehouse or office (JPG/PNG/WEBP, up to 8)</label><input id="ob_ph" type="file" multiple accept=".jpg,.jpeg,.png,.webp"></div><div class="actions"><button class="btn primary" onclick="onbUpload([[\'ob_ph\',\'businessPhotos\']])">Upload photos</button></div>'+onbFiles(["business_photo","factory_photo"]);
+  }
+  const nav='<div class="actions" style="justify-content:space-between;margin-top:18px"><button class="btn"'+(onbStep<=1?" disabled":"")+' onclick="onbGo('+(onbStep-1)+')">← Back</button><button class="btn"'+(onbStep>=8?" disabled":"")+' onclick="onbGo('+(onbStep+1)+')">Skip / Next →</button></div>';
+  pane.innerHTML=lockNote+h+nav;
+  if(onbStep===1)onbFillSub(onb.data.business.subcategory);
+}
+function onbFillSub(selected){
+  const c=document.getElementById("ob_cat"),s=document.getElementById("ob_sub");if(!c||!s)return;
+  s.innerHTML='<option value="">Select sub-category</option>'+((SD_TAX.subs[c.value]||[]).map(x=>'<option'+(x===selected?" selected":"")+'>'+esc(x)+'</option>').join(""));
+}
+const gv=id=>(document.getElementById(id)?.value||"").trim();
+async function onbSave(path,body,next){
+  try{await api("/api/supplier-dashboard/onboarding/"+path,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});await loadOnboarding();if(next){onbStep=next;renderOnboarding();}onbMsg("Saved.",true);}
+  catch(e){onbMsg(e.message,false);}
+}
+function onbSaveBusiness(){onbSave("business",{legalName:gv("ob_legal"),tradeName:gv("ob_trade"),businessType:gv("ob_type"),yearEstablished:gv("ob_year"),country:gv("ob_country"),city:gv("ob_city"),address:gv("ob_addr"),website:gv("ob_web"),designation:gv("ob_desig"),category:gv("ob_cat"),subcategory:gv("ob_sub")},2);}
+function onbSaveLegal(){onbSave("legal",{registrationNumber:gv("ob_reg"),taxNumber:gv("ob_tax"),importExportNumber:gv("ob_ie")},3);}
+function onbSaveCerts(){onbSave("certifications",{text:gv("ob_cert"),none:document.getElementById("ob_nocert").checked});}
+async function onbUpload(pairs){
+  const fd=new FormData();let n=0;
+  for(const [id,field] of pairs){const el=document.getElementById(id);for(const f of (el?.files||[])){fd.append(field,f);n++;}}
+  if(!n){onbMsg("Choose at least one file first.",false);return;}
+  try{await api("/api/supplier-dashboard/onboarding/files",{method:"POST",body:fd,timeoutMs:90000});await loadOnboarding();onbMsg("Uploaded.",true);}
+  catch(e){onbMsg(e.message,false);}
+}
+async function onbDeleteFile(id){
+  if(!confirm("Remove this file?"))return;
+  try{await api("/api/supplier-dashboard/onboarding/files/"+encodeURIComponent(id),{method:"DELETE"});await loadOnboarding();}
+  catch(e){onbMsg(e.message,false);}
+}
+async function onbSubmit(){
+  try{const d=await api("/api/supplier-dashboard/onboarding/submit",{method:"POST"});await loadOnboarding();onbMsg(d.message,true);}
+  catch(e){onbMsg(e.message,false);}
+}
 
 async function logout(){try{await api("/api/supplier-dashboard/logout",{method:"POST"})}catch{}dashboardStorage.removeItem(dashboardKey);showLogin("You have signed out.");}
 document.getElementById("productImages").addEventListener("change",e=>{

@@ -129,6 +129,11 @@ const PO_STATES = {
   completed:          { label: "Completed" },
   cancelled:          { label: "Cancelled" }
 };
+// What the SUPPLIER sees: SupplyDesk PO -> Accepted -> Production -> QC -> Ready -> Dispatch -> Completed.
+const PO_SUPPLIER_LABELS = {
+  issued: "SupplyDesk PO", accepted: "Accepted", partially_accepted: "Partially accepted", declined: "Declined",
+  in_production: "Production", ready_for_qc: "QC", ready_for_dispatch: "Ready", dispatched: "Dispatch", completed: "Completed", cancelled: "Cancelled"
+};
 const PO_TRANSITIONS = {
   issued: ["accepted", "partially_accepted", "declined", "cancelled"],
   accepted: ["in_production", "cancelled"],
@@ -252,5 +257,5 @@ function buyerStep(state){
   if(["buyer_approved","converted"].includes(state))return 4;
   return 0;
 }
-module.exports = { STATES, TRANSITIONS, LEGACY_STATUS_TO_STATE, isState, canTransition, isTerminal, parseQuantity, scoreCapability, newRfqCode, ORDER_STATES, ORDER_TRANSITIONS, isOrderState, canOrderTransition, newQuoteNo, newPoNumber, PO_STATES, PO_TRANSITIONS, isPoState, canPoTransition, newSupplierPoNumber, toMinor, fromMinor, computeInvoice, invoiceStatus, PAYMENT_METHODS, newInvoiceNo, priceFromMarkup, priceFromMargin, marginOf, buyerStep,
+module.exports = { STATES, TRANSITIONS, LEGACY_STATUS_TO_STATE, isState, canTransition, isTerminal, parseQuantity, scoreCapability, newRfqCode, ORDER_STATES, ORDER_TRANSITIONS, isOrderState, canOrderTransition, newQuoteNo, newPoNumber, PO_STATES, PO_SUPPLIER_LABELS, PO_TRANSITIONS, isPoState, canPoTransition, newSupplierPoNumber, toMinor, fromMinor, computeInvoice, invoiceStatus, PAYMENT_METHODS, newInvoiceNo, priceFromMarkup, priceFromMargin, marginOf, buyerStep,
   ORDER_REVIEW, isReviewState, REVIEW_DECISIONS, reviewOpen, reviewAccepted, STAGES, STAGE_KEYS, stageIndex, stageLabel, isStage, legacyStatusForStage, autoStageFromPos, poReadyForDispatch, manualStageProblem, newSdNumber, PO_RANK };
