@@ -140,11 +140,87 @@ test("denied attempts and assignment changes are audited", async ({ request }) =
   expect(entries.some(e => e.action === "access.denied")).toBe(true);
 });
 
+test("phase 2: contact details are blocked in outgoing messages (except Management / Super Admin)", async ({ request }) => {
+  const url = `/api/admin/requirements/${w1.requirementId}/message`;
+  for (const text of ["mail me at john@supplier.com", "call +91 98100 12345", "see www.supplier.com", "whatsapp 9810012345", "ring 98100 12345 67"]) {
+    const r = await request.post(url, { headers: H(admin), data: { message: text } });
+    expect(r.status(), text).toBe(422);
+    expect((await r.json()).code).toBe("contact_blocked");
+  }
+  // ordinary quantities, prices and Indian-format numbers are fine
+  const ok = await request.post(url, { headers: H(admin), data: { message: "We can supply 1,00,000 pcs at Rs 42.50 per unit within 30 days." } });
+  expect(ok.status()).toBe(201);
+  expect((await request.post(url, { headers: H(U.management.token), data: { message: "Direct line approved: +91 98100 12345" } })).status()).toBe(201);
+  // contact details may not reach suppliers through PO terms either
+  expect((await request.post(`/api/admin/sd-orders/${w1.sdOrderId}/supplier-pos`, { headers: H(admin), data: { terms: "contact buyer@example.com" } })).status()).toBe(422);
+});
+
+test("phase 2: sensitive views, downloads and writes are audited", async ({ request }) => {
+  await request.get("/api/admin/requirements", { headers: H(U.management.token) });
+  await request.get("/api/super-admin/margin-report", { headers: H(U.finance.token) });
+  await new Promise(r => setTimeout(r, 300));
+  const entries = (await (await request.get("/api/admin/audit", { headers: H(su) })).json()).entries;
+  const has = (a, role) => entries.some(e => e.action === a && (!role || e.actor_role === role));
+  expect(has("buyer_contacts.view", "management")).toBe(true);
+  expect(has("margin.view", "finance")).toBe(true);
+  expect(has("communication.sent")).toBe(true);
+  expect(has("disclosure.blocked")).toBe(true);
+});
+
+test("phase 3: My Desk shows only assigned work for each desk", async ({ request }) => {
+  const bd = await makeUser(request, "buyer_desk", ".p3");
+  U.bd3 = bd;
+  const empty = await (await request.get("/api/admin/my-desk", { headers: H(bd.token) })).json();
+  expect(empty.desk).toBe("buyer"); expect(empty.items.length).toBe(0);
+  expect((await assign(request, "requirement", w1.requirementId, "buyer", bd.adminId)).status()).toBe(200);
+  const mine = await (await request.get("/api/admin/my-desk", { headers: H(bd.token) })).json();
+  expect(mine.items.map(i => i.id)).toEqual([w1.requirementId]);
+  const pd = await (await request.get("/api/admin/my-desk", { headers: H(U.procurement.token) })).json();
+  expect(pd.desk).toBe("procurement");
+  expect(pd.items.map(i => i.id).sort()).toEqual([w1.sdOrderId, w2.sdOrderId].sort());
+  expect(pd.items[0]).toHaveProperty("needed");
+  expect((await request.get("/api/admin/my-desk", { headers: H(U.finance.token) })).status()).toBe(403);
+});
+
+test("phase 3: identity is revealed only after Management approves, and only for a limited time", async ({ request }) => {
+  const bd = U.bd3, bt = H(bd.token), mt = H(U.management.token);
+  const ask = (t, data) => request.post("/api/admin/disclosure-requests", { headers: t, data });
+  // validation and ownership
+  expect((await ask(bt, { entityType: "requirement", entityId: w1.requirementId, reason: "no" })).status()).toBe(400);
+  expect((await ask(bt, { entityType: "requirement", entityId: w2.requirementId, reason: "I need the supplier name to verify quality" })).status()).toBe(403);
+  const r = await ask(bt, { entityType: "requirement", entityId: w1.requirementId, reason: "Need the supplier name to resolve a quality complaint" });
+  expect(r.status()).toBe(201);
+  const rid = (await r.json()).id;
+  expect((await ask(bt, { entityType: "requirement", entityId: w1.requirementId, reason: "Need the supplier name to resolve a quality complaint" })).status()).toBe(409);
+  // not visible before approval
+  expect((await request.get(`/api/admin/disclosure-requests/${rid}/reveal`, { headers: bt })).status()).toBe(403);
+  // desks cannot decide; management sees it in the queue
+  expect((await request.post(`/api/admin/disclosure-requests/${rid}/decision`, { headers: bt, data: { decision: "approve" } })).status()).toBe(403);
+  const pending = (await (await request.get("/api/admin/disclosure-requests?status=pending", { headers: mt })).json()).requests;
+  expect(pending.some(x => x.id === rid)).toBe(true);
+  expect((await request.post(`/api/admin/disclosure-requests/${rid}/decision`, { headers: mt, data: { decision: "approve", hours: 4 } })).status()).toBe(200);
+  expect((await request.post(`/api/admin/disclosure-requests/${rid}/decision`, { headers: mt, data: { decision: "reject" } })).status()).toBe(409);
+  // now the requester can reveal; nobody else can
+  const rev = await request.get(`/api/admin/disclosure-requests/${rid}/reveal`, { headers: bt });
+  expect(rev.status()).toBe(200);
+  expect((await rev.json()).kind).toBe("supplier_identity");
+  expect((await request.get(`/api/admin/disclosure-requests/${rid}/reveal`, { headers: H(U.procurement.token) })).status()).toBe(404);
+  // a rejected request stays closed
+  const r2 = await request.post("/api/admin/disclosure-requests", { headers: H(U.procurement.token), data: { entityType: "sd_order", entityId: w1.sdOrderId, reason: "Need buyer contact for delivery coordination" } });
+  expect(r2.status()).toBe(201);
+  const rid2 = (await r2.json()).id;
+  expect((await request.post(`/api/admin/disclosure-requests/${rid2}/decision`, { headers: mt, data: { decision: "reject", note: "Use the relay" } })).status()).toBe(200);
+  expect((await request.get(`/api/admin/disclosure-requests/${rid2}/reveal`, { headers: H(U.procurement.token) })).status()).toBe(403);
+  const entries = (await (await request.get("/api/admin/audit", { headers: H(su) })).json()).entries;
+  for (const a of ["disclosure.requested", "disclosure.approved", "disclosure.rejected", "identity.revealed"]) expect(entries.some(e => e.action === a), a).toBe(true);
+});
+
 test("UI: buyer desk gets a trimmed menu; management can assign from a requirement", async ({ page, request }) => {
   const login = await makeUser(request, "buyer_desk", ".ui");
   await page.addInitScript(([t, r]) => { sessionStorage.setItem("supplydesk_admin_token", t); sessionStorage.setItem("supplydesk_admin_role", r); }, [login.token, "buyer_desk"]);
   await page.goto("/admin.html");
   await expect(page.locator("#roleBadge")).toHaveText("BUYER DESK");
   await expect(page.locator(".toolbar .navgroup button:visible")).toHaveText(["Overview", "Requests", "Orders"]);
+  await expect(page.locator("#detail h2")).toHaveText("My desk");
   await page.close();
 });
