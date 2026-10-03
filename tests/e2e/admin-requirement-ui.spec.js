@@ -1,5 +1,6 @@
 const { test, expect } = require("@playwright/test");
-// Admin requirement detail shows ONE clear next step per state, with the rest collapsed.
+// Initial review shows ONLY: summary, Accept full / Accept partial / Reject, notes and the activity timeline.
+// No supplier selection at this stage. Later states show one clear next step.
 const KEY = process.env.E2E_TEST_KEY, AID = process.env.E2E_ADMIN_ID, APW = process.env.E2E_ADMIN_PASSWORD;
 test.skip(!KEY || !AID || !APW, "needs admin env");
 
@@ -13,24 +14,40 @@ test("requirement detail is state-aware", async ({ request, page }) => {
   await page.addInitScript(([t, r]) => { sessionStorage.setItem("supplydesk_admin_token", t); sessionStorage.setItem("supplydesk_admin_role", r); }, [login.token, login.role]);
   await page.goto("/admin.html");
 
-  // list: grouped tabs, search finds the row, click opens detail
+  // lands on the Overview pipeline; Requests opens the queue
+  await expect(page.locator(".pl-stage")).toHaveCount(9);
+  await page.locator("#requirementsBtn").click();
   await expect(page.locator(".rq-tab.on")).toContainText("Needs action");
   await page.locator(".rq-search").fill(title);
   await page.locator(".rq-row", { hasText: title }).click();
   const d = page.locator("#detail");
-  await expect(d.locator(".rq-next-h")).toContainText("Review this requirement");
-  await expect(d.locator(".rq-opt")).toHaveCount(3);
+  await expect(d.locator(".rq-next-h")).toContainText("Decision");
+  await expect(d.locator(".dec-row button")).toHaveCount(3);
+  await expect(d.getByRole("button", { name: "Accept in full" })).toBeVisible();
+  await expect(d.getByRole("button", { name: "Accept partially" })).toBeVisible();
+  await expect(d.getByRole("button", { name: "Reject" })).toBeVisible();
+  await expect(d.locator("#reqAdminNotes")).toHaveCount(1);
+  await expect(d.locator(".tl-i").first()).toContainText("Requirement received");
+  // nothing about suppliers at the initial review, and none of the later-stage sections
+  await expect(d.locator(".reqSup")).toHaveCount(0);
+  await expect(d).not.toContainText(/Choose suppliers|Send to selected suppliers|Capability matches|Supplier quotations/);
+  await expect(d.locator("details.rq-sec")).toHaveCount(0);
   await expect(d.locator("#bqPrice")).toHaveCount(0);          // quote form not shown yet
-  await expect(d.locator("details.rq-sec[open]")).toHaveCount(0); // everything else collapsed
   await expect(d).not.toContainText(email);                      // normal admin: no buyer contact
 
-  // choose "SupplyDesk supplies directly" -> costing -> quote form is the next step
+  // partial acceptance asks for a quantity only when chosen
+  await expect(d.locator("#reqAccQty")).toBeHidden();
+  await d.getByRole("button", { name: "Accept partially" }).click();
+  await expect(d.locator("#reqAccQty")).toBeVisible();
+
+  // accept in full -> costing -> quote form is the next step
   page.on("dialog", x => x.accept());
-  await d.getByRole("button", { name: "Handle directly" }).click();
-  await expect(d.locator(".rq-next-h")).toContainText("Send the quotation");
+  await d.getByRole("button", { name: "Accept in full" }).click();
+  await expect(d.locator(".rq-next.done .rq-next-h")).toContainText("Accepted in full");
+  await expect(d.locator(".rq-next:not(.done) .rq-next-h")).toContainText("Send the quotation");
   await d.locator("#bqPrice").fill("30");
   await d.getByRole("button", { name: /Send quotation/ }).click();
-  await expect(d.locator(".rq-next-h")).toContainText("waiting for the buyer");
+  await expect(d.locator(".rq-next:not(.done) .rq-next-h")).toContainText("waiting for the buyer");
 
   // message from the collapsed section
   await d.locator("summary", { hasText: "Messages with buyer" }).click();

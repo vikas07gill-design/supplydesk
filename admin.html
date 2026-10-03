@@ -9,7 +9,7 @@
 .navgroup .gl{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);min-width:88px}
 .toolbar button[data-tab].tabon{background:var(--brand);color:#fff;border-color:var(--brand);box-shadow:none}
 .toolbar .subbar{display:flex;flex-wrap:wrap;gap:8px;flex-basis:100%}.toolbar .subbar>*{display:none}
-#buyerGroup,#supplierGroup{display:none}.signed #buyerGroup,.signed #supplierGroup{display:flex}
+#opsGroup,#networkGroup,#toolsGroup{display:none}.signed #opsGroup,.signed #networkGroup,.signed #toolsGroup{display:flex}
 .signed #loginBox{display:none!important}
 .rq-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.rq-head h2{margin:0 0 4px;font-size:20px}.rq-pill{white-space:nowrap;background:#e5f4f6;color:#075b66;font-weight:800;padding:5px 11px;border-radius:999px;font-size:12px}
 .rq-steps{display:flex;margin:16px 0 14px}.rq-step{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;font-size:11px;color:var(--muted);position:relative}.rq-step i{width:24px;height:24px;border-radius:50%;background:#e3edf1;color:#52707a;display:grid;place-items:center;font-style:normal;font-weight:800;font-size:12px;z-index:1}
@@ -50,11 +50,11 @@ body.solo .grid{grid-template-columns:minmax(0,880px);justify-content:center}bod
 @media(max-width:700px){.toolbar .navgroup{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin;padding-bottom:10px}.toolbar .navgroup button{white-space:nowrap;flex:0 0 auto}.toolbar .navgroup .gl{flex:0 0 auto;min-width:0;margin-right:4px}.toolbar .subbar input,.toolbar .subbar select{min-width:0;flex:1 1 100%}.rq-tabs{overflow-x:auto;flex-wrap:nowrap}.rq-tab{white-space:nowrap}.rq-row{flex-direction:column;gap:6px}.rq-row-s{text-align:left}}
 #message.muted{margin:6px 0 10px;min-height:0}
 </style>
-<link rel="stylesheet" href="assets/depth.css"><script src="assets/depth.js" defer></script></head>
+<link rel="stylesheet" href="assets/depth.css"><link rel="stylesheet" href="assets/admin-flow.css"><script src="assets/depth.js" defer></script></head>
 <body>
 <header><div class="wrap head"><div style="display:flex;align-items:center;gap:18px"><a href="index.html" aria-label="SupplyDesk home"><img src="assets/supplydesk-logo-dark.svg" alt="SupplyDesk" style="width:180px;height:auto;display:block"></a><div><h1>SupplyDesk Admin</h1><div class="muted" style="color:#b9cad6">Supplier verification & profile update queue</div></div></div><button id="logout" style="background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.14);color:#fff">Clear Token</button></div></header>
 <main class="wrap">
-<div class="toolbar"><span id="loginBox" style="display:contents"><input id="adminId" placeholder="Admin ID"><div class="admin-password-wrap"><input id="adminPassword" type="password" placeholder="Password" autocomplete="current-password"><button type="button" class="password-toggle" onclick="toggleAdminPassword()" aria-label="Show password">Show</button></div><button class="primary" onclick="login()">Sign In</button></span><span id="roleBadge" class="badge">Not signed in</span><span id="loginError" class="login-error" role="alert"></span><div class="navgroup" id="buyerGroup"><span class="gl">Buyer side</span><button id="requirementsBtn" data-tab="requirements" onclick="loadBuyerRequirements()" style="display:none">Buyer Requirements</button><button id="connectionsBtn" data-tab="connections" onclick="loadConnections()" style="display:none">Connection Requests</button><button id="ordersBtn" data-tab="orders" onclick="loadOrders()" style="display:none">Orders</button><button id="marginBtn" data-tab="margin" onclick="loadMarginReport()" style="display:none">Margin</button></div><div class="navgroup" id="supplierGroup"><span class="gl">Supplier side</span><button data-tab="apps" onclick="loadApps()">Applications</button><button id="updatesBtn" data-tab="updates" onclick="loadUpdates()" style="display:none">Supplier Updates</button><button data-tab="products" onclick="loadProducts()">Products</button><button id="suppliersBtn" data-tab="suppliers" onclick="loadSuppliersDirectory()" style="display:none">Suppliers</button><button id="inviteBtn" onclick="openInvite()" style="display:none">Invite</button><button id="bulkInviteBtn" onclick="openBulkInvite()" style="display:none">Bulk Onboarding</button><button id="teamBtn" data-tab="team" onclick="openTeam()" style="display:none">Team</button><button id="potentialDbBtn" onclick="openPotentialDb()" style="display:none">Potential Database</button><button id="testMailBtn" class="testTool" onclick="testEmail()" style="display:none">Test Email</button><button id="testSupplierMailBtn" class="testTool" onclick="testSupplierEmail()" style="display:none">Test Supplier Email</button><button id="testDashboardOtpBtn" class="testTool" onclick="testDashboardOtp()" style="display:none">Test Dashboard OTP</button><button id="testStorageBtn" class="testTool" onclick="testConnectionStorage()" style="display:none">Test Connection DB</button></div><div class="subbar" id="subbar"><select id="status"><option value="">All applications</option><option value="under_review">Under Review</option><option value="query">Query</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select><select id="productStatus" style="display:none"><option value="pending">Pending Products</option><option value="all">All Products</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="archived">Archived</option></select><input id="productSearch" placeholder="Search product / supplier" style="display:none"><button id="productRefreshBtn" onclick="loadProducts()" style="display:none">Refresh Products</button></div></div>
+<div class="toolbar"><span id="loginBox" style="display:contents"><input id="adminId" placeholder="Admin ID"><div class="admin-password-wrap"><input id="adminPassword" type="password" placeholder="Password" autocomplete="current-password"><button type="button" class="password-toggle" onclick="toggleAdminPassword()" aria-label="Show password">Show</button></div><button class="primary" onclick="login()">Sign In</button></span><span id="roleBadge" class="badge">Not signed in</span><span id="loginError" class="login-error" role="alert"></span><div class="navgroup ops" id="opsGroup"><span class="gl">Procurement</span><button id="overviewBtn" data-tab="overview" onclick="loadOverview()">Overview</button><button id="requirementsBtn" data-tab="requirements" onclick="loadBuyerRequirements()" style="display:none">Requests</button><button id="sourcingBtn" data-tab="sourcing" onclick="loadSourcing()">Sourcing</button><button id="ordersBtn" data-tab="orders" onclick="loadOrders()" style="display:none">Orders</button><button id="productionBtn" data-tab="production" onclick="loadPhase('production')">Production</button><button id="qcBtn" data-tab="qc" onclick="loadPhase('qc')">QC</button><button id="logisticsBtn" data-tab="logistics" onclick="loadPhase('logistics')">Logistics</button><button id="financeBtn" data-tab="finance" onclick="loadPhase('finance')">Finance</button><button id="exceptionsBtn" data-tab="exceptions" onclick="loadExceptions()">Exceptions<span class="nav-badge" id="exCount"></span></button></div><div class="navgroup" id="networkGroup"><span class="gl">Supplier network</span><button id="suppliersBtn" data-tab="suppliers" onclick="loadSuppliersDirectory()" style="display:none">Suppliers</button><button data-tab="products" onclick="loadProducts()">Products</button><button data-tab="capabilities" onclick="loadNetwork('capabilities')">Capabilities</button><button data-tab="capacity" onclick="loadNetwork('capacity')">Capacity</button><button data-tab="apps" onclick="loadApps()">Verification</button><button data-tab="agreements" onclick="loadNetwork('agreements')">Agreements</button></div><div class="navgroup" id="toolsGroup"><span class="gl">Tools</span><button id="connectionsBtn" data-tab="connections" onclick="loadConnections()" style="display:none">Connection Requests</button><button id="updatesBtn" data-tab="updates" onclick="loadUpdates()" style="display:none">Supplier Updates</button><button id="marginBtn" data-tab="margin" onclick="loadMarginReport()" style="display:none">Margin</button><button id="inviteBtn" onclick="openInvite()" style="display:none">Invite</button><button id="bulkInviteBtn" onclick="openBulkInvite()" style="display:none">Bulk Onboarding</button><button id="potentialDbBtn" onclick="openPotentialDb()" style="display:none">Potential Database</button><button id="teamBtn" data-tab="team" onclick="openTeam()" style="display:none">Team</button><button id="testMailBtn" class="testTool" onclick="testEmail()" style="display:none">Test Email</button><button id="testSupplierMailBtn" class="testTool" onclick="testSupplierEmail()" style="display:none">Test Supplier Email</button><button id="testDashboardOtpBtn" class="testTool" onclick="testDashboardOtp()" style="display:none">Test Dashboard OTP</button><button id="testStorageBtn" class="testTool" onclick="testConnectionStorage()" style="display:none">Test Connection DB</button></div><div class="subbar" id="subbar"><select id="status"><option value="">All applications</option><option value="under_review">Under Review</option><option value="query">Query</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select><select id="productStatus" style="display:none"><option value="pending">Pending Products</option><option value="all">All Products</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="archived">Archived</option></select><input id="productSearch" placeholder="Search product / supplier" style="display:none"><button id="productRefreshBtn" onclick="loadProducts()" style="display:none">Refresh Products</button></div></div>
 <div id="message" class="muted"></div>
 <div id="inviteBackdrop" class="invite-backdrop" role="dialog" aria-modal="true" aria-labelledby="inviteTitle">
   <div class="invite-modal">
@@ -156,6 +156,7 @@ body.solo .grid{grid-template-columns:minmax(0,880px);justify-content:center}bod
 <section class="card detail" id="detail"><h2>SupplyDesk Admin</h2><div class="muted">Sign in to see buyer requirements, orders and supplier tools.</div></section>
 </div>
 </main>
+<script src="assets/admin-flow.js"></script>
 <script>
 const key="supplydesk_admin_token", roleKey="supplydesk_admin_role";
 const adminIdInput=document.getElementById("adminId"), adminPasswordInput=document.getElementById("adminPassword");
@@ -183,7 +184,7 @@ async function login(){
       document.getElementById("message").textContent="Login failed. Please check your credentials.";
       return;
     }
-    sessionStorage.setItem(key,d.token);sessionStorage.setItem(roleKey,d.role);adminPasswordInput.value="";applyRole();document.getElementById("message").textContent="Signed in successfully.";await loadBuyerRequirements();
+    sessionStorage.setItem(key,d.token);sessionStorage.setItem(roleKey,d.role);adminPasswordInput.value="";applyRole();document.getElementById("message").textContent="Signed in successfully.";await loadOverview();
   }catch(e){err.textContent="Unable to sign in. Please try again.";err.style.display="inline-block";document.getElementById("message").textContent=e.message}
 }
 document.getElementById("productStatus")?.addEventListener("change",loadProducts);
@@ -610,7 +611,7 @@ async function setOnboarding(profileId,status){
 }
 async function verifyCapacity(productId,verified){
   try{await api("/api/admin/products/"+encodeURIComponent(productId)+"/capacity-verification",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({verified})});
-    document.getElementById("message").textContent=verified?"Capacity verified.":"Capacity verification revoked.";if(window.__openAppId)await openApp(window.__openAppId);
+    document.getElementById("message").textContent=verified?"Capacity verified.":"Capacity verification revoked.";if(CUR.screen==="capacity")await loadNetwork("capacity");else if(window.__openAppId)await openApp(window.__openAppId);
   }catch(e){document.getElementById("message").textContent=e.message}
 }
 async function loadApps(){try{const q=document.getElementById("status").value;const data=await api("/api/admin/applications"+(q?"?status="+encodeURIComponent(q):""));document.getElementById("message").textContent="";renderList(data.applications)}catch(e){document.getElementById("message").textContent=e.message}}
@@ -641,8 +642,8 @@ function renderRequirementList(){
  document.getElementById("list").innerHTML='<div class="rq-listhead"><b>Procurement queue</b>'+(flagged?'<span class="rq-flag bad">'+flagged+' need attention</span>':"")+'</div><input class="rq-search" placeholder="Search by title, RFQ no, buyer..." value="'+esc(reqSearch)+'" oninput="reqSearch=this.value;document.getElementById(\'rqRows\').innerHTML=rqRowsHtml()"><div class="rq-tabs">'+tabs+'</div><div id="rqRows">'+rqRowsHtml()+'</div>';
 }
 // ---- Buyer requirement detail: state-aware layout (one clear next step, everything else collapsed) ----
-const STEP_OF={submitted:1,matching:1,sourcing:2,quotes_received:2,costing:3,quote_sent:3,buyer_approved:4,converted:4};
-const STEP_NAMES=["Received","Sourcing","Quote","Order"];
+const STEP_OF={submitted:1,matching:1,sourcing:2,quotes_received:2,costing:2,quote_sent:3,buyer_approved:4,converted:4};
+const STEP_NAMES=["Review","Accepted","Quoted","Order"];
 const rqStepper=st=>{const n=STEP_OF[st]||0;return n?'<div class="rq-steps">'+STEP_NAMES.map((t,i)=>'<div class="rq-step'+(i+1<n?" done":"")+(i+1===n?" now":"")+'"><i>'+(i+1<n?"✓":i+1)+'</i><span>'+t+'</span></div>').join("")+'</div>':""};
 const rqFact=(l,v)=>'<div><label>'+l+'</label><span>'+(v||'<span class="muted">—</span>')+'</span></div>';
 const rqSec=(title,body,open,count)=>'<details class="rq-sec"'+(open?" open":"")+'><summary>'+title+(count!=null?' <em>'+count+'</em>':"")+'</summary><div class="rq-sec-b">'+body+'</div></details>';
@@ -659,73 +660,11 @@ function rqQuoteForm(id,r){
  +'<label class="rq-wide">Note to buyer<textarea id="bqNote" style="min-height:48px"></textarea></label>'
  +'<div class="actions"><button class="primary" onclick="sendBuyerQuote(\''+esc(id)+'\')">Send quotation to buyer</button></div></div>';
 }
-function rqSupplierPicker(id,m,lv){
- return '<div class="muted" style="margin-bottom:8px">Match level: <select onchange="openBuyerRequirementAdmin(\''+esc(id)+'\',this.value)"><option value="subcategory"'+(lv==="subcategory"?" selected":"")+'>Same sub-category</option><option value="category"'+(lv==="category"?" selected":"")+'>Same category</option><option value="all"'+(lv==="all"?" selected":"")+'>All verified suppliers</option></select> · '+m.suppliers.length+' found</div>'
- +'<div class="rq-list">'+(m.suppliers.map(s=>'<label><input type="checkbox" class="reqSup" value="'+esc(s.id)+'"'+(s.sent_status?" disabled":" checked")+'> <span><strong>'+esc(s.trade_name||s.legal_name)+'</strong>'+(s.city||s.country?' · '+esc(s.city||"")+' '+esc(s.country||""):"")+' · '+esc(s.subcategory||s.category||"")+(s.sent_status?' <span class="badge">already sent</span>':"")+'</span></label>').join("")||'<div class="muted" style="padding:6px">No verified suppliers match. Try a broader level, or choose "SupplyDesk supplies directly".</div>')+'</div>';
-}
-async function openBuyerRequirementAdmin(id,level,openSec){
- try{
-  const enc=encodeURIComponent(id),all=await api("/api/admin/requirements");reqCache=all.requirements||[];
-  const r=reqCache.find(x=>x.id===id);if(!r)throw Error("Requirement not found.");
-  const [qd,q,mt,au,ms]=await Promise.all([api("/api/admin/requirements/"+enc+"/quotes"),api("/api/admin/procurement/queue"),api("/api/admin/requirements/"+enc+"/capability-matches"),api("/api/admin/audit?entity=rfq&id="+enc),api("/api/admin/requirements/"+enc+"/messages").catch(()=>({messages:[]}))]);
-  const it=(q.items||[]).find(x=>x.id===id)||{rfq_state:r.rfq_state||"submitted",allowedNext:[]},st=it.rfq_state,su=role()==="super_admin",priv=su?"":"Super Admin only";
-  const canAct=["pending_review","open","fulfilling"].includes(r.status),quotes=qd.quotes||[];
-  const stLabel=q.states[st]||st;
-  const reviewing=["submitted","matching"].includes(st)&&canAct,sourcing=["sourcing","quotes_received"].includes(st);
-  let m=null;if(canAct&&(reviewing||sourcing))m=await api("/api/admin/requirements/"+enc+"/matches"+(level?"?level="+level:""));
-  const day=v=>v?String(v).slice(0,10):"";
-  // facts
-  const facts=rqFact("Buyer",esc(r.buyer_name||""))+rqFact("Company",esc(r.buyer_company||priv))+rqFact("Contact",esc([r.buyer_email,r.buyer_phone].filter(Boolean).join(" · ")||priv))
-   +rqFact("Category",esc([r.category,r.subcategory].filter(Boolean).join(" › ")||"Custom"))+rqFact("Quantity",esc(((r.quantity||"")+" "+(r.unit||"")).trim()))
-   +rqFact("Target price",r.target_price!=null&&r.target_price!==""?esc(Number(r.target_price).toLocaleString("en-IN")+" "+(r.currency||"")):"")
-   +rqFact("Delivery",esc([r.delivery_city,r.delivery_country].filter(Boolean).join(", ")))+rqFact("Required by",esc(day(r.required_by)))
-   +(r.quality_standards?rqFact("Quality",esc(r.quality_standards)):"")+(r.certifications?rqFact("Certifications",esc(r.certifications)):"")+(r.packaging?rqFact("Packaging",esc(r.packaging)):"")
-   +(r.payment_terms?rqFact("Payment terms",esc(r.payment_terms)):"")+(r.incoterm?rqFact("Delivery terms",esc(r.incoterm)):"");
-  // next step
-  let next="";
-  if(reviewing){
-   next='<div class="rq-next"><div class="rq-next-h">Next step · Review this requirement</div><div class="muted">Choose how SupplyDesk will fulfil it. The buyer never sees supplier names or supplier prices.</div>'
-    +'<div class="rq-opts">'
-    +'<div class="rq-opt"><h4>1 · Source from suppliers</h4><p>Send the requirement (without buyer details) to matching verified suppliers and collect their quotes. Then you quote the buyer.</p><details><summary>Choose suppliers ('+m.suppliers.length+')</summary>'+rqSupplierPicker(id,m,m.level)+'</details><button class="approve" onclick="reviewRequirement(\''+esc(id)+'\',\'share_suppliers\')">Send to selected suppliers</button></div>'
-    +'<div class="rq-opt"><h4>2 · SupplyDesk supplies directly</h4><p>Skip supplier quotes. You set the price yourself and quote the buyer straight away.</p><button onclick="reviewRequirement(\''+esc(id)+'\',\'supplydesk\')">Handle directly</button></div>'
-    +'<div class="rq-opt"><h4>3 · Reject</h4><p>Decline this requirement. The buyer receives your message by email and in the dashboard.</p><button class="danger" onclick="reviewRequirement(\''+esc(id)+'\',\'reject\')">Reject requirement</button></div></div>'
-    +'<div class="rq-grid2"><label>Internal notes <small>(not shown to buyer)</small><textarea id="reqAdminNotes" style="min-height:52px">'+esc(r.admin_notes||"")+'</textarea></label><label>Message to buyer <small>(email + dashboard)</small><textarea id="reqBuyerNote" style="min-height:52px">'+esc(r.buyer_note||"")+'</textarea></label></div></div>';
-  }else if(sourcing){
-   next='<div class="rq-next"><div class="rq-next-h">Next step · Collect supplier quotes, then quote the buyer</div><div class="muted">Shared with '+esc(it.shared_count||0)+' supplier(s) · '+esc(quotes.length)+' quotation(s) received.</div><div class="actions"><button class="approve" onclick="setRfqState(\''+esc(id)+'\',\'costing\')">Prepare buyer quotation</button></div>'
-    +(m?'<details style="margin-top:10px"><summary>Share with more suppliers</summary>'+rqSupplierPicker(id,m,m.level)+'<div class="actions"><button onclick="reviewRequirement(\''+esc(id)+'\',\'share_suppliers\')">Send to selected suppliers</button></div></details>':"")+'</div>';
-  }else if(st==="costing"){
-   next='<div class="rq-next"><div class="rq-next-h">Next step · Send the quotation to the buyer</div>'+rqQuoteForm(id,r)+'</div>';
-  }else if(st==="quote_sent"){
-   next='<div class="rq-next"><div class="rq-next-h">Quotation sent · waiting for the buyer</div><div class="muted">The buyer can accept or decline in their dashboard. You can revise the quotation if needed.</div><div class="actions">'+((it.allowedNext||[]).includes("costing")?'<button onclick="setRfqState(\''+esc(id)+'\',\'costing\')">Revise quotation</button>':"")+((it.allowedNext||[]).includes("lost")?'<button class="danger" onclick="setRfqState(\''+esc(id)+'\',\'lost\')">Mark as lost</button>':"")+'</div></div>';
-  }else if(["buyer_approved","converted"].includes(st)){
-   next='<div class="rq-next done"><div class="rq-next-h">Order created</div><div class="muted">The buyer accepted the quotation. Manage supplier POs, invoices and delivery under Orders.</div><div class="actions"><button class="approve" onclick="loadOrders()">Open Orders</button></div></div>';
-  }else{
-   next='<div class="rq-next done"><div class="rq-next-h">'+esc(stLabel)+'</div><div class="muted">No further action is needed on this requirement.</div></div>';
-  }
-  // collapsible sections
-  const qHtml=quotes.map(x=>'<div class="rq-q"><strong>'+esc(x.trade_name||x.legal_name)+'</strong> · '+esc(x.unit_price)+' '+esc(x.currency)+' <span class="muted">MOQ '+esc(x.moq||"—")+' · Lead '+esc(x.lead_time||"—")+'</span>'+(x.business_email?'<div class="muted">'+esc(x.business_email)+'</div>':"")+'</div>').join("")||'<div class="muted">No supplier quotations yet.</div>';
-  const mRows=(mt.matches||[]).slice(0,10).map(x=>'<tr><td><b>'+esc(x.capabilityCode||"")+'</b></td><td>'+esc(x.supplierName)+'</td><td>'+esc(x.productName)+'</td><td>'+esc(x.availableCapacity==null?(x.capacityBand||"n/a"):x.availableCapacity+" "+x.capacityUnit)+'</td><td>'+esc(x.leadTimeDays==null?"-":x.leadTimeDays+"d")+'</td><td>'+esc(x.score)+(x.stale?" (stale)":"")+'</td></tr>').join("");
-  const mHtml=mRows?'<div class="muted" style="margin-bottom:6px">Ranked by capacity, location and lead time. Use the Capability ID when issuing a supplier PO.</div><table class="rq-t"><tr><th>ID</th><th>Supplier</th><th>Product</th><th>Free capacity</th><th>Lead</th><th>Score</th></tr>'+mRows+'</table>':'<div class="muted">No matching capability found.</div>';
-  const thread=(ms.messages||[]).map(x=>'<div class="rq-msg"><b>'+esc(x.subject)+'</b>'+(x.body?'<div>'+esc(x.body)+'</div>':"")+'<small>'+esc(new Date(x.created_at).toLocaleString())+' · '+esc(x.created_by||"")+'</small></div>').join("");
-  const msgHtml='<div class="muted" style="margin-bottom:6px">Sent by email and shown in the buyer dashboard.</div><input id="bmSubject" placeholder="Subject (optional)"><textarea id="bmText" placeholder="Write to the buyer..." style="min-height:60px;margin-top:6px"></textarea><div class="actions"><button class="primary" onclick="sendBuyerMessage(\''+esc(id)+'\')">Send message</button></div><div id="bmThread">'+(thread||'<div class="muted" style="margin-top:8px">No messages yet.</div>')+'</div>';
-  const log=(au.entries||[]).slice(0,15).map(e=>'<div class="muted">'+esc(new Date(e.created_at).toLocaleString())+' · '+esc(e.actor||"")+' · '+esc(e.action)+'</div>').join("")||'<div class="muted">No activity yet.</div>';
-  const manual=(it.allowedNext||[]).length?'<div class="muted" style="margin-bottom:6px">Only use this to correct a status. Normal progress happens through the steps above.</div><div class="actions">'+(it.allowedNext||[]).map(n=>'<button onclick="setRfqState(\''+esc(id)+'\',\''+esc(n)+'\')">'+esc(q.states[n]||n)+'</button>').join(" ")+'</div>':'<div class="muted">This is a final status.</div>';
-  document.getElementById("detail").innerHTML=
-   '<div class="rq-head"><div><h2>'+esc(r.title)+'</h2><div class="muted">'+(r.rfq_code?'RFQ '+esc(r.rfq_code)+' · ':"")+'Received '+esc(new Date(r.created_at).toLocaleDateString())+'</div></div><span class="pill rq-pill">'+esc(stLabel)+'</span></div>'
-   +rqStepper(st)+next
-   +'<div class="rq-facts">'+facts+'</div>'+(r.description?'<div class="rq-desc">'+esc(r.description)+'</div>':"")
-   +rqSec("Messages with buyer",msgHtml,openSec==="messages",(ms.messages||[]).length)
-   +rqSec("Supplier quotations",qHtml,sourcing,quotes.length)
-   +rqSec("Capability matches (internal)",mHtml,false,(mt.matches||[]).length)
-   +rqSec("Activity log",log,false)
-   +rqSec("Change status manually",manual,false);
- }catch(e){document.getElementById("message").textContent=e.message}
-}
 async function renderRfqExtras(){}   // superseded by the state-aware layout above
 
 
 // ---- Orders: Buyer PO -> SupplyDesk order (SD) -> Supplier PO. The buyer only ever deals with SupplyDesk. ----
-const ORD_GROUPS={review:"Needs review",assign:"To assign",progress:"In progress",done:"Delivered",closed:"Closed",sd:"SD orders"};
+const ORD_GROUPS={review:"Needs review",assign:"To assign",progress:"In progress",done:"Delivered",closed:"Closed"};
 let ordFilter="review",ordData={orders:[],stages:[]},sdList=[],ordSearch="",ordSel=new Set();
 const ordGroup=o=>o.status==="cancelled"||o.review_status==="rejected"?"closed":o.reviewOpen?"review":!o.sd_order_id?"assign":["delivered","order_closed"].includes(o.stage)?"done":"progress";
 const ordPill=o=>o.reviewOpen||o.review_status==="rejected"?o.reviewLabel:(o.status==="cancelled"?"Cancelled":o.stageLabel);
@@ -746,9 +685,10 @@ function renderOrderList(){
  document.getElementById("list").innerHTML='<div class="rq-listhead"><b>Orders</b></div><input class="rq-search" placeholder="Search PO, SD no, product, buyer..." value="'+esc(ordSearch)+'" oninput="ordSearch=this.value;document.getElementById(\'ordRows\').innerHTML=ordRowsHtml()"><div class="rq-tabs">'+tabs+'</div>'+bar+'<div id="ordRows">'+ordRowsHtml()+'</div>';
 }
 async function loadOrders(){
+ CUR.screen="orders";CUR.phase="";
  try{const [d,s]=await Promise.all([api("/api/admin/orders"),api("/api/admin/sd-orders")]);document.getElementById("message").textContent="";
   ordData=d;sdList=s.sdOrders||[];ordSel=new Set([...ordSel].filter(id=>d.orders.some(o=>o.id===id&&ordGroup(o)==="assign")));
-  if(!d.orders.some(o=>ordGroup(o)===ordFilter)&&ordFilter!=="sd"){const first=Object.keys(ORD_GROUPS).find(k=>d.orders.some(o=>ordGroup(o)===k));if(first)ordFilter=first;}
+  if(!d.orders.some(o=>ordGroup(o)===ordFilter)){const first=Object.keys(ORD_GROUPS).find(k=>d.orders.some(o=>ordGroup(o)===k));if(first)ordFilter=first;}
   document.getElementById("detail").innerHTML="";renderOrderList();
  }catch(e){document.getElementById("message").textContent=e.message}
 }
@@ -756,7 +696,7 @@ async function makeSdOrder(){
  if(!ordSel.size)return;
  const title=ordSel.size>1?prompt("Name for this combined run (e.g. product + month):",""):"";if(title===null)return;
  try{const d=await api("/api/admin/sd-orders",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({buyerOrderIds:[...ordSel],title})});
-  ordSel=new Set();await loadOrders();document.getElementById("message").textContent="SupplyDesk order "+d.sdNumber+" created. Now issue the supplier PO.";await openSdOrder(d.sdOrderId);
+  ordSel=new Set();await loadSourcing();await openSourcingPlan(d.sdOrderId);document.getElementById("message").textContent="SupplyDesk order "+d.sdNumber+" created. Now plan the sourcing.";
  }catch(e){document.getElementById("message").textContent=e.message}
 }
 async function ordPost(path,body,after){
@@ -766,14 +706,17 @@ function ordDecChange(){const v=document.getElementById("ordDec").value;document
 async function ordReview(id){
  const g=x=>document.getElementById(x).value.trim(),dec=g("ordDec");
  if(dec==="reject"&&!confirm("Reject this buyer order? It will leave the pipeline."))return;
- await ordPost("/api/admin/orders/"+encodeURIComponent(id)+"/review",{decision:dec,acceptedQuantity:g("ordAccQty"),note:g("ordNote")},async()=>{await loadOrders();await openOrderAdmin(id);document.getElementById("message").textContent="Decision saved. The buyer has been notified.";});
+ try{const d=await api("/api/admin/orders/"+encodeURIComponent(id)+"/review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({decision:dec,acceptedQuantity:g("ordAccQty"),note:g("ordNote"),autoSdOrder:true})});
+  if(d.sdOrderId){document.getElementById("message").textContent="Accepted. SupplyDesk order created; now plan the sourcing.";await loadSourcing();await openSourcingPlan(d.sdOrderId);return}
+  await reloadOrders();await openOrderAdmin(id);document.getElementById("message").textContent="Decision saved. The buyer has been notified.";
+ }catch(e){document.getElementById("message").textContent=e.message}
 }
 async function ordStage(id,stage){
  const g=x=>(document.getElementById(x)||{value:""}).value.trim();
- await ordPost("/api/admin/orders/"+encodeURIComponent(id)+"/stage",{stage,ref:g("ordRef"),note:g("ordStageNote")},async()=>{await loadOrders();await openOrderAdmin(id);document.getElementById("message").textContent="Buyer timeline updated and the buyer notified.";});
+ await ordPost("/api/admin/orders/"+encodeURIComponent(id)+"/stage",{stage,ref:g("ordRef"),note:g("ordStageNote")},async()=>{await reloadOrders();await openOrderAdmin(id);document.getElementById("message").textContent="Buyer timeline updated and the buyer notified.";});
 }
 async function ordSingleSd(id){
- await ordPost("/api/admin/sd-orders",{buyerOrderIds:[id]},async()=>{await loadOrders();await openOrderAdmin(id);});
+ await ordPost("/api/admin/sd-orders",{buyerOrderIds:[id]},async()=>{await reloadOrders();await openOrderAdmin(id);});
 }
 const poStatusTxt=p=>esc(p.statusLabel||p.status)+(p.accepted_quantity?' ('+esc(p.accepted_quantity)+' accepted)':'');
 const poExtra=p=>[p.batch_no?'Batch '+esc(p.batch_no):'',p.production_started_at?'Started '+esc(String(p.production_started_at).slice(0,10)):'',p.expected_completion?'Expected '+esc(String(p.expected_completion).slice(0,10)):''].filter(Boolean).join(' · ');
@@ -813,39 +756,9 @@ async function openOrderAdmin(id){
  }catch(e){document.getElementById("message").textContent=e.message}
 }
 const fmtDtAdmin=s=>{try{return new Date(s).toLocaleString([],{dateStyle:"medium",timeStyle:"short"})}catch{return""}};
-async function openSdOrder(id){
- try{
-  const d=await api("/api/admin/sd-orders/"+encodeURIComponent(id)),su=role()==="super_admin",sd=d.sdOrder;
-  const items='<table style="width:100%;font-size:13px"><tr><th>Buyer PO</th><th>Buyer</th><th>Needed</th><th>Allocated</th><th>Remaining</th><th>Stage</th></tr>'+d.items.map(i=>'<tr><td><a href="#" onclick="openOrderAdmin(\''+esc(i.buyer_order_id)+'\');return false"><b>'+esc(i.buyer_po)+'</b></a></td><td>'+esc(i.buyer_name||"")+'</td><td>'+esc(i.needed==null?i.quantity:i.needed)+'</td><td>'+esc(i.allocated)+'</td><td>'+esc(i.remaining==null?"-":i.remaining)+'</td><td>'+esc(i.stageLabel)+'</td></tr>').join("")+'</table>';
-  const pos=d.supplierPos.map(p=>'<div class="rq-q"><b>'+esc(p.po_number)+'</b> · '+esc(p.trade_name||p.legal_name||"")+' · '+esc(p.quantity)+' @ '+esc(p.unit_cost)+' '+esc(p.currency)+' · '+poStatusTxt(p)+(poExtra(p)?'<div class="muted">'+poExtra(p)+'</div>':'')+'<div class="muted">Contains: '+p.lines.map(l=>esc(l.buyerPo)+' × '+esc(l.quantity==null?"-":l.quantity)).join(" · ")+'</div>'+(["issued","accepted","partially_accepted","in_production","ready_for_qc","ready_for_dispatch"].includes(p.status)?'<div class="actions"><button onclick="cancelSupplierPo(\''+esc(p.id)+'\',\''+esc(id)+'\',true)">Cancel this PO</button></div>':'')+'</div>').join("")||'<div class="muted">No supplier PO issued yet.</div>';
-  let allocHtml='<div class="muted">No allocation yet.</div>';
-  try{const al=await api("/api/admin/sd-orders/"+encodeURIComponent(id)+"/allocation");
-    allocHtml='<div><b>Total requirement: '+esc(al.totalRequirement)+'</b> · allocated '+esc(al.allocated)+' · unallocated '+esc(al.unallocated)+'</div>'+(al.regions.length?al.regions.map(r=>'<div class="rq-q"><b>'+esc(r.region)+'</b> <span class="muted">'+esc(r.total)+'</span>'+r.suppliers.map(s=>'<div>'+esc(s.supplier)+': '+esc(s.quantity)+' <span class="muted">'+esc(s.poNumber)+' · '+esc(s.statusLabel)+'</span></div>').join("")+'</div>').join(""):'<div class="muted">No supplier PO issued yet.</div>')+'<div><b>Total: '+esc(al.allocated)+'</b></div>';
-  }catch(e){allocHtml='<div class="muted">'+esc(e.message)+'</div>';}
-  const open=d.items.filter(i=>i.remaining==null?i.allocated===0:i.remaining>0);
-  const alloc=open.map(i=>'<label class="rq-alloc"><span><b>'+esc(i.buyer_po)+'</b> <span class="muted">remaining '+esc(i.remaining==null?"n/a":i.remaining)+'</span></span><input class="allocQty" data-id="'+esc(i.buyer_order_id)+'" type="number" min="0" step="any" value="'+esc(i.remaining==null?"":i.remaining)+'" placeholder="qty"></label>').join("");
-  const issue=open.length?'<div class="muted" style="margin-bottom:8px">One PO can carry several buyer orders (combine). Change the quantities to split a buyer order across suppliers: issue one PO now for part, and another for the rest. The supplier sees only the total, never the buyers.</div><div class="rq-list" style="max-height:none">'+alloc+'</div><div class="rq-grid" style="margin-top:8px"><label>Capability ID<input id="spoCode" placeholder="SD-XXX-XXXX"></label>'+(su?'<label>or Supplier ID <small>(Super Admin)</small><input id="spoSid"></label>':'')+'<label>Unit cost *<input id="spoCost" type="number" step="0.0001" min="0"></label><label>Currency<select id="spoCur"><option>INR</option><option>USD</option><option>EUR</option><option>GBP</option><option>AED</option></select></label><label>Deliver by<input id="spoDate" type="date"></label></div><label class="rq-wide">Terms (payment, packing, delivery)<textarea id="spoTerms" style="min-height:48px"></textarea></label><div class="actions"><button class="primary" onclick="issueSdPo(\''+esc(id)+'\')">Issue PO to supplier</button></div>':'<div class="muted">Everything in this SupplyDesk order is allocated to supplier POs.</div>';
-  const spare=ordData.orders.filter(o=>ordGroup(o)==="assign");
-  const add=spare.length?'<div class="rq-grid"><label>Add another accepted buyer order<select id="sdAddSel"><option value="">Choose…</option>'+spare.map(o=>'<option value="'+esc(o.id)+'">'+esc(o.po_number+" · "+o.title+" · "+o.quantity)+'</option>').join("")+'</select></label></div><div class="actions"><button onclick="addToSd(\''+esc(id)+'\')">Add to this SupplyDesk order</button></div>':'<div class="muted">No other accepted buyer orders are waiting to be assigned.</div>';
-  document.getElementById("detail").innerHTML='<div class="rq-head"><div><h2>'+esc(sd.sd_number)+' · '+esc(sd.title)+'</h2><div class="muted">SupplyDesk order · '+d.items.length+' buyer order(s) · '+d.supplierPos.length+' supplier PO(s)</div></div><span class="rq-pill">SupplyDesk order</span></div>'
-   +'<div class="rq-sec-b">'+items+'</div>'+rqSec("Issue a supplier PO",issue,d.supplierPos.length===0,null)+rqSec("Internal allocation (SupplyDesk only)",allocHtml,d.supplierPos.length>0,null)+rqSec("Supplier POs",pos,d.supplierPos.length>0,d.supplierPos.length)+rqSec("Combine with another buyer order",add,false,null);
-  document.getElementById("detail").scrollIntoView({behavior:"smooth",block:"start"});
- }catch(e){document.getElementById("message").textContent=e.message}
-}
-async function issueSdPo(id){
- const g=x=>(document.getElementById(x)||{value:""}).value.trim();
- const allocations=[...document.querySelectorAll(".allocQty")].filter(i=>i.value.trim()!=="").map(i=>({buyerOrderId:i.dataset.id,quantity:Number(i.value)}));
- if(!allocations.length){document.getElementById("message").textContent="Enter a quantity for at least one buyer order.";return;}
- if(!confirm("Issue this purchase order? The supplier will be emailed. The supplier will not see the buyers."))return;
- await ordPost("/api/admin/sd-orders/"+encodeURIComponent(id)+"/supplier-pos",{capabilityCode:g("spoCode"),supplierId:g("spoSid"),unitCost:g("spoCost"),currency:g("spoCur"),deliveryBy:g("spoDate"),terms:g("spoTerms"),allocations},async()=>{document.getElementById("message").textContent="Supplier PO issued.";await loadOrders();await openSdOrder(id);});
-}
-async function addToSd(id){
- const v=document.getElementById("sdAddSel").value;if(!v)return;
- await ordPost("/api/admin/sd-orders/"+encodeURIComponent(id)+"/orders",{buyerOrderIds:[v]},async()=>{await loadOrders();await openSdOrder(id);});
-}
 async function cancelSupplierPo(id,refId,fromSd){
  const note=prompt("Reason (shown to supplier, optional):","");if(note===null)return;
- try{await api("/api/admin/supplier-pos/"+encodeURIComponent(id)+"/cancel",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({note})});await loadOrders();await (fromSd?openSdOrder(refId):openOrderAdmin(refId));}catch(e){document.getElementById("message").textContent=e.message}
+ try{await api("/api/admin/supplier-pos/"+encodeURIComponent(id)+"/cancel",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({note})});await reloadOrders();await (fromSd?openSdOrder(refId):openOrderAdmin(refId));}catch(e){document.getElementById("message").textContent=e.message}
 }
 
 async function openInvoice(orderId){
@@ -901,19 +814,17 @@ async function sendBuyerMessage(id){
  const m=document.getElementById("bmText").value.trim(),s=document.getElementById("bmSubject").value.trim();
  if(!m){document.getElementById("message").textContent="Write a message first.";return}
  try{const d=await api("/api/admin/requirements/"+encodeURIComponent(id)+"/message",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:m,subject:s})});
-  document.getElementById("message").textContent=d.emailed?"Message sent (email + buyer dashboard).":"Saved to buyer dashboard. Email could not be sent.";await openBuyerRequirementAdmin(id,undefined,"messages");}catch(e){document.getElementById("message").textContent=e.message}
+  document.getElementById("message").textContent=d.emailed?"Message sent (email + buyer dashboard).":"Saved to buyer dashboard. Email could not be sent.";await openBuyerRequirementAdmin(id,"messages");}catch(e){document.getElementById("message").textContent=e.message}
 }
 async function setRfqState(id,state){
  const note=prompt("Note (optional) for "+state+":","");if(note===null)return;
  try{await api("/api/admin/requirements/"+encodeURIComponent(id)+"/state",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({state,note})});await loadBuyerRequirements();await openBuyerRequirementAdmin(id);}catch(e){document.getElementById("message").textContent=e.message}
 }
-async function reviewRequirement(id,action){
- const ids=[...document.querySelectorAll(".reqSup:checked")].map(x=>x.value);
- if(action==="share_suppliers"&&!ids.length){document.getElementById("message").textContent="Select at least one supplier.";return}
- const msg=action==="share_suppliers"?"Send this requirement to "+ids.length+" supplier(s)? They will be emailed.":action==="supplydesk"?"Mark as handled by SupplyDesk (SupplyDesk billing)? The buyer will be emailed.":"Reject this requirement? The buyer will be emailed.";
+async function reviewRequirement(id,action,qty){
+ const msg=action==="accept_full"?"Accept this requirement in full? The buyer will be emailed.":action==="accept_partial"?"Accept "+qty+" units only? The buyer will be told the accepted quantity.":"Reject this requirement? The buyer will be emailed.";
  if(!confirm(msg))return;
- try{const d=await api("/api/admin/requirements/"+encodeURIComponent(id)+"/review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,supplierIds:ids,adminNotes:(document.getElementById("reqAdminNotes")?.value||""),buyerNote:(document.getElementById("reqBuyerNote")?.value||"")})});
-  document.getElementById("message").textContent="Saved."+(action==="share_suppliers"?" Shared with "+d.sharedWith+" new supplier(s); "+d.supplierEmailsSent+" email(s) sent.":"");
+ try{const d=await api("/api/admin/requirements/"+encodeURIComponent(id)+"/review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,acceptedQuantity:qty||"",adminNotes:(document.getElementById("reqAdminNotes")?.value||""),buyerNote:(document.getElementById("reqBuyerNote")?.value||"")})});
+  document.getElementById("message").textContent=action==="reject"?"Requirement rejected. The buyer has been told.":"Accepted"+(action==="accept_partial"?" ("+d.acceptedQuantity+")":" in full")+". Next: send the buyer a quotation.";
   await loadBuyerRequirements();await openBuyerRequirementAdmin(id);
  }catch(e){document.getElementById("message").textContent=e.message}
 }
@@ -1092,24 +1003,27 @@ async function viewFile(id){
 document.getElementById("status").onchange=loadApps;
 // ---- Tab navigation: active state, per-tab filters and a correct empty detail pane ----
 const TAB_HELP={
- requirements:["Buyer requirements","Pick a requirement to review it, message the buyer and send a quotation."],
  connections:["Connection requests","Pick a buyer request to see the supplier-side decision and notes."],
  orders:["Orders","Buyer orders land under Needs review. Accept them, combine accepted orders into a SupplyDesk order, then issue the supplier PO. The buyer only ever sees SupplyDesk."],
  margin:["Margin report","Super Admin only."],
  suppliers:["Suppliers","Super Admin only. Supplier identity is never shown to buyers or Admin."],
  apps:["Select an application","Documents and legal details remain private to this admin area."],
  updates:["Supplier updates","Pick an update request to review it."],
- products:["Select a product","Pick a product to review it."]
+ products:["Select a product","Pick a product to review it."],
+ requirements:["Requests","Open a request to accept it in full, accept part of it, or reject it."],
+ sourcing:["Sourcing","Open a SupplyDesk order to allocate supplier capacity and issue supplier POs."],
+ orders:["Orders","Open a buyer order to review it or move its buyer timeline."],
+ production:["Production","Open an order to see its supplier POs."],qc:["QC","Open an order to record its QC result."],logistics:["Logistics","Open an order to book transport, insurance and delivery."],finance:["Finance","Open an order for its invoice and payments."]
 };
 function setTab(name){
  document.querySelectorAll(".toolbar button[data-tab]").forEach(b=>b.classList.toggle("tabon",b.dataset.tab===name));
  const show=(id,on)=>{const e=document.getElementById(id);if(e)e.style.display=on?"":"none"};
- document.body.classList.toggle("solo",name==="team");
+ {const SOLO=["team","overview","exceptions","capabilities","capacity","agreements"];document.body.classList.toggle("solo",SOLO.includes(name));document.body.classList.toggle("wide",SOLO.includes(name)&&name!=="team");}
  {const m=document.getElementById("message");if(m)m.textContent=""}
  show("status",name==="apps");
  ["productStatus","productSearch","productRefreshBtn"].forEach(id=>show(id,name==="products"));
  const d=document.getElementById("detail"),t=TAB_HELP[name];
- if(d&&t&&name!=="team")d.innerHTML="<h2>"+t[0]+"</h2><div class='muted'>"+t[1]+"</div>";
+ if(d&&t&&!["team","overview","exceptions","capabilities","capacity","agreements"].includes(name))d.innerHTML="<h2>"+t[0]+"</h2><div class='muted'>"+t[1]+"</div>";
 }
 ["Apps","Updates","Connections","BuyerRequirements","Orders","MarginReport","SuppliersDirectory","Products"].forEach(n=>{
  const fn="load"+n,name={Apps:"apps",Updates:"updates",Connections:"connections",BuyerRequirements:"requirements",Orders:"orders",MarginReport:"margin",SuppliersDirectory:"suppliers",Products:"products"}[n];
@@ -1119,7 +1033,7 @@ function setTab(name){
 {const _openTeam=openTeam;openTeam=function(){setTab("team");document.getElementById("list").innerHTML="";return _openTeam.apply(this,arguments)};}
 const _applyRole=applyRole;
 applyRole=function(){_applyRole();document.body.classList.toggle("signed",!!role())};
-applyRole(); if(sessionStorage.getItem(key)){loadBuyerRequirements()}
+applyRole(); if(sessionStorage.getItem(key)){loadOverview()}
 </script>
 </body>
 </html>
