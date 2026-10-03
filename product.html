@@ -65,7 +65,9 @@ function renderCapacity(product) {
   var rows = [
     ["Monthly capacity", c.band ? c.band + (c.unit ? " " + c.unit : "") : "Shared on request"],
     ["Availability", '<span class="pill cap-' + escapeHtml(c.status || "unknown") + '">' + escapeHtml(labels[c.status] || labels.unknown) + '</span>'],
-    ["Lead time", c.leadTimeDays ? c.leadTimeDays + " days" : "Confirmed on quote"],
+    ["Available capacity", c.available ? Number(c.available).toLocaleString("en-US") + (c.unit ? " " + c.unit : " units") + " / month" : "Confirmed on quote"],
+    ["Delivery", c.leadTimeDays ? (c.leadTimeMaxDays && c.leadTimeMaxDays > c.leadTimeDays ? c.leadTimeDays + "\u2013" + c.leadTimeMaxDays : c.leadTimeDays) + " days" : "Confirmed on quote"],
+    ["SupplyDesk verification", "Verified"],
     ["Minimum order (MOQ)", product.moq ? escapeHtml(product.moq) + (product.unit ? " " + escapeHtml(product.unit) : "") : "Confirmed on quote"],
     ["Manufacturing location", escapeHtml([c.region, product.country].filter(Boolean).join(", ") || "-")]
   ];

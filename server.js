@@ -100,7 +100,8 @@ const TAXONOMY = require("./taxonomy");
 const RFQ = require("./rfq");
 const catalog = TAXONOMY.catalog;
 // Phase 1A: SupplyDesk sells to the buyer. Supplier identity/contact is never public unless explicitly switched off.
-const HIDE_SUPPLIERS = String(process.env.SD_HIDE_SUPPLIERS || "true").toLowerCase() !== "false";
+// Business rule: buyers never see suppliers (SupplyDesk is the only counterparty). Not switchable by env.
+const HIDE_SUPPLIERS = true;
 const CAPACITY_STALE_DAYS = 45;
 const CAP_UNITS = ["pcs","kg","tons","meters","sets","units","liters","boxes","pairs","sq.m"];
 function capacityStatus(monthly, available){
@@ -193,6 +194,27 @@ function dashboardTokenHash(token) {
   return crypto.createHash("sha256").update(String(token)).digest("hex");
 }
 
+// Capacity holds. issued PO => allocated; accepted..dispatched => committed; declined/cancelled/completed => released.
+function capacityHold(status,qty,acceptedQty){
+  const q=Number(RFQ.parseQuantity(qty))||0;
+  if(status==="issued") return {a:q,c:0};
+  if(status==="partially_accepted") return {a:0,c:Math.min(Number(RFQ.parseQuantity(acceptedQty))||0,q||Infinity)};
+  if(["accepted","in_production","ready_for_qc","ready_for_dispatch","dispatched"].includes(status)) return {a:0,c:q};
+  return {a:0,c:0};
+}
+async function applyCapacityHold(db,productId,from,to){
+  if(!productId) return;
+  const da=to.a-from.a, dc=to.c-from.c;
+  if(!da&&!dc) return;
+  await db.execute("UPDATE supplier_products SET allocated_capacity=GREATEST(CAST(allocated_capacity AS SIGNED)+?,0),committed_capacity=GREATEST(CAST(committed_capacity AS SIGNED)+?,0) WHERE id=?",[da,dc,productId]);
+}
+
+// Unapproved suppliers may use the dashboard (profile, products, onboarding) but never live procurement APIs.
+function requireEligibleSupplier(req,res,next){
+  if(req.supplier&&req.supplier.eligible) return next();
+  return res.status(403).json({error:"Your account is not yet approved for live SupplyDesk orders. Complete onboarding and wait for SupplyDesk approval.",code:"supplier_not_eligible",onboardingStatus:req.supplier?.onboarding_status||"account_verified"});
+}
+
 async function requireSupplierDashboard(req, res, next) {
   const rawToken = clean(req.get("x-supplier-dashboard-token"), 128);
   if (!rawToken) return res.status(401).json({ error: "Dashboard access required." });
@@ -200,15 +222,17 @@ async function requireSupplierDashboard(req, res, next) {
     const [[supplier]] = await pool.execute(
       `SELECT s.id, s.application_id, s.legal_name, s.trade_name, s.business_type, s.country, s.city,
               s.address, s.website, s.business_email, s.business_phone, s.contact_person, s.designation,
-              s.category, s.subcategory, s.profile_details_json, s.verified, s.published, t.id AS token_id, t.expires_at
+              s.category, s.subcategory, s.profile_details_json, s.verified, s.published, s.onboarding_status, s.agreement_signed_at, s.wizard_json, s.application_id AS app_id, t.id AS token_id, t.expires_at
        FROM supplier_dashboard_tokens t
        JOIN supplier_profiles s ON s.id = t.supplier_id
        WHERE t.token_hash = ? AND t.revoked_at IS NULL
-         AND t.expires_at > NOW() AND s.verified = 1 AND s.published = 1`,
+         AND t.expires_at > NOW()`,
       [dashboardTokenHash(rawToken)]
     );
     if (!supplier) return res.status(401).json({ error: "Dashboard link is expired or invalid." });
     await pool.execute("UPDATE supplier_dashboard_tokens SET last_used_at=NOW() WHERE id=?", [supplier.token_id]);
+    // Dashboard access only proves the email. Live-procurement eligibility is separate (see requireEligibleSupplier).
+    supplier.eligible = Boolean(supplier.verified && supplier.published && supplier.onboarding_status === "supplydesk_approved" && supplier.agreement_signed_at);
     req.supplier = supplier;
     next();
   } catch (error) {
@@ -460,7 +484,7 @@ function maskSupplierRow(req,row){
 }
 
 const adminLoginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false,
+  windowMs: 15 * 60 * 1000, limit: process.env.E2E_TEST_MODE ? 1000 : 30, standardHeaders: true, legacyHeaders: false,
   message: { error: "Too many sign-in attempts. Please wait 15 minutes and try again." }
 });
 const scryptAsync=(pw,salt)=>new Promise((resolve,reject)=>crypto.scrypt(pw,salt,64,(e,k)=>e?reject(e):resolve(k.toString("hex"))));
@@ -1104,7 +1128,7 @@ app.get("/api/buyer-dashboard", requireBuyerDashboard, async (req,res)=>{
     const [enquiries]=await pool.execute(
       `SELECT e.id,e.product_id,e.supplier_id,e.message,e.quantity,e.status,e.created_at,e.updated_at,
               e.decision,e.approved_quantity,e.buyer_remark,e.decided_at,p.capability_code,
-              p.product_name,s.trade_name,s.legal_name,s.country,s.city
+              p.product_name,p.category AS p_category,p.subcategory AS p_subcategory,s.trade_name,s.legal_name,s.country,s.city
        FROM buyer_enquiries e
        JOIN supplier_profiles s ON s.id=e.supplier_id
        LEFT JOIN supplier_products p ON p.id=e.product_id
@@ -1114,7 +1138,7 @@ app.get("/api/buyer-dashboard", requireBuyerDashboard, async (req,res)=>{
     res.json({
       buyer:{id:req.buyer.id,email:req.buyer.email,name:req.buyer.name||"",company:req.buyer.company||"",country:req.buyer.country||"",phone:req.buyer.phone||""},
       enquiries:enquiries.map(e=>{
-        const row={id:e.id,productId:e.product_id,productName:e.product_name||"General enquiry",capabilityCode:e.capability_code||"",quantity:e.quantity||"",message:e.message||"",status:e.status,decision:e.decision||"pending",approvedQuantity:e.approved_quantity||"",remark:e.buyer_remark||"",decidedAt:e.decided_at||null,createdAt:e.created_at,updatedAt:e.updated_at};
+        const row={id:e.id,productId:e.product_id?publicCapabilityId(capabilityKey({category:e.p_category,subcategory:e.p_subcategory,product_name:e.product_name})):null,productName:e.product_name||"General enquiry",capabilityCode:e.capability_code||"",quantity:e.quantity||"",message:e.message||"",status:e.status,decision:e.decision||"pending",approvedQuantity:e.approved_quantity||"",remark:e.buyer_remark||"",decidedAt:e.decided_at||null,createdAt:e.created_at,updatedAt:e.updated_at};
         return HIDE_SUPPLIERS?row:{...row,supplierId:e.supplier_id,supplierName:e.trade_name||e.legal_name,supplierCountry:e.country,supplierCity:e.city};
       })
     });
@@ -1140,9 +1164,28 @@ app.post("/api/buyer-dashboard/logout", requireBuyerDashboard, async(req,res)=>{
   res.json({ok:true});
 });
 
+// Buyer / supplier quick-signup fields (company, contact, mobile, country). Documents are never collected at signup.
+function readSignupFields(body){
+  const company=clean(body?.company,180), contact=clean(body?.contact,180), phone=clean(body?.phone,40), country=clean(body?.country,100);
+  let error="";
+  if(!company) error="Company name is required.";
+  else if(!contact) error="Contact person is required.";
+  else if(!/^[+()\d][\d\s().-]{6,24}$/.test(phone)) error="Enter a valid mobile number.";
+  else if(!country) error="Country is required.";
+  return {company,contact,phone,country,error};
+}
+
 app.post("/api/buyer-email/request-otp", buyerOtpRequestLimiter, async (req,res)=>{
   const email=clean(req.body?.email,255).toLowerCase();
   if(!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({error:"Please enter a valid email address."});
+  if(req.body?.signup===true){
+    // Signup mode: a brand-new buyer must give company, contact, mobile and country up front (existing buyers just log in).
+    try{
+      const [[known]]=await pool.execute("SELECT id FROM buyers WHERE email=? LIMIT 1",[email]);
+      const f=readSignupFields(req.body);
+      if(!known && f.error) return res.status(400).json({error:f.error});
+    }catch(error){console.error("Buyer signup precheck failed:",error);return res.status(500).json({error:"Could not start signup. Please try again."});}
+  }
   const e2eMode=String(process.env.E2E_TEST_MODE||"").toLowerCase()==="true";
   const e2eKey=clean(req.get("x-e2e-key"),256);
   const configuredE2eKey=clean(process.env.E2E_TEST_KEY,256);
@@ -1187,14 +1230,19 @@ app.post("/api/buyer-email/verify-otp", buyerOtpVerifyLimiter, async (req,res)=>
     const dashboardToken=crypto.randomBytes(32).toString("hex");
     const [[existingBuyer]]=await pool.execute("SELECT id FROM buyers WHERE email=? LIMIT 1",[email]);
     const buyerId=existingBuyer?.id||crypto.randomUUID();
+    const signupFields=req.body?.signup===true?readSignupFields(req.body):null;
+    if(!existingBuyer && signupFields?.error) return res.status(400).json({error:signupFields.error});
     if(existingBuyer){
-      await pool.execute("UPDATE buyers SET last_seen=NOW() WHERE id=?",[buyerId]);
+      await pool.execute("UPDATE buyers SET last_seen=NOW(),email_verified_at=COALESCE(email_verified_at,NOW()) WHERE id=?",[buyerId]);
+      if(signupFields&&!signupFields.error) await pool.execute("UPDATE buyers SET name=COALESCE(NULLIF(name,''),?),company=COALESCE(NULLIF(company,''),?),phone=COALESCE(NULLIF(phone,''),?),country=COALESCE(NULLIF(country,''),?) WHERE id=?",[signupFields.contact,signupFields.company,signupFields.phone,signupFields.country,buyerId]);
+    }else if(signupFields){
+      await pool.execute("INSERT INTO buyers (id,email,name,company,phone,country,email_verified_at,last_seen) VALUES (?,?,?,?,?,?,NOW(),NOW())",[buyerId,email,signupFields.contact,signupFields.company,signupFields.phone,signupFields.country]);
     }else{
-      await pool.execute("INSERT INTO buyers (id,email,last_seen) VALUES (?,?,NOW())",[buyerId,email]);
+      await pool.execute("INSERT INTO buyers (id,email,email_verified_at,last_seen) VALUES (?,?,NOW(),NOW())",[buyerId,email]);
     }
     await pool.execute("UPDATE buyer_email_otps SET verified_at=NOW(),verification_token_hash=?,verification_expires_at=DATE_ADD(NOW(),INTERVAL 30 MINUTE) WHERE id=?",[hashToken(rawToken),row.id]);
     await pool.execute("INSERT INTO buyer_dashboard_tokens (id,buyer_id,token_hash,expires_at) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 30 DAY))",[crypto.randomUUID(),buyerId,tokenHash(dashboardToken)]);
-    res.json({ok:true,verificationToken:rawToken,dashboardToken,buyerId,dashboardUrl:"/buyer-dashboard.html",message:"Email verified. Your Buyer Dashboard is ready."});
+    res.json({ok:true,verificationToken:rawToken,dashboardToken,buyerId,newAccount:!existingBuyer,dashboardUrl:"/buyer-dashboard.html",message:existingBuyer?"Email verified. Your Buyer Dashboard is ready.":"Account created. Your Buyer Dashboard is ready."});
   }catch(error){
     console.error("Buyer email verification failed:",error);
     res.status(500).json({error:"Could not verify the email. Please try again."});
@@ -1203,7 +1251,7 @@ app.post("/api/buyer-email/verify-otp", buyerOtpVerifyLimiter, async (req,res)=>
 
 app.post("/api/connect-requests", connectLimiter, async (req, res) => {
   let supplierId = clean(req.body?.supplierId, 80);
-  const productId = clean(req.body?.productId, 80) || null;
+  let productId = clean(req.body?.productId, 80) || null;
   const customerName = clean(req.body?.customerName, 180);
   const customerEmail = clean(req.body?.customerEmail, 255).toLowerCase();
   const customerCompany = clean(req.body?.customerCompany, 180) || null;
@@ -1240,12 +1288,10 @@ app.post("/api/connect-requests", connectLimiter, async (req, res) => {
     let selectedProductName = productName, selectedCode = "";
     if (HIDE_SUPPLIERS) {
       // The buyer never names a supplier: SupplyDesk resolves it internally from the product.
-      const [[product]] = await pool.execute(
-        "SELECT p.id,p.product_name,p.supplier_id,p.capability_code FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id WHERE p.id=? AND p.status='approved' AND s.verified=1 AND s.published=1",
-        [productId]
-      );
-      if (!product) return res.status(400).json({ error: "This product is not currently available." });
-      supplierId = product.supplier_id; selectedProductName = product.product_name; selectedCode = product.capability_code || "";
+      const resolved = await resolveCapabilityMember(productId);
+      if (!resolved) return res.status(400).json({ error: "This product is not currently available." });
+      const product = resolved.member;
+      productId = product.id; supplierId = product.supplier_id; selectedProductName = resolved.group.name; selectedCode = product.capability_code || "";
     }
     const [[supplier]] = await pool.execute(
       "SELECT id, legal_name, trade_name, business_email, category, subcategory FROM supplier_profiles WHERE id=? AND verified=1 AND published=1",
@@ -1438,7 +1484,7 @@ app.post("/api/admin/connect-requests/:id/decision", requireAdmin, async (req,re
 });
 
 // Supplier: update the status of one of its own requests
-app.patch("/api/supplier-dashboard/connections/:id", requireSupplierDashboard, async (req,res)=>{
+app.patch("/api/supplier-dashboard/connections/:id", requireSupplierDashboard,requireEligibleSupplier, async (req,res)=>{
   const status=clean(req.body?.status,40);
   if(!["new","contacted","in_discussion","closed"].includes(status)) return res.status(400).json({error:"Invalid connection request status."});
   try{
@@ -1485,18 +1531,17 @@ app.get("/api/buyer-requirements",requireBuyerDashboard,async(req,res)=>{try{con
       [oq]=await pool.query("SELECT rfq_id,quote_no,unit_price,currency,quantity,total_price,lead_time_days,valid_until,terms,note FROM rfq_quotes WHERE status='sent' AND rfq_id IN (?) ORDER BY created_at DESC",[ids]);}
     res.json({requirements:requirements.map(r=>{const st=r.rfq_state||RFQ.LEGACY_STATUS_TO_STATE[r.status]||"submitted";return {...r,rfq_state:st,stateLabel:(RFQ.STATES[st]||RFQ.STATES.submitted).buyerLabel,stateStep:RFQ.buyerStep?RFQ.buyerStep(st):0,messages:msgs.filter(m=>m.rfq_id===r.id).slice(0,6),openQuote:st==="quote_sent"?(oq.find(q=>q.rfq_id===r.id)||null):null};})});}catch(error){console.error(error);res.status(500).json({error:"Could not load requirements."});}});
 app.get("/api/buyer-requirements/:id/quotes",requireBuyerDashboard,async(req,res)=>{try{const [[requirement]]=await pool.execute("SELECT id,title,status FROM buyer_requirements WHERE id=? AND buyer_id=?",[clean(req.params.id,80),req.buyer.id]);if(!requirement)return res.status(404).json({error:"Requirement not found."});const [sdQuotes]=await pool.execute("SELECT id,quote_no,unit_price,currency,quantity,total_price,lead_time_days,valid_until,terms,note,status,created_at,responded_at FROM rfq_quotes WHERE rfq_id=? AND status IN ('sent','accepted','rejected') ORDER BY created_at DESC",[requirement.id]);if(HIDE_SUPPLIERS)return res.json({requirement,quotes:[],sdQuotes});const [quotes]=await pool.execute("SELECT q.id,q.unit_price,q.currency,q.quantity_available,q.moq,q.lead_time,q.payment_terms,q.incoterm,q.quote_valid_until,q.sample_available,q.notes,q.status,q.created_at,s.id supplier_id,s.trade_name,s.legal_name,s.country,s.city FROM supplier_quotes q JOIN supplier_profiles s ON s.id=q.supplier_id WHERE q.requirement_id=? AND q.status='submitted' ORDER BY q.created_at DESC",[requirement.id]);res.json({requirement,quotes:HIDE_SUPPLIERS?quotes.map((q,i)=>{const {supplier_id,trade_name,legal_name,country,city,...rest}=q;return {...rest,supplier_label:"SupplyDesk sourcing partner #"+(quotes.length-i)};}):quotes,sdQuotes});}catch(error){res.status(500).json({error:"Could not load quotations."});}});
-app.get("/api/supplier-dashboard/requirements",requireSupplierDashboard,async(req,res)=>{try{const [rows]=await pool.execute("SELECT r.id,r.requirement_type,r.title,r.category,r.subcategory,r.description,r.quantity,r.unit,r.target_price,r.currency,r.delivery_country,r.delivery_city,r.required_by,r.market_scope,r.created_at,m.status match_status,q.id quote_id,q.unit_price quote_unit_price,q.currency quote_currency,q.updated_at quote_updated_at FROM buyer_requirements r JOIN requirement_supplier_matches m ON m.requirement_id=r.id AND m.supplier_id=? LEFT JOIN supplier_quotes q ON q.requirement_id=r.id AND q.supplier_id=? AND q.status='submitted' WHERE r.status='open' ORDER BY r.created_at DESC LIMIT 100",[req.supplier.id,req.supplier.id]);res.json({requirements:rows});}catch(error){res.status(500).json({error:"Could not load buyer requirements."});}});
-app.post("/api/supplier-dashboard/requirements/:id/view",requireSupplierDashboard,async(req,res)=>{try{const id=clean(req.params.id,80),[[r]]=await pool.execute("SELECT id,status FROM buyer_requirements WHERE id=?",[id]);if(!r||r.status!=="open")return res.status(404).json({error:"Requirement is no longer open."});const [vr]=await pool.execute("UPDATE requirement_supplier_matches SET status=IF(status='quoted',status,'viewed'),viewed_at=COALESCE(viewed_at,NOW()) WHERE requirement_id=? AND supplier_id=?",[id,req.supplier.id]);if(!vr.affectedRows)return res.status(404).json({error:"Requirement is no longer open."});res.json({ok:true});}catch(error){res.status(500).json({error:"Could not record requirement view."});}});
-app.post("/api/supplier-dashboard/requirements/:id/quote",requireSupplierDashboard,async(req,res)=>{
+app.get("/api/supplier-dashboard/requirements",requireSupplierDashboard,requireEligibleSupplier,async(req,res)=>{try{const [rows]=await pool.execute("SELECT r.id,r.requirement_type,r.title,r.category,r.subcategory,r.description,r.quantity,r.unit,r.currency,r.delivery_country,r.required_by,r.market_scope,r.created_at,m.status match_status,q.id quote_id,q.unit_price quote_unit_price,q.currency quote_currency,q.updated_at quote_updated_at FROM buyer_requirements r JOIN requirement_supplier_matches m ON m.requirement_id=r.id AND m.supplier_id=? LEFT JOIN supplier_quotes q ON q.requirement_id=r.id AND q.supplier_id=? AND q.status='submitted' WHERE r.status='open' ORDER BY r.created_at DESC LIMIT 100",[req.supplier.id,req.supplier.id]);res.json({requirements:rows});}catch(error){res.status(500).json({error:"Could not load buyer requirements."});}});
+app.post("/api/supplier-dashboard/requirements/:id/view",requireSupplierDashboard,requireEligibleSupplier,async(req,res)=>{try{const id=clean(req.params.id,80),[[r]]=await pool.execute("SELECT id,status FROM buyer_requirements WHERE id=?",[id]);if(!r||r.status!=="open")return res.status(404).json({error:"Requirement is no longer open."});const [vr]=await pool.execute("UPDATE requirement_supplier_matches SET status=IF(status='quoted',status,'viewed'),viewed_at=COALESCE(viewed_at,NOW()) WHERE requirement_id=? AND supplier_id=?",[id,req.supplier.id]);if(!vr.affectedRows)return res.status(404).json({error:"Requirement is no longer open."});res.json({ok:true});}catch(error){res.status(500).json({error:"Could not record requirement view."});}});
+app.post("/api/supplier-dashboard/requirements/:id/quote",requireSupplierDashboard,requireEligibleSupplier,async(req,res)=>{
   const id=clean(req.params.id,80),unitPrice=Number(req.body?.unitPrice),currency=clean(req.body?.currency,10).toUpperCase()||"USD",quantityAvailable=clean(req.body?.quantityAvailable,120)||null,moq=clean(req.body?.moq,120)||null,leadTime=clean(req.body?.leadTime,120)||null,paymentTerms=clean(req.body?.paymentTerms,255)||null,incoterm=clean(req.body?.incoterm,40)||null,quoteValidUntil=clean(req.body?.quoteValidUntil,20)||null,notes=clean(req.body?.notes,3000)||null,sampleAvailable=req.body?.sampleAvailable?1:0;
   if(!Number.isFinite(unitPrice)||unitPrice<0)return res.status(400).json({error:"Enter a valid unit price."});
   try{const [[r]]=await pool.execute("SELECT r.* FROM buyer_requirements r JOIN requirement_supplier_matches m ON m.requirement_id=r.id AND m.supplier_id=? WHERE r.id=? AND r.status='open'",[req.supplier.id,id]);if(!r)return res.status(404).json({error:"Requirement is no longer open."});
     await pool.execute("INSERT INTO supplier_quotes (id,requirement_id,supplier_id,unit_price,currency,quantity_available,moq,lead_time,payment_terms,incoterm,quote_valid_until,sample_available,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE unit_price=VALUES(unit_price),currency=VALUES(currency),quantity_available=VALUES(quantity_available),moq=VALUES(moq),lead_time=VALUES(lead_time),payment_terms=VALUES(payment_terms),incoterm=VALUES(incoterm),quote_valid_until=VALUES(quote_valid_until),sample_available=VALUES(sample_available),notes=VALUES(notes),status='submitted',updated_at=NOW()",[crypto.randomUUID(),id,req.supplier.id,unitPrice,currency,quantityAvailable,moq,leadTime,paymentTerms,incoterm,quoteValidUntil||null,sampleAvailable,notes]);
     await pool.execute("INSERT INTO requirement_supplier_matches (id,requirement_id,supplier_id,status,viewed_at) VALUES (?,?,?,'quoted',NOW()) ON DUPLICATE KEY UPDATE status='quoted',viewed_at=COALESCE(viewed_at,NOW())",[crypto.randomUUID(),id,req.supplier.id]);
-    try{const [[buyer]]=await pool.execute("SELECT email,name FROM buyers WHERE id=?",[r.buyer_id]);if(buyer?.email&&process.env.SMTP_HOST&&process.env.SMTP_USER&&process.env.SMTP_PASSWORD&&process.env.SMTP_FROM){const qm=buildProfessionalEmail({preheader:"A supplier has quoted on your requirement",title:"New quotation received",intro:"Hello "+(buyer.name||"Buyer")+", a supplier has submitted a quotation for your requirement.",bodyHtml:'<table style="width:100%;border-collapse:collapse;margin:18px 0;font-size:14px"><tr><td style="padding:8px 0;color:#58717c">Requirement</td><td style="padding:8px 0;font-weight:700">'+escapeEmailHtml(r.title)+'</td></tr><tr><td style="padding:8px 0;color:#58717c">Supplier</td><td style="padding:8px 0;font-weight:700">'+escapeEmailHtml(req.supplier.trade_name||req.supplier.legal_name||"Supplier")+'</td></tr><tr><td style="padding:8px 0;color:#58717c">Unit price</td><td style="padding:8px 0;font-weight:700">'+escapeEmailHtml(unitPrice+" "+currency)+'</td></tr>'+(moq?'<tr><td style="padding:8px 0;color:#58717c">MOQ</td><td style="padding:8px 0;font-weight:700">'+escapeEmailHtml(moq)+'</td></tr>':"")+(leadTime?'<tr><td style="padding:8px 0;color:#58717c">Lead time</td><td style="padding:8px 0;font-weight:700">'+escapeEmailHtml(leadTime)+'</td></tr>':"")+'</table>',textLines:["Hello "+(buyer.name||"Buyer")+",","","A supplier has submitted a quotation for your requirement:",r.title,"Supplier: "+(req.supplier.trade_name||req.supplier.legal_name||"Supplier"),"Unit price: "+unitPrice+" "+currency,moq?"MOQ: "+moq:"",leadTime?"Lead time: "+leadTime:""].filter(x=>x!==""),ctaText:"Open Buyer Dashboard",ctaUrl:String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"")+"/buyer-dashboard.html"});
-await mailer.sendMail({from:process.env.SMTP_FROM,replyTo:process.env.SMTP_FROM,to:buyer.email,subject:"SupplyDesk | New quotation received",text:qm.text,html:qm.html});}}catch(mailError){console.error("Buyer quote notification failed:",mailError);}
+    // Supplier quotes go to SupplyDesk only; the buyer is never notified of or shown a supplier quote.
     try{const c=await pool.getConnection();try{await c.beginTransaction();const [[st]]=await c.execute("SELECT rfq_state FROM buyer_requirements WHERE id=?",[id]);if(st?.rfq_state==="sourcing")await moveRfq(c,{supplier:req.supplier},id,"quotes_received","first supplier quote");await audit(c,{supplier:req.supplier},"supplier.quote_submitted","rfq",id,null,{supplierId:req.supplier.id,unitPrice,currency});await c.commit();}catch(e){await c.rollback();throw e;}finally{c.release();}}catch(auditError){console.error("RFQ state/audit after supplier quote failed:",auditError);}
-    res.status(201).json({ok:true,message:"Quotation sent to the buyer successfully."});
+    res.status(201).json({ok:true,message:"Quotation sent to SupplyDesk."});
   }catch(error){console.error("Supplier quote failed:",error);res.status(500).json({error:"Could not submit the quotation."});}
 });
 app.patch("/api/buyer-requirements/:id",requireBuyerDashboard,async(req,res)=>{const status=clean(req.body?.status,20);if(!["closed","cancelled"].includes(status))return res.status(400).json({error:"Invalid requirement status."});const rid=clean(req.params.id,80);const conn=await pool.getConnection();try{await conn.beginTransaction();const [[own]]=await conn.execute("SELECT id FROM buyer_requirements WHERE id=? AND buyer_id=?",[rid,req.buyer.id]);if(!own){await conn.rollback();return res.status(404).json({error:"Requirement not found."});}await moveRfq(conn,req,rid,status==="cancelled"?"cancelled":"closed","buyer request");await conn.execute("UPDATE buyer_requirements SET status=?,updated_at=NOW() WHERE id=?",[status,rid]);await conn.commit();res.json({ok:true,status});}catch(error){await conn.rollback();if(error instanceof RfqError)return res.status(error.status).json({error:error.message});console.error("Buyer requirement update failed:",error);res.status(500).json({error:"Could not update requirement."});}finally{conn.release();}});
@@ -1591,7 +1636,7 @@ async function createSupplierPo(conn,req,{sdOrderId,code,sid,unitCost,currency,q
   if(!quantity)throw fail(400,"Quantity is required.");
   const qty=RFQ.parseQuantity(quantity),total=qty?money(qty*unitCost):null;
   let sup;
-  if(code){[[sup]]=await conn.execute("SELECT s.id,s.business_email,p.id product_id FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id WHERE p.capability_code=? AND p.status='approved' AND s.verified=1 AND s.published=1 LIMIT 1",[code]);}
+  if(code){[[sup]]=await conn.execute("SELECT s.id,s.business_email,p.id product_id FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id WHERE p.capability_code=? AND p.status='approved' AND p.product_verified=1 AND p.capacity_verified=1 AND s.verified=1 AND s.published=1 LIMIT 1",[code]);}
   else{[[sup]]=await conn.execute("SELECT id,business_email,NULL product_id FROM supplier_profiles WHERE id=? AND verified=1 AND published=1",[sid]);}
   if(!sup)throw fail(404,"No verified supplier found for that capability.");
   const [[dup]]=await conn.execute("SELECT id FROM supplier_pos WHERE sd_order_id=? AND supplier_id=? AND status NOT IN ('declined','cancelled') LIMIT 1",[sdOrderId,sup.id]);
@@ -1600,6 +1645,7 @@ async function createSupplierPo(conn,req,{sdOrderId,code,sid,unitCost,currency,q
   for(let a=0;a<8;a++){po=RFQ.newSupplierPoNumber();try{
     await conn.execute("INSERT INTO supplier_pos (id,po_number,order_id,sd_order_id,supplier_id,product_id,title,quantity,unit_cost,currency,total_cost,delivery_by,terms,created_by) VALUES (?,?,NULL,?,?,?,?,?,?,?,?,?,?,?)",[pid,po,sdOrderId,sup.id,sup.product_id||null,sd.title,quantity,unitCost,currency,total,deliveryBy,terms,actorOf(req).id]);break;}
     catch(e){if(e?.code!=="ER_DUP_ENTRY"||a===7)throw e;}}
+  await applyCapacityHold(conn,sup.product_id,{a:0,c:0},capacityHold("issued",quantity));
   for(const a of alloc)await conn.execute("INSERT INTO supplier_po_lines (id,supplier_po_id,sd_order_id,buyer_order_id,quantity) VALUES (?,?,?,?,?)",[crypto.randomUUID(),pid,sdOrderId,a.buyerOrderId,a.quantity==null?null:a.quantity]);
   await audit(conn,req,"supplier_po.issued","supplier_po",pid,null,{poNumber:po,sdNumber:sd.sd_number,buyerOrders:alloc.map(a=>({order:byId.get(a.buyerOrderId).po_number,quantity:a.quantity})),supplierRef:isSuper(req)?sup.id:supplierAlias(sup.id),quantity,unitCost,currency});
   for(const a of alloc)await addOrderEvent(conn,a.buyerOrderId,"backend",null,null,"Supplier PO "+po+" issued under "+sd.sd_number,actorOf(req).id);
@@ -1760,10 +1806,11 @@ app.patch("/api/admin/supplier-pos/:id/cancel",requireAdmin,async(req,res)=>{
   const conn=await pool.getConnection();
   try{
     await conn.beginTransaction();
-    const [[po]]=await conn.execute("SELECT po.id,po.po_number,po.status,s.business_email FROM supplier_pos po JOIN supplier_profiles s ON s.id=po.supplier_id WHERE po.id=? FOR UPDATE",[id]);
+    const [[po]]=await conn.execute("SELECT po.id,po.po_number,po.status,po.product_id,po.quantity,po.accepted_quantity,s.business_email FROM supplier_pos po JOIN supplier_profiles s ON s.id=po.supplier_id WHERE po.id=? FOR UPDATE",[id]);
     if(!po){await conn.rollback();return res.status(404).json({error:"Purchase order not found."});}
     if(!RFQ.canPoTransition(po.status,"cancelled")||po.status==="cancelled"){await conn.rollback();return res.status(409).json({error:"A "+RFQ.PO_STATES[po.status].label+" purchase order cannot be cancelled."});}
     await conn.execute("UPDATE supplier_pos SET status='cancelled',status_changed_at=NOW(),supplier_note=COALESCE(?,supplier_note) WHERE id=?",[note,id]);
+    await applyCapacityHold(conn,po.product_id,capacityHold(po.status,po.quantity,po.accepted_quantity),capacityHold("cancelled"));
     await audit(conn,req,"supplier_po.cancelled","supplier_po",id,{status:po.status},{status:"cancelled",note});
     await syncOrdersOfPo(conn,req,id);
     await conn.commit();
@@ -1774,16 +1821,16 @@ app.patch("/api/admin/supplier-pos/:id/cancel",requireAdmin,async(req,res)=>{
 });
 
 // Supplier side: only the PO itself (no buyer, no buyer PO number, no buyer price).
-app.get("/api/supplier-dashboard/purchase-orders",requireSupplierDashboard,async(req,res)=>{
+app.get("/api/supplier-dashboard/purchase-orders",requireSupplierDashboard,requireEligibleSupplier,async(req,res)=>{
   try{const [rows]=await pool.execute("SELECT id,po_number,title,quantity,accepted_quantity,unit_cost,currency,total_cost,delivery_by,terms,status,supplier_note,batch_no,production_started_at,expected_completion,status_changed_at,created_at FROM supplier_pos WHERE supplier_id=? ORDER BY created_at DESC LIMIT 200",[req.supplier.id]);
-    res.json({purchaseOrders:rows.map(r=>({...r,statusLabel:RFQ.PO_STATES[r.status]?.label||r.status,allowedNext:(RFQ.PO_TRANSITIONS[r.status]||[]).filter(n=>n!=="cancelled")}))});}
+    res.json({purchaseOrders:rows.map(r=>({...r,statusLabel:RFQ.PO_SUPPLIER_LABELS[r.status]||RFQ.PO_STATES[r.status]?.label||r.status,allowedNext:(RFQ.PO_TRANSITIONS[r.status]||[]).filter(n=>n!=="cancelled")}))});}
   catch(error){console.error(error);res.status(500).json({error:"Could not load purchase orders."});}
 });
 
 const isoDate=(v)=>{v=clean(v,10);return /^\d{4}-\d{2}-\d{2}$/.test(v)&&!Number.isNaN(new Date(v).getTime())?v:null;};
 // Supplier acknowledgement: accept / partially accept / reject, production start, expected completion, ready for QC, ready for dispatch.
 // Only after these does SupplyDesk move the buyer-facing timeline (syncOrdersOfPo).
-app.patch("/api/supplier-dashboard/purchase-orders/:id/status",requireSupplierDashboard,async(req,res)=>{
+app.patch("/api/supplier-dashboard/purchase-orders/:id/status",requireSupplierDashboard,requireEligibleSupplier,async(req,res)=>{
   const id=clean(req.params.id,80),to=clean(req.body?.status,24),note=clean(req.body?.note,500)||null;
   const acceptedQty=clean(req.body?.acceptedQuantity,60)||null,batchNo=clean(req.body?.batchNo,60)||null;
   const expected=req.body?.expectedCompletion?isoDate(req.body.expectedCompletion):null;
@@ -1794,12 +1841,13 @@ app.patch("/api/supplier-dashboard/purchase-orders/:id/status",requireSupplierDa
   const conn=await pool.getConnection();
   try{
     await conn.beginTransaction();
-    const [[po]]=await conn.execute("SELECT id,po_number,status,quantity FROM supplier_pos WHERE id=? AND supplier_id=? FOR UPDATE",[id,req.supplier.id]);
+    const [[po]]=await conn.execute("SELECT id,po_number,status,quantity,accepted_quantity,product_id FROM supplier_pos WHERE id=? AND supplier_id=? FOR UPDATE",[id,req.supplier.id]);
     if(!po){await conn.rollback();return res.status(404).json({error:"Purchase order not found."});}
     if(po.status===to){await conn.rollback();return res.json({ok:true,changed:false});}
     if(!RFQ.canPoTransition(po.status,to)){await conn.rollback();return res.status(409).json({error:"Cannot move this purchase order from "+RFQ.PO_STATES[po.status].label+" to "+RFQ.PO_STATES[to].label+"."});}
     if(to==="partially_accepted"){const aq=RFQ.parseQuantity(acceptedQty),pq=RFQ.parseQuantity(po.quantity);if(pq&&aq>=pq){await conn.rollback();return res.status(400).json({error:"For the full quantity choose Accept. Partial must be below "+pq+"."});}}
     await conn.execute("UPDATE supplier_pos SET status=?,status_changed_at=NOW(),supplier_note=COALESCE(?,supplier_note),accepted_quantity=COALESCE(?,accepted_quantity),batch_no=COALESCE(?,batch_no),expected_completion=COALESCE(?,expected_completion),production_started_at=IF(?='in_production',COALESCE(production_started_at,NOW()),production_started_at) WHERE id=?",[to,note,to==="partially_accepted"?acceptedQty:null,batchNo,expected,to,id]);
+    await applyCapacityHold(conn,po.product_id,capacityHold(po.status,po.quantity,po.accepted_quantity),capacityHold(to,po.quantity,acceptedQty||po.accepted_quantity));
     await audit(conn,{supplier:req.supplier},"supplier_po.status_change","supplier_po",id,{status:po.status},{status:to,note,acceptedQuantity:acceptedQty,batchNo,expectedCompletion:expected});
     const synced=await syncOrdersOfPo(conn,req,id);
     await conn.commit();
@@ -1809,7 +1857,7 @@ app.patch("/api/supplier-dashboard/purchase-orders/:id/status",requireSupplierDa
   finally{conn.release();}
 });
 // Supplier updates the expected completion date / batch number without changing the PO status.
-app.patch("/api/supplier-dashboard/purchase-orders/:id/schedule",requireSupplierDashboard,async(req,res)=>{
+app.patch("/api/supplier-dashboard/purchase-orders/:id/schedule",requireSupplierDashboard,requireEligibleSupplier,async(req,res)=>{
   const id=clean(req.params.id,80),batchNo=clean(req.body?.batchNo,60)||null;
   const expected=req.body?.expectedCompletion?isoDate(req.body.expectedCompletion):null;
   if(req.body?.expectedCompletion&&!expected)return res.status(400).json({error:"Enter a valid expected completion date."});
@@ -2140,6 +2188,31 @@ app.get("/api/admin/sd-orders",requireAdmin,async(req,res)=>{
   try{const [rows]=await pool.execute("SELECT s.id,s.sd_number,s.title,s.created_at,(SELECT COUNT(*) FROM sd_order_items i WHERE i.sd_order_id=s.id) buyer_orders,(SELECT COUNT(*) FROM supplier_pos p WHERE p.sd_order_id=s.id AND p.status NOT IN ('declined','cancelled')) live_pos FROM sd_orders s ORDER BY s.created_at DESC LIMIT 200");res.json({sdOrders:rows});}
   catch(error){console.error(error);res.status(500).json({error:"Could not load SupplyDesk orders."});}
 });
+// Internal SupplyDesk view: total requirement split by region and supplier. Buyers and suppliers never see this.
+app.get("/api/admin/sd-orders/:id/allocation",requireAdmin,async(req,res)=>{
+  try{
+    const id=clean(req.params.id,80);
+    const [[sd]]=await pool.execute("SELECT id,sd_number,title FROM sd_orders WHERE id=?",[id]);
+    if(!sd)return res.status(404).json({error:"SupplyDesk order not found."});
+    const [items]=await pool.execute("SELECT o.quantity FROM sd_order_items i JOIN orders o ON o.id=i.buyer_order_id WHERE i.sd_order_id=?",[id]);
+    const totalRequirement=items.reduce((t,i)=>t+(RFQ.parseQuantity(i.quantity)||0),0);
+    const [pos]=await pool.execute(
+      `SELECT po.id,po.po_number,po.status,po.quantity,po.supplier_id,s.legal_name,s.trade_name,s.country,s.city,
+              COALESCE(NULLIF(p.origin_region,''),NULLIF(s.city,''),s.country) AS region,
+              (SELECT COALESCE(SUM(l.quantity),0) FROM supplier_po_lines l WHERE l.supplier_po_id=po.id) AS line_qty
+       FROM supplier_pos po JOIN supplier_profiles s ON s.id=po.supplier_id LEFT JOIN supplier_products p ON p.id=po.product_id
+       WHERE po.sd_order_id=? AND po.status NOT IN ('declined','cancelled') ORDER BY region,po.created_at`,[id]);
+    const regions=new Map();let allocated=0;
+    for(const po of pos){
+      const qty=Number(po.line_qty)||RFQ.parseQuantity(po.quantity)||0;allocated+=qty;
+      const r=regions.get(po.region)||{region:po.region,total:0,suppliers:[]};
+      r.total+=qty;
+      r.suppliers.push({supplier:isSuper(req)?(po.trade_name||po.legal_name):supplierAlias(po.supplier_id),quantity:qty,poNumber:po.po_number,status:po.status,statusLabel:RFQ.PO_STATES[po.status]?.label||po.status});
+      regions.set(po.region,r);
+    }
+    res.json({sdOrder:sd,totalRequirement,allocated,unallocated:Math.max(0,Math.round((totalRequirement-allocated)*100)/100),regions:[...regions.values()],detailsRestricted:!isSuper(req)});
+  }catch(error){console.error("Allocation view failed:",error);res.status(500).json({error:"Could not load the allocation view."});}
+});
 app.get("/api/admin/sd-orders/:id",requireAdmin,async(req,res)=>{
   try{const d=await sdOrderDetail(req,clean(req.params.id,80));if(!d)return res.status(404).json({error:"SupplyDesk order not found."});res.json(d);}
   catch(error){console.error(error);res.status(500).json({error:"Could not load the SupplyDesk order."});}
@@ -2233,7 +2306,7 @@ app.get("/api/admin/requirements/:id/capability-matches",requireAdmin,async(req,
       `SELECT p.id,p.product_name,p.description,p.category,p.subcategory,p.moq,p.unit,p.monthly_capacity,p.available_capacity,p.capacity_unit,p.lead_time_days,p.origin_region,p.capacity_updated_at,p.capability_code,
               s.id supplier_id,s.legal_name,s.trade_name,s.country,s.city
        FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id
-       WHERE p.status='approved' AND s.verified=1 AND s.published=1 LIMIT 2000`);
+       WHERE p.status='approved' AND p.product_verified=1 AND p.capacity_verified=1 AND s.verified=1 AND s.published=1 LIMIT 2000`);
     const matches=caps.map(c=>({c,sc:RFQ.scoreCapability(r,c)})).filter(x=>x.sc.eligible&&x.sc.score>0)
       .sort((a,b)=>b.sc.score-a.sc.score).slice(0,30)
       .map(({c,sc})=>({productId:c.id,capabilityCode:c.capability_code,productName:c.product_name,category:c.category,subcategory:c.subcategory,supplierId:isSuper(req)?c.supplier_id:null,supplierName:isSuper(req)?(c.trade_name||c.legal_name):supplierAlias(c.supplier_id),country:isSuper(req)?c.country:"",region:c.origin_region||"",
@@ -2453,11 +2526,11 @@ app.post("/api/supplier-dashboard/request-otp", supplierDashboardLimiter, async 
   if(!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({error:"Please enter a valid business email address.",requestId});
   try{
     const [[supplier]]=await pool.execute(
-      "SELECT id,business_email,verified,published FROM supplier_profiles WHERE LOWER(TRIM(business_email))=LOWER(TRIM(?)) LIMIT 1",
+      "SELECT id,business_email,verified,published,onboarding_status FROM supplier_profiles WHERE LOWER(TRIM(business_email))=LOWER(TRIM(?)) LIMIT 1",
       [email]
     );
-    if(!supplier) return res.status(404).json({error:"This email is not registered as a verified SupplyDesk supplier.",requestId});
-    if(!supplier.verified||!supplier.published) return res.status(403).json({error:"This supplier account is not currently enabled for dashboard access.",requestId});
+    if(!supplier) return res.status(404).json({error:"This email is not registered as a SupplyDesk supplier. Create a free supplier account first.",requestId});
+    // Rejected / unapproved suppliers can still sign in to see their status and resubmit; procurement APIs stay closed.
     if(!supplier.business_email) return res.status(400).json({error:"Supplier business email is missing.",requestId});
 
     if(String(process.env.E2E_TEST_MODE||"").toLowerCase()==="true"&&clean(process.env.E2E_TEST_KEY,256)&&safeEqual(clean(req.get("x-e2e-key"),256),clean(process.env.E2E_TEST_KEY,256))){
@@ -2498,7 +2571,6 @@ app.post("/api/supplier-dashboard/verify-otp", supplierDashboardLimiter, async (
       FROM supplier_dashboard_otps o
       JOIN supplier_profiles s ON s.id=o.supplier_id
       WHERE LOWER(TRIM(s.business_email))=LOWER(TRIM(?))
-        AND s.verified=1 AND s.published=1
         AND o.used_at IS NULL AND o.expires_at>NOW()
       ORDER BY o.created_at DESC LIMIT 5`,[email]);
 
@@ -2587,7 +2659,7 @@ app.get("/api/supplier-dashboard", requireSupplierDashboard, async (req,res) => 
         id:req.supplier.id,legal_name:req.supplier.legal_name,trade_name:req.supplier.trade_name,business_type:req.supplier.business_type,
         country:req.supplier.country,city:req.supplier.city,address:req.supplier.address,website:req.supplier.website,
         business_email:req.supplier.business_email,business_phone:req.supplier.business_phone,contact_person:req.supplier.contact_person,
-        designation:req.supplier.designation,category:req.supplier.category,subcategory:req.supplier.subcategory,profileDetails:(()=>{try{return JSON.parse(req.supplier.profile_details_json||"{}")}catch{return {}}})(),verified:true
+        designation:req.supplier.designation,category:req.supplier.category,subcategory:req.supplier.subcategory,profileDetails:(()=>{try{return JSON.parse(req.supplier.profile_details_json||"{}")}catch{return {}}})(),verified:Boolean(req.supplier.eligible),eligible:Boolean(req.supplier.eligible),onboardingStatus:req.supplier.onboarding_status||"account_verified",onboardingLabel:ONBOARDING_LABELS[req.supplier.onboarding_status]||"",agreementSigned:Boolean(req.supplier.agreement_signed_at)
       },
       metrics:{
         product_count:Number(counts.product_count||0),approved_products:Number(counts.approved_products||0),
@@ -2600,6 +2672,233 @@ app.get("/api/supplier-dashboard", requireSupplierDashboard, async (req,res) => 
     console.error("Supplier dashboard load failed:",error);
     res.status(500).json({error:"Could not load dashboard."});
   }
+});
+
+// ---------------------------------------------------------------------------
+// Supplier quick signup (email OTP) -> account created -> Supplier Dashboard.
+// Email OTP proves the mailbox ONLY. It is never business/KYC verification.
+// ---------------------------------------------------------------------------
+const supplierSignupRequestLimiter = rateLimit({
+  skip: e2eSkipLimit, windowMs: 60 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false,
+  message: { error: "Too many verification codes requested. Please wait a while and try again." }
+});
+const supplierSignupVerifyLimiter = rateLimit({
+  skip: e2eSkipLimit, windowMs: 60 * 60 * 1000, limit: 40, standardHeaders: true, legacyHeaders: false,
+  message: { error: "Too many verification attempts. Please wait a while and try again." }
+});
+async function sendSignupOtpMail(to, otp){
+  const mail=buildProfessionalEmail({
+    preheader:"Your SupplyDesk supplier signup code",
+    title:"Verify your email",
+    intro:"Use the verification code below to create your SupplyDesk supplier account.",
+    bodyHtml:'<div style="margin:24px 0;padding:20px;background:#eef9f8;border:1px solid #c9ebe5;border-radius:12px;text-align:center"><div style="font-size:12px;color:#58717c;text-transform:uppercase;font-weight:700;letter-spacing:.08em">Verification code</div><div style="font-size:34px;font-weight:800;letter-spacing:.18em;color:#0b2a35;margin-top:6px">'+otp+'</div></div><p style="font-size:13px;color:#58717c">Valid for 10 minutes.</p>',
+    textLines:["Verification code: "+otp,"Valid for 10 minutes.","If you did not request this code, you can safely ignore this email."]
+  });
+  return mailer.sendMail({from:process.env.SMTP_FROM,replyTo:process.env.SMTP_FROM,to,subject:"SupplyDesk | Supplier Signup Verification",text:mail.text,html:mail.html});
+}
+app.post("/api/supplier-signup/request-otp", supplierSignupRequestLimiter, async (req,res)=>{
+  if(clean(req.body?.website_confirm,100)) return res.status(400).json({error:"Invalid submission."});
+  const email=clean(req.body?.email,255).toLowerCase();
+  if(!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({error:"Please enter a valid business email."});
+  const f=readSignupFields(req.body);
+  if(f.error) return res.status(400).json({error:f.error});
+  const authorizedE2e=String(process.env.E2E_TEST_MODE||"").toLowerCase()==="true"&&clean(process.env.E2E_TEST_KEY,256)&&safeEqual(clean(req.get("x-e2e-key"),256),clean(process.env.E2E_TEST_KEY,256));
+  if(!authorizedE2e&&(!process.env.SMTP_HOST||!process.env.SMTP_USER||!process.env.SMTP_PASSWORD||!process.env.SMTP_FROM)) return res.status(503).json({error:"Email verification service is not configured yet."});
+  try{
+    const [[known]]=await pool.execute("SELECT id FROM supplier_profiles WHERE LOWER(TRIM(business_email))=? LIMIT 1",[email]);
+    if(known) return res.status(409).json({error:"This email already has a supplier account. Please log in instead.",code:"account_exists"});
+    const [[blocked]]=await pool.execute("SELECT id FROM supplier_applications WHERE LOWER(TRIM(business_email))=? AND status='suspended' LIMIT 1",[email]);
+    if(blocked) return res.status(403).json({error:"This email cannot be used to create an account. Please contact SupplyDesk."});
+    const otp=String(crypto.randomInt(100000,1000000));
+    await pool.execute("UPDATE supplier_signup_otps SET expires_at=NOW() WHERE email=? AND used_at IS NULL AND expires_at>NOW()",[email]);
+    await pool.execute("INSERT INTO supplier_signup_otps (id,email,otp_hash,payload_json,expires_at) VALUES (?,?,?,?,DATE_ADD(NOW(),INTERVAL 10 MINUTE))",
+      [crypto.randomUUID(),email,hashToken(otp),JSON.stringify({company:f.company,contact:f.contact,phone:f.phone,country:f.country})]);
+    if(authorizedE2e) return res.json({ok:true,message:"Test verification code created.",expiresInMinutes:10,testOtp:otp});
+    await sendSignupOtpMail(email,otp);
+    res.json({ok:true,message:"Verification code sent to your email.",expiresInMinutes:10});
+  }catch(error){
+    console.error("Supplier signup OTP failed:",{code:error?.code,message:error?.message});
+    res.status(502).json({error:"Could not send the verification code. Please try again."});
+  }
+});
+app.post("/api/supplier-signup/verify-otp", supplierSignupVerifyLimiter, async (req,res)=>{
+  const email=clean(req.body?.email,255).toLowerCase(), otp=clean(req.body?.otp,10);
+  if(!/^\S+@\S+\.\S+$/.test(email)||!/^\d{6}$/.test(otp)) return res.status(400).json({error:"Enter the 6-digit verification code sent to your email."});
+  const conn=await pool.getConnection();
+  try{
+    const [[row]]=await conn.execute("SELECT id,otp_hash,payload_json,attempts FROM supplier_signup_otps WHERE email=? AND used_at IS NULL AND expires_at>NOW() ORDER BY created_at DESC LIMIT 1",[email]);
+    if(!row) return res.status(400).json({error:"Code expired. Please request a new code."});
+    if(Number(row.attempts)>=5) return res.status(429).json({error:"Too many incorrect attempts. Please request a new code."});
+    if(!safeEqual(hashToken(otp),row.otp_hash)){
+      await conn.execute("UPDATE supplier_signup_otps SET attempts=attempts+1 WHERE id=?",[row.id]);
+      return res.status(400).json({error:"Incorrect verification code."});
+    }
+    let f; try{f=JSON.parse(row.payload_json);}catch{f=null;}
+    if(!f||!f.company) return res.status(400).json({error:"Signup details missing. Please start again."});
+    await conn.beginTransaction();
+    const [[dup]]=await conn.execute("SELECT id FROM supplier_profiles WHERE LOWER(TRIM(business_email))=? LIMIT 1 FOR UPDATE",[email]);
+    if(dup){await conn.rollback();return res.status(409).json({error:"This email already has a supplier account. Please log in instead.",code:"account_exists"});}
+    // A supplier who used the old long application form (no account yet) claims that application instead of starting over.
+    const [[legacy]]=await conn.execute("SELECT id FROM supplier_applications WHERE LOWER(TRIM(business_email))=? AND status IN ('submitted','under_review','query') ORDER BY created_at DESC LIMIT 1",[email]);
+    let applicationId=legacy?.id, status="account_verified";
+    if(legacy){
+      status="business_verification_pending";
+    }else{
+      applicationId=crypto.randomUUID();
+      await conn.execute("INSERT INTO supplier_applications (id,legal_name,business_type,country,city,address,business_email,business_phone,contact_person,category,subcategory,status) VALUES (?,?,'',?,'','',?,?,?,'','','submitted')",
+        [applicationId,f.company,f.country,email,f.phone,f.contact]);
+    }
+    const profileId=crypto.randomUUID();
+    await conn.execute(
+      `INSERT INTO supplier_profiles (id,application_id,legal_name,business_type,country,city,address,business_email,business_phone,contact_person,category,subcategory,verified,published,onboarding_status,email_verified_at,status_updated_at)
+       SELECT ?,a.id,a.legal_name,a.business_type,a.country,a.city,a.address,a.business_email,a.business_phone,a.contact_person,a.category,a.subcategory,0,0,?,NOW(),NOW() FROM supplier_applications a WHERE a.id=?`,
+      [profileId,status,applicationId]);
+    await conn.execute("INSERT INTO supplier_onboarding_events (id,supplier_id,from_status,to_status,note,actor) VALUES (?,?,NULL,?,?,?)",[crypto.randomUUID(),profileId,status,legacy?"Account created; earlier application linked":"Account created (email verified only)","supplier:self"]);
+    await conn.execute("UPDATE supplier_signup_otps SET used_at=NOW() WHERE id=?",[row.id]);
+    const rawToken=crypto.randomBytes(32).toString("hex");
+    await conn.execute("INSERT INTO supplier_dashboard_tokens (id,supplier_id,token_hash,expires_at) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 24 HOUR))",[crypto.randomUUID(),profileId,dashboardTokenHash(rawToken)]);
+    await audit(conn,{supplier:{id:profileId},ip:req.ip},"supplier.signup","supplier",profileId,null,{status,linkedApplication:Boolean(legacy)});
+    await conn.commit();
+    res.json({ok:true,token:rawToken,onboardingStatus:status,dashboardUrl:"/supplier-dashboard.html",message:"Account created. Welcome to your Supplier Dashboard."});
+  }catch(error){
+    try{await conn.rollback();}catch{}
+    console.error("Supplier signup verification failed:",error);
+    res.status(500).json({error:"Could not create the account. Please try again."});
+  }finally{conn.release();}
+});
+
+// ---------------------------------------------------------------------------
+// Progressive onboarding wizard (8 steps) for the logged-in supplier.
+// ---------------------------------------------------------------------------
+const WIZARD_STEPS=[
+  {n:1,key:"business",title:"Business details"},
+  {n:2,key:"legal",title:"Legal / registration details"},
+  {n:3,key:"products",title:"Products & capabilities"},
+  {n:4,key:"capacity",title:"Capacity"},
+  {n:5,key:"leadtime",title:"Lead time"},
+  {n:6,key:"certifications",title:"Certifications"},
+  {n:7,key:"documents",title:"Business documents"},
+  {n:8,key:"photos",title:"Factory / business photos"}
+];
+const DOC_FILE_TYPES=["business_registration","tax_registration","licence_certificate","address_proof"];
+const onboardingUpload=(req,res,next)=>{req.applicationId=req.supplier.application_id;return upload.fields([
+  {name:"registrationDoc",maxCount:1},{name:"taxDoc",maxCount:1},{name:"licenceDoc",maxCount:1},{name:"addressProof",maxCount:1},
+  {name:"certificationDocs",maxCount:5},{name:"businessPhotos",maxCount:8}
+])(req,res,next);};
+async function loadOnboarding(supplier){
+  const [[a]]=await pool.execute("SELECT legal_name,trade_name,business_type,year_established,country,city,address,website,designation,category,subcategory,registration_number,tax_number,import_export_number,certification_details FROM supplier_applications WHERE id=?",[supplier.application_id]);
+  const [files]=await pool.execute("SELECT id,file_type,original_name,file_size,created_at FROM supplier_files WHERE application_id=? ORDER BY created_at",[supplier.application_id]);
+  const [[pc]]=await pool.execute("SELECT COUNT(*) total,SUM(monthly_capacity>0) with_capacity,SUM(lead_time_days>0) with_lead,SUM(product_verified=1) pv,SUM(capacity_verified=1) cv FROM supplier_products WHERE supplier_id=? AND status<>'archived'",[supplier.id]);
+  const [[prof]]=await pool.execute("SELECT legal_name,business_type,country,city,address,category,subcategory,trade_name,website,designation,wizard_json,onboarding_status,status_note FROM supplier_profiles WHERE id=?",[supplier.id]);
+  let wz={};try{wz=JSON.parse(prof.wizard_json||"{}");}catch{}
+  const has=(t)=>files.some(f=>t.includes(f.file_type));
+  const complete={
+    1:Boolean(prof.legal_name&&prof.business_type&&prof.country&&prof.city&&prof.address&&prof.category&&prof.subcategory),
+    2:Boolean((a?.registration_number||"").trim()||(a?.tax_number||"").trim()),
+    3:Number(pc.total)>0,
+    4:Number(pc.with_capacity)>0,
+    5:Number(pc.with_lead)>0,
+    6:Boolean((a?.certification_details||"").trim()||has(["certification"])||wz.noCertifications),
+    7:has(DOC_FILE_TYPES),
+    8:has(["business_photo","factory_photo"])
+  };
+  const steps=WIZARD_STEPS.map(s=>({...s,complete:Boolean(complete[s.n])}));
+  const required=[1,2,3,7];
+  const missing=required.filter(n=>!complete[n]).map(n=>WIZARD_STEPS[n-1].title);
+  return {
+    status:prof.onboarding_status,statusLabel:ONBOARDING_LABELS[prof.onboarding_status]||prof.onboarding_status,note:prof.status_note||"",
+    eligible:Boolean(supplier.eligible),agreementSigned:Boolean(supplier.agreement_signed_at),
+    steps,completedCount:steps.filter(s=>s.complete).length,current:(steps.find(s=>!s.complete)||{n:8}).n,
+    missingForSubmit:missing,canSubmit:!missing.length&&["account_verified","needs_resubmission"].includes(prof.onboarding_status),
+    locked:["business_verification_pending","business_verified","capability_verification_pending","capability_verified","supplydesk_approved"].includes(prof.onboarding_status),
+    data:{business:{legalName:prof.legal_name,tradeName:prof.trade_name||"",businessType:prof.business_type,yearEstablished:a?.year_established||"",country:prof.country,city:prof.city,address:prof.address||"",website:prof.website||"",designation:prof.designation||"",category:prof.category,subcategory:prof.subcategory},
+      legal:{registrationNumber:a?.registration_number||"",taxNumber:a?.tax_number||"",importExportNumber:a?.import_export_number||""},
+      certifications:{text:a?.certification_details||"",none:Boolean(wz.noCertifications)}},
+    products:{total:Number(pc.total||0),withCapacity:Number(pc.with_capacity||0),withLeadTime:Number(pc.with_lead||0),verified:Number(pc.pv||0),capacityVerified:Number(pc.cv||0)},
+    files
+  };
+}
+// Approved suppliers change their public profile through the existing review flow, not through the wizard.
+const requireOnboardingEditable=(req,res,next)=>{
+  if(["supplydesk_approved"].includes(req.supplier.onboarding_status)) return res.status(409).json({error:"Your profile is approved. Use Profile → Request update so SupplyDesk can review changes."});
+  next();
+};
+app.get("/api/supplier-dashboard/onboarding", requireSupplierDashboard, async (req,res)=>{
+  try{res.json(await loadOnboarding(req.supplier));}
+  catch(error){console.error("Onboarding load failed:",error);res.status(500).json({error:"Could not load onboarding."});}
+});
+app.put("/api/supplier-dashboard/onboarding/business", requireSupplierDashboard, requireOnboardingEditable, async (req,res)=>{
+  const b=req.body||{};
+  const v={legalName:clean(b.legalName,255),tradeName:clean(b.tradeName,255),businessType:clean(b.businessType,100),country:clean(b.country,100),city:clean(b.city,150),address:clean(b.address,4000),website:clean(b.website,500),designation:clean(b.designation,150),category:clean(b.category,180),subcategory:clean(b.subcategory,180)};
+  if(!v.legalName||!v.businessType||!v.country||!v.city||!v.address||!v.category||!v.subcategory) return res.status(400).json({error:"Please complete all required business details."});
+  if(!catalog[v.category]||!catalog[v.category].includes(v.subcategory)) return res.status(400).json({error:"Invalid category or sub-category."});
+  const year=b.yearEstablished?Number(b.yearEstablished):null;
+  if(year!==null&&(!Number.isInteger(year)||year<1800||year>new Date().getFullYear())) return res.status(400).json({error:"Please enter a valid year established."});
+  const conn=await pool.getConnection();
+  try{
+    await conn.beginTransaction();
+    await conn.execute("UPDATE supplier_applications SET legal_name=?,trade_name=?,business_type=?,year_established=?,country=?,city=?,address=?,website=?,designation=?,category=?,subcategory=? WHERE id=?",[v.legalName,v.tradeName||null,v.businessType,year,v.country,v.city,v.address,v.website||null,v.designation||null,v.category,v.subcategory,req.supplier.application_id]);
+    await conn.execute("UPDATE supplier_profiles SET legal_name=?,trade_name=?,business_type=?,country=?,city=?,address=?,website=?,designation=?,category=?,subcategory=? WHERE id=?",[v.legalName,v.tradeName||null,v.businessType,v.country,v.city,v.address,v.website||null,v.designation||null,v.category,v.subcategory,req.supplier.id]);
+    await conn.commit();
+    res.json({ok:true});
+  }catch(error){await conn.rollback();console.error("Onboarding business save failed:",error);res.status(500).json({error:"Could not save business details."});}
+  finally{conn.release();}
+});
+app.put("/api/supplier-dashboard/onboarding/legal", requireSupplierDashboard, requireOnboardingEditable, async (req,res)=>{
+  const reg=clean(req.body?.registrationNumber,180),tax=clean(req.body?.taxNumber,180),ie=clean(req.body?.importExportNumber,180);
+  if(!reg&&!tax) return res.status(400).json({error:"Enter at least a registration number or a tax number."});
+  try{
+    await pool.execute("UPDATE supplier_applications SET registration_number=?,tax_number=?,import_export_number=? WHERE id=?",[reg||null,tax||null,ie||null,req.supplier.application_id]);
+    res.json({ok:true});
+  }catch(error){console.error("Onboarding legal save failed:",error);res.status(500).json({error:"Could not save legal details."});}
+});
+app.put("/api/supplier-dashboard/onboarding/certifications", requireSupplierDashboard, requireOnboardingEditable, async (req,res)=>{
+  const text=clean(req.body?.text,4000),none=req.body?.none===true;
+  try{
+    await pool.execute("UPDATE supplier_applications SET certification_details=? WHERE id=?",[text||null,req.supplier.application_id]);
+    let wz={};try{wz=JSON.parse(req.supplier.wizard_json||"{}");}catch{}
+    wz.noCertifications=none&&!text;
+    await pool.execute("UPDATE supplier_profiles SET wizard_json=? WHERE id=?",[JSON.stringify(wz),req.supplier.id]);
+    res.json({ok:true});
+  }catch(error){console.error("Onboarding certifications save failed:",error);res.status(500).json({error:"Could not save certifications."});}
+});
+app.post("/api/supplier-dashboard/onboarding/files", requireSupplierDashboard, requireOnboardingEditable, onboardingUpload, optimizeUploads(), async (req,res)=>{
+  const files=req.files||{};
+  const map=[["registrationDoc","business_registration"],["taxDoc","tax_registration"],["licenceDoc","licence_certificate"],["addressProof","address_proof"],["certificationDocs","certification"],["businessPhotos","business_photo"]];
+  const rows=[];
+  for(const [field,type] of map) for(const file of files[field]||[]){
+    rows.push([crypto.randomUUID(),req.supplier.application_id,type,clean(file.originalname,255),path.basename(file.path),path.relative(UPLOAD_DIR,file.path).split(path.sep).join("/"),file.mimetype,file.size]);
+  }
+  if(!rows.length) return res.status(400).json({error:"Choose at least one file to upload."});
+  try{
+    // Single-slot document types are replaced, not duplicated.
+    for(const [field,type] of map){ if(["registrationDoc","taxDoc","licenceDoc","addressProof"].includes(field)&&(files[field]||[]).length) await pool.execute("DELETE FROM supplier_files WHERE application_id=? AND file_type=?",[req.supplier.application_id,type]); }
+    await pool.query("INSERT INTO supplier_files (id,application_id,file_type,original_name,stored_name,relative_path,mime_type,file_size) VALUES ?",[rows]);
+    res.status(201).json({ok:true,uploaded:rows.length});
+  }catch(error){console.error("Onboarding upload failed:",error);res.status(500).json({error:"Could not save the files."});}
+});
+app.delete("/api/supplier-dashboard/onboarding/files/:id", requireSupplierDashboard, requireOnboardingEditable, async (req,res)=>{
+  try{
+    const [r]=await pool.execute("DELETE FROM supplier_files WHERE id=? AND application_id=?",[clean(req.params.id,80),req.supplier.application_id]);
+    if(!r.affectedRows) return res.status(404).json({error:"File not found."});
+    res.json({ok:true});
+  }catch(error){console.error("Onboarding file delete failed:",error);res.status(500).json({error:"Could not remove the file."});}
+});
+app.post("/api/supplier-dashboard/onboarding/submit", requireSupplierDashboard, async (req,res)=>{
+  const conn=await pool.getConnection();
+  try{
+    const ob=await loadOnboarding(req.supplier);
+    if(!["account_verified","needs_resubmission"].includes(ob.status)) return res.status(409).json({error:"Your account is already "+ob.statusLabel.toLowerCase()+"."});
+    if(ob.missingForSubmit.length) return res.status(400).json({error:"Please complete: "+ob.missingForSubmit.join(", ")+".",missing:ob.missingForSubmit});
+    await conn.beginTransaction();
+    await conn.execute("UPDATE supplier_profiles SET onboarding_status='business_verification_pending',status_note=NULL,status_updated_at=NOW(),status_updated_by='supplier:self' WHERE id=?",[req.supplier.id]);
+    await conn.execute("UPDATE supplier_applications SET status='under_review' WHERE id=? AND status IN ('submitted','query')",[req.supplier.application_id]);
+    await conn.execute("INSERT INTO supplier_onboarding_events (id,supplier_id,from_status,to_status,note,actor) VALUES (?,?,?,?,?,?)",[crypto.randomUUID(),req.supplier.id,ob.status,"business_verification_pending","Submitted for business verification","supplier:self"]);
+    await audit(conn,{supplier:req.supplier,ip:req.ip},"supplier.onboarding_submitted","supplier",req.supplier.id,{status:ob.status},{status:"business_verification_pending"});
+    await conn.commit();
+    res.json({ok:true,status:"business_verification_pending",message:"Submitted. SupplyDesk will verify your business. You can keep completing your profile meanwhile."});
+  }catch(error){try{await conn.rollback();}catch{}console.error("Onboarding submit failed:",error);res.status(500).json({error:"Could not submit for verification."});}
+  finally{conn.release();}
 });
 
 app.post("/api/supplier-dashboard/logout", requireSupplierDashboard, async (req,res) => {
@@ -2700,7 +2999,7 @@ app.patch("/api/supplier-dashboard/products/:id", requireSupplierDashboard, asyn
   const keys=Object.keys(fields);
   if(!keys.length) return res.status(400).json({error:"No changes submitted."});
   const set=keys.map(k=>k+"=?").join(",");
-  await pool.execute("UPDATE supplier_products SET "+set+", status='pending', admin_notes=NULL, reviewed_at=NULL, reviewed_by=NULL WHERE id=? AND supplier_id=?",[...keys.map(k=>fields[k]),id,req.supplier.id]);
+  await pool.execute("UPDATE supplier_products SET "+set+", status='pending', product_verified=0, admin_notes=NULL, reviewed_at=NULL, reviewed_by=NULL WHERE id=? AND supplier_id=?",[...keys.map(k=>fields[k]),id,req.supplier.id]);
   res.json({ok:true,message:"Product changes submitted for review."});
 });
 
@@ -2716,8 +3015,10 @@ app.patch("/api/supplier-dashboard/products/:id/capacity", requireSupplierDashbo
     if(!old) return res.status(404).json({error:"Product not found."});
     const monthly=c.monthly_capacity??old.monthly_capacity, available=c.available_capacity??old.available_capacity;
     if(monthly!=null&&available!=null&&Number(available)>Number(monthly)) return res.status(400).json({error:"Available capacity cannot be more than monthly capacity."});
-    await pool.execute("UPDATE supplier_products SET monthly_capacity=?,available_capacity=?,capacity_unit=?,lead_time_days=?,origin_region=?,capacity_updated_at=NOW() WHERE id=? AND supplier_id=?",
-      [monthly,available,c.capacity_unit??old.capacity_unit,c.lead_time_days??old.lead_time_days,c.origin_region??old.origin_region,id,req.supplier.id]);
+    // Day-to-day "available" changes keep the verification; a changed installed (monthly) capacity must be re-verified by SupplyDesk.
+    const installedChanged=old.monthly_capacity!=null&&monthly!=null&&Number(old.monthly_capacity)!==Number(monthly);
+    await pool.execute("UPDATE supplier_products SET monthly_capacity=?,available_capacity=?,capacity_unit=?,lead_time_days=?,origin_region=?,capacity_updated_at=NOW(),capacity_verified=IF(?,0,capacity_verified) WHERE id=? AND supplier_id=?",
+      [monthly,available,c.capacity_unit??old.capacity_unit,c.lead_time_days??old.lead_time_days,c.origin_region??old.origin_region,installedChanged?1:0,id,req.supplier.id]);
     await audit(pool,req,"capacity.updated","product",id,{monthly:old.monthly_capacity,available:old.available_capacity,leadTimeDays:old.lead_time_days},{monthly,available,leadTimeDays:c.lead_time_days??old.lead_time_days});
     res.json({ok:true,message:"Capacity updated."});
   }catch(error){console.error("Capacity update failed:",error);res.status(500).json({error:"Could not update capacity."});}
@@ -2762,7 +3063,7 @@ app.delete("/api/supplier-dashboard/products/:productId/images/:imageId", requir
 
 app.get("/api/products/:productId/images/:imageId", async (req,res)=>{
   try{
-    const [[f]]=await pool.execute("SELECT f.relative_path,f.original_name,f.mime_type FROM supplier_product_files f JOIN supplier_products p ON p.id=f.product_id JOIN supplier_profiles s ON s.id=p.supplier_id WHERE f.id=? AND f.product_id=? AND f.status='approved' AND p.status='approved' AND s.verified=1 AND s.published=1",[clean(req.params.imageId,80),clean(req.params.productId,80)]);
+    const [[f]]=await pool.execute("SELECT f.relative_path,f.original_name,f.mime_type FROM supplier_product_files f JOIN supplier_products p ON p.id=f.product_id JOIN supplier_profiles s ON s.id=p.supplier_id WHERE f.id=? AND f.status='approved' AND p.status='approved' AND p.product_verified=1 AND s.verified=1 AND s.published=1",[clean(req.params.imageId,80)]);
     if(!f)return res.status(404).json({error:"Image not found."});
     const absolute=path.resolve(UPLOAD_DIR,f.relative_path),root=path.resolve(UPLOAD_DIR);
     if(!absolute.startsWith(root+path.sep)||!fs.existsSync(absolute))return res.status(404).json({error:"Image not found."});
@@ -2824,66 +3125,99 @@ app.get("/api/suppliers/:id/products", async (req,res) => {
   }catch(error){console.error(error);res.status(500).json({error:"Could not load supplier products."});}
 });
 
+// ---------------------------------------------------------------------------
+// PUBLIC = SupplyDesk fulfilment capability. Supplier rows are merged into one capability per
+// (category, sub-category, product name); supplier identity and supplier-wise capacity never leave the server.
+// Only capacity that is eligible + approved + capacity-verified + fresh is counted (never stale, rejected, committed or allocated).
+// ---------------------------------------------------------------------------
+const normName=(v)=>String(v||"").toLowerCase().replace(/\s+/g," ").trim();
+const capabilityKey=(r)=>[normName(r.category),normName(r.subcategory),normName(r.product_name)].join("|");
+const publicCapabilityId=(key)=>"cap-"+crypto.createHash("sha1").update(key).digest("hex").slice(0,12);
+function floorSig(n,digits=2){n=Number(n);if(!Number.isFinite(n)||n<=0)return 0;const p=Math.pow(10,Math.max(String(Math.floor(n)).length-digits,0));return Math.floor(n/p)*p;}
+function aggregateCapability(rows){
+  const sorted=rows.slice().sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
+  const latest=rows.slice().sort((a,b)=>new Date(b.updated_at)-new Date(a.updated_at))[0];
+  const now=Date.now(),stale=CAPACITY_STALE_DAYS*86400000;
+  const counted=rows.filter(r=>Number(r.capacity_verified)===1&&r.capacity_updated_at&&now-new Date(r.capacity_updated_at).getTime()<=stale&&Number(r.monthly_capacity)>0);
+  const monthly=counted.reduce((t,r)=>t+Number(r.monthly_capacity||0),0);
+  const free=counted.reduce((t,r)=>t+Math.max(Number(r.available_capacity||0)-Number(r.allocated_capacity||0)-Number(r.committed_capacity||0),0),0);
+  const leads=counted.map(r=>Number(r.lead_time_days)).filter(n=>n>0);
+  const byCountry={};for(const r of rows){byCountry[r.country]=(byCountry[r.country]||0)+1;}
+  const countries=Object.keys(byCountry).filter(Boolean).sort((a,b)=>byCountry[b]-byCountry[a]);
+  const updated=counted.length?new Date(Math.max(...counted.map(r=>new Date(r.capacity_updated_at).getTime()))):null;
+  return {
+    id:publicCapabilityId(capabilityKey(latest)),name:latest.product_name,category:latest.category,subcategory:latest.subcategory,
+    description:latest.description,moq:latest.moq,unit:latest.unit,market_scope:latest.market_scope,countries,country:countries[0]||"",
+    capabilityCode:sorted[0].capability_code||"",
+    capacity:{
+      band:capacityBand(monthly),
+      // An exact aggregate is shown only when 2+ suppliers contribute, so it can never equal one supplier's own figure.
+      available:new Set(counted.map(r=>r.supplier_id)).size>=2?floorSig(free):null,unit:latest.capacity_unit||latest.unit||"",
+      status:counted.length?capacityStatus(monthly,free):"unknown",stale:!counted.length,
+      leadTimeDays:leads.length?Math.min(...leads):null,leadTimeMaxDays:leads.length?Math.max(...leads):null,
+      region:"",updatedAt:updated?updated.toISOString():null
+    },
+    imageRow:rows.find(r=>r.image_id)||null,
+    // internal only (never serialised): member products, best-capacity first
+    members:rows.slice().sort((a,b)=>(Number(b.capacity_verified)-Number(a.capacity_verified))||(Math.max(Number(b.available_capacity||0)-Number(b.allocated_capacity||0)-Number(b.committed_capacity||0),0)-Math.max(Number(a.available_capacity||0)-Number(a.allocated_capacity||0)-Number(a.committed_capacity||0),0)))
+  };
+}
+async function loadPublicCapabilities(){
+  const [rows]=await pool.execute(
+    `SELECT p.id,p.product_name,p.category,p.subcategory,p.description,p.moq,p.unit,p.market_scope,p.created_at,p.updated_at,
+            p.monthly_capacity,p.available_capacity,p.allocated_capacity,p.committed_capacity,p.capacity_unit,p.lead_time_days,
+            p.capacity_updated_at,p.capacity_verified,p.capability_code,p.supplier_id,s.country,
+            (SELECT f.id FROM supplier_product_files f WHERE f.product_id=p.id AND f.status='approved' ORDER BY f.created_at LIMIT 1) AS image_id
+     FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id
+     WHERE p.status='approved' AND p.product_verified=1 AND s.verified=1 AND s.published=1
+     ORDER BY p.updated_at DESC LIMIT 3000`);
+  const groups=new Map();
+  for(const r of rows){const k=capabilityKey(r);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r);}
+  return [...groups.values()].map(aggregateCapability);
+}
+function publicCapabilityJson(g){
+  const base={
+    id:g.id,name:g.name,type:"product",country:g.country,city:"",region:"",
+    market:g.market_scope,desc:g.description||`${g.category} · ${g.subcategory}`,category:g.category,
+    subcategories:[g.subcategory],verified:true,moq:g.moq||"",unit:g.unit||"",
+    capabilityCode:g.capabilityCode,capacity:g.capacity,
+    imageUrl:g.imageRow?"/api/products/"+encodeURIComponent(g.id)+"/images/"+encodeURIComponent(g.imageRow.image_id):""
+  };
+  return base;
+}
+// A buyer references a capability by its public id (or, for old links, a legacy product id). SupplyDesk picks the supplier internally.
+async function resolveCapabilityMember(publicId){
+  const groups=await loadPublicCapabilities();
+  const g=groups.find(x=>x.id===publicId)||groups.find(x=>x.members.some(m=>m.id===publicId));
+  return g?{group:g,member:g.members[0]}:null;
+}
+
 app.get("/api/products", async (req,res) => {
   const q=clean(req.query.q,200).toLowerCase();
   const category=clean(req.query.category,180);
   const country=clean(req.query.country,100);
-  const params=[];
-  let sql=`SELECT p.id,p.product_name,p.category,p.subcategory,p.description,p.moq,p.unit,p.market_scope,
-                   p.monthly_capacity,p.available_capacity,p.capacity_unit,p.lead_time_days,p.origin_region,p.capacity_updated_at,p.capability_code,
-                   s.id AS supplier_id,s.legal_name,s.trade_name,s.business_type,s.country,s.city,
-                   (SELECT f.id FROM supplier_product_files f WHERE f.product_id=p.id AND f.status='approved' ORDER BY f.created_at LIMIT 1) AS image_id
-            FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id
-            WHERE p.status='approved' AND s.verified=1 AND s.published=1`;
-  if(category){sql+=" AND p.category=?";params.push(category);}
-  if(country){sql+=" AND s.country=?";params.push(country);}
-  if(q){
-    const like="%"+q+"%";
-    if(HIDE_SUPPLIERS){
-      sql+=" AND (LOWER(p.product_name) LIKE ? OR LOWER(p.category) LIKE ? OR LOWER(p.subcategory) LIKE ? OR LOWER(COALESCE(p.description,'')) LIKE ? OR LOWER(COALESCE(p.capability_code,'')) LIKE ?)";
-      params.push(like,like,like,like,like);
-    }else{
-      sql+=" AND (LOWER(p.product_name) LIKE ? OR LOWER(p.category) LIKE ? OR LOWER(p.subcategory) LIKE ? OR LOWER(COALESCE(p.description,'')) LIKE ? OR LOWER(s.legal_name) LIKE ? OR LOWER(COALESCE(s.trade_name,'')) LIKE ?)";
-      params.push(like,like,like,like,like,like);
-    }
-  }
-  sql+=" ORDER BY p.updated_at DESC LIMIT 200";
   try{
-    const [rows]=await pool.execute(sql,params);
-    res.json({products:rows.map(p=>{
-      const base={
-        id:p.id,name:p.product_name,type:"product",country:p.country,
-        market:p.market_scope,desc:p.description||`${p.category} · ${p.subcategory}`,category:p.category,
-        subcategories:[p.subcategory],verified:true,moq:p.moq||"",unit:p.unit||"",
-        capabilityCode:p.capability_code||"",capacity:publicCapacity(p),
-        imageUrl:p.image_id?"/api/products/"+encodeURIComponent(p.id)+"/images/"+encodeURIComponent(p.image_id):""
-      };
-      if(HIDE_SUPPLIERS) return {...base,city:"",region:p.origin_region||"",tags:[p.category,p.subcategory]};
-      return {...base,city:p.city,tags:[p.category,p.subcategory,p.business_type],supplierId:p.supplier_id,supplierName:p.trade_name||p.legal_name};
-    })});
+    let groups=await loadPublicCapabilities();
+    if(category) groups=groups.filter(g=>g.category===category);
+    if(country) groups=groups.filter(g=>g.countries.includes(country));
+    if(q) groups=groups.filter(g=>[g.name,g.category,g.subcategory,g.description||"",g.capabilityCode].some(v=>String(v||"").toLowerCase().includes(q)));
+    res.json({products:groups.slice(0,200).map(publicCapabilityJson)});
   }catch(error){console.error(error);res.status(500).json({error:"Could not load products."});}
 });
 
 app.get("/api/products/:id", async (req,res) => {
   try{
-    const [[p]]=await pool.execute(
-      `SELECT p.id,p.product_name,p.category,p.subcategory,p.description,p.moq,p.unit,p.market_scope,
-              p.monthly_capacity,p.available_capacity,p.capacity_unit,p.lead_time_days,p.origin_region,p.capacity_updated_at,p.capability_code,
-              s.id AS supplier_id,s.legal_name,s.trade_name,s.business_type,s.country,s.city,s.website
-       FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id
-       WHERE p.id=? AND p.status='approved' AND s.verified=1 AND s.published=1`,
-      [req.params.id]
-    );
-    if(!p) return res.status(404).json({error:"Product not found."});
-    const [images]=await pool.execute("SELECT id,original_name FROM supplier_product_files WHERE product_id=? AND status='approved' ORDER BY created_at",[p.id]);
+    const r=await resolveCapabilityMember(clean(req.params.id,80));
+    if(!r) return res.status(404).json({error:"Product not found."});
+    const g=r.group;
+    const ids=g.members.map(m=>m.id);
+    const [images]=ids.length?await pool.execute("SELECT id,original_name FROM supplier_product_files WHERE product_id IN ("+ids.map(()=>"?").join(",")+") AND status='approved' ORDER BY created_at LIMIT 8",ids):[[]];
     const product={
-      id:p.id,name:p.product_name,category:p.category,subcategory:p.subcategory,description:p.description,
-      moq:p.moq,unit:p.unit,market_scope:p.market_scope,country:p.country,
-      capabilityCode:p.capability_code||"",capacity:publicCapacity(p),
-      images:images.map(x=>({id:x.id,name:x.original_name,url:"/api/products/"+encodeURIComponent(p.id)+"/images/"+encodeURIComponent(x.id)}))
+      id:g.id,name:g.name,category:g.category,subcategory:g.subcategory,description:g.description,
+      moq:g.moq,unit:g.unit,market_scope:g.market_scope,country:g.country,region:"",
+      capabilityCode:g.capabilityCode,capacity:g.capacity,
+      images:images.map((x,i)=>({id:x.id,name:"Product image "+(i+1),url:"/api/products/"+encodeURIComponent(g.id)+"/images/"+encodeURIComponent(x.id)}))
     };
-    if(HIDE_SUPPLIERS){ product.region=p.origin_region||""; }
-    else Object.assign(product,{supplierId:p.supplier_id,supplierName:p.trade_name||p.legal_name,supplierType:p.business_type,city:p.city,website:p.website});
     res.json({product});
   }catch(error){console.error(error);res.status(500).json({error:"Could not load product."});}
 });
@@ -2906,15 +3240,17 @@ app.get("/api/admin/applications", requireAdmin, async (req, res) => {
   const status = clean(req.query.status, 40);
   const allowed = ["submitted","under_review","query","approved","rejected","suspended"];
   const params = [];
-  let sql = `SELECT id, legal_name, trade_name, business_type, country, city, business_email,
-                    category, subcategory, status, submitted_at, reviewed_at
-             FROM supplier_applications`;
+  let sql = `SELECT a.id, a.legal_name, a.trade_name, a.business_type, a.country, a.city, a.business_email,
+                    a.category, a.subcategory, a.status, a.submitted_at, a.reviewed_at,
+                    p.id AS profile_id, p.onboarding_status, p.agreement_signed_at IS NOT NULL AS agreement_signed
+             FROM supplier_applications a LEFT JOIN supplier_profiles p ON p.application_id = a.id`;
+  const onb = clean(req.query.onboarding, 40);
 
-  if (allowed.includes(status)) {
-    sql += " WHERE status = ?";
-    params.push(status);
-  }
-  sql += " ORDER BY submitted_at DESC LIMIT 200";
+  const where = [];
+  if (allowed.includes(status)) { where.push("a.status = ?"); params.push(status); }
+  if (ONBOARDING_STATES.includes(onb)) { where.push("p.onboarding_status = ?"); params.push(onb); }
+  if (where.length) sql += " WHERE " + where.join(" AND ");
+  sql += " ORDER BY a.submitted_at DESC LIMIT 200";
 
   try {
     const [rows] = await pool.execute(sql, params);
@@ -3057,11 +3393,59 @@ app.get("/api/admin/products/:id/images", requireAdmin, async (req,res)=>{
   catch(error){res.status(500).json({error:"Could not load product images."});}
 });
 
+// Admin: verify (or revoke) a product's capacity. Only verified capacity is counted in public availability and procurement.
+app.post("/api/admin/products/:id/capacity-verification", requireAdmin, async (req,res)=>{
+  const id=clean(req.params.id,80),verified=req.body?.verified!==false;
+  try{
+    const [[p]]=await pool.execute("SELECT id,status,monthly_capacity,capacity_verified FROM supplier_products WHERE id=?",[id]);
+    if(!p) return res.status(404).json({error:"Product not found."});
+    if(verified&&p.status!=="approved") return res.status(400).json({error:"Approve the product before verifying its capacity."});
+    if(verified&&!(Number(p.monthly_capacity)>0)) return res.status(400).json({error:"The supplier has not entered a monthly capacity yet."});
+    await pool.execute("UPDATE supplier_products SET capacity_verified=?,capacity_verified_at=IF(?,NOW(),NULL) WHERE id=?",[verified?1:0,verified?1:0,id]);
+    await audit(pool,req,"capacity.verification","product",id,{verified:Boolean(p.capacity_verified)},{verified});
+    res.json({ok:true,capacityVerified:verified});
+  }catch(error){console.error("Capacity verification failed:",error);res.status(500).json({error:"Could not update capacity verification."});}
+});
+// Admin: move a supplier through the onboarding state machine. Eligibility (verified/published) is derived from it.
+app.patch("/api/admin/suppliers/:id/onboarding", requireAdmin, async (req,res)=>{
+  const key=clean(req.params.id,80),to=clean(req.body?.status,40),note=clean(req.body?.note,1500),agreement=req.body?.agreementSigned;
+  if(!ONBOARDING_STATES.includes(to)) return res.status(400).json({error:"Invalid onboarding status."});
+  if(["rejected","needs_resubmission"].includes(to)&&!note) return res.status(400).json({error:"Add a reason so the supplier knows what to fix."});
+  const conn=await pool.getConnection();
+  try{
+    await conn.beginTransaction();
+    const [[p]]=await conn.execute("SELECT id,application_id,onboarding_status,agreement_signed_at FROM supplier_profiles WHERE id=? OR application_id=? LIMIT 1 FOR UPDATE",[key,key]);
+    if(!p){await conn.rollback();return res.status(404).json({error:"Supplier account not found."});}
+    const from=p.onboarding_status;
+    if(from!==to&&!(ONBOARDING_ADMIN_MOVES[from]||[]).includes(to)){await conn.rollback();return res.status(409).json({error:"Cannot move from "+(ONBOARDING_LABELS[from]||from)+" to "+ONBOARDING_LABELS[to]+"."});}
+    let agreementAt=p.agreement_signed_at;
+    if(agreement===true&&!agreementAt) agreementAt=new Date();
+    if(agreement===false) agreementAt=null;
+    if(["capability_verified","supplydesk_approved"].includes(to)){
+      const [[c]]=await conn.execute("SELECT COUNT(*) n FROM supplier_products WHERE supplier_id=? AND status='approved' AND product_verified=1 AND capacity_verified=1",[p.id]);
+      if(!Number(c.n)){await conn.rollback();return res.status(400).json({error:"Approve at least one product and verify its capacity first."});}
+    }
+    if(to==="supplydesk_approved"&&!agreementAt){await conn.rollback();return res.status(400).json({error:"Record the signed SupplyDesk supplier agreement before approving."});}
+    await conn.execute("UPDATE supplier_profiles SET onboarding_status=?,agreement_signed_at=?,status_note=?,status_updated_at=NOW(),status_updated_by=? WHERE id=?",[to,agreementAt,note||null,req.admin.admin_id,p.id]);
+    const eligible=await syncSupplierEligibility(conn,p.id);
+    const appStatus={supplydesk_approved:"approved",rejected:"rejected",needs_resubmission:"query",business_verification_pending:"under_review"}[to];
+    if(appStatus) await conn.execute("UPDATE supplier_applications SET status=?,admin_notes=COALESCE(?,admin_notes),reviewed_at=NOW(),reviewed_by=? WHERE id=?",[appStatus,note||null,req.admin.admin_id,p.application_id]);
+    await conn.execute("INSERT INTO supplier_onboarding_events (id,supplier_id,from_status,to_status,note,actor) VALUES (?,?,?,?,?,?)",[crypto.randomUUID(),p.id,from,to,note||null,req.admin.admin_id]);
+    await audit(conn,req,"supplier.onboarding_status","supplier",p.id,{status:from},{status:to,eligible,agreementSigned:Boolean(agreementAt),note});
+    await conn.commit();
+    res.json({ok:true,status:to,label:ONBOARDING_LABELS[to],eligible});
+  }catch(error){try{await conn.rollback();}catch{}console.error("Onboarding status change failed:",error);res.status(500).json({error:"Could not update onboarding status."});}
+  finally{conn.release();}
+});
+
 app.patch("/api/admin/products/:id", requireAdmin, async (req,res)=>{
   const status=clean(req.body?.status,30), notes=clean(req.body?.adminNotes,4000);
   if(!["approved","rejected","pending"].includes(status)) return res.status(400).json({error:"Invalid product status."});
   try{
-    const [result]=await pool.execute("UPDATE supplier_products SET status=?,admin_notes=?,reviewed_at=NOW(),reviewed_by=? WHERE id=?",[status,notes||null,req.admin.admin_id,clean(req.params.id,80)]);
+    const pid=clean(req.params.id,80);
+    // product_verified mirrors "approved". Capacity is verified separately (explicit flag here or the capacity-verification route).
+    const [result]=await pool.execute("UPDATE supplier_products SET status=?,product_verified=IF(?='approved',1,0),capacity_verified=IF(?='approved',capacity_verified,0),admin_notes=?,reviewed_at=NOW(),reviewed_by=? WHERE id=?",[status,status,status,notes||null,req.admin.admin_id,pid]);
+    if(status==="approved"&&req.body?.capacityVerified===true) await pool.execute("UPDATE supplier_products SET capacity_verified=1,capacity_verified_at=NOW() WHERE id=? AND monthly_capacity>0",[pid]);
     if(status==="approved") await pool.execute("UPDATE supplier_product_files SET status='approved',admin_notes=?,reviewed_at=NOW(),reviewed_by=? WHERE product_id=? AND status='pending'",[notes||null,req.admin.admin_id,clean(req.params.id,80)]);
     if(status==="rejected") await pool.execute("UPDATE supplier_product_files SET status='rejected',admin_notes=?,reviewed_at=NOW(),reviewed_by=? WHERE product_id=? AND status='pending'",[notes||null,req.admin.admin_id,clean(req.params.id,80)]);
     if(!result.affectedRows) return res.status(404).json({error:"Product not found."});
@@ -3104,6 +3488,13 @@ app.get("/api/admin/files/:id", requireAdmin, async (req, res) => {
   }
 });
 
+async function adminOnboardingBlock(applicationId){
+  const [[prof]]=await pool.execute("SELECT id,onboarding_status,agreement_signed_at,status_note,status_updated_at,email_verified_at,verified,published FROM supplier_profiles WHERE application_id=?",[applicationId]);
+  if(!prof) return null;
+  const [events]=await pool.execute("SELECT from_status,to_status,note,actor,created_at FROM supplier_onboarding_events WHERE supplier_id=? ORDER BY created_at DESC LIMIT 30",[prof.id]);
+  const [products]=await pool.execute("SELECT id,product_name,status,product_verified,capacity_verified,monthly_capacity,available_capacity,allocated_capacity,committed_capacity,capacity_unit,lead_time_days FROM supplier_products WHERE supplier_id=? AND status<>'archived' ORDER BY created_at",[prof.id]);
+  return {profileId:prof.id,status:prof.onboarding_status,label:ONBOARDING_LABELS[prof.onboarding_status]||prof.onboarding_status,note:prof.status_note||"",agreementSigned:Boolean(prof.agreement_signed_at),emailVerified:Boolean(prof.email_verified_at),eligible:Boolean(prof.verified&&prof.published),moves:ONBOARDING_ADMIN_MOVES[prof.onboarding_status]||[],events,products};
+}
 app.get("/api/admin/applications/:id", requireAdmin, async (req,res) => {
   try {
     const [[application]] = await pool.execute(
@@ -3113,7 +3504,8 @@ app.get("/api/admin/applications/:id", requireAdmin, async (req,res) => {
     if(!application)return res.status(404).json({error:"Application not found."});
     const [files]=await pool.execute("SELECT id,file_type,original_name,mime_type,file_size,created_at FROM supplier_files WHERE application_id=? ORDER BY created_at",[req.params.id]);
     const [[verification]]=await pool.execute("SELECT registration_checked,documents_checked,photos_checked,address_checked,verification_notes,verified_at,verified_by FROM supplier_verification WHERE application_id=?",[req.params.id]);
-    res.json({application,files,verification});
+    const onboarding=await adminOnboardingBlock(req.params.id);
+    res.json({application,files,verification,onboarding});
   }catch(error){console.error(error);res.status(500).json({error:"Could not load application."});}
 });
 
@@ -3123,7 +3515,8 @@ app.get("/api/super-admin/applications/:id", requireSuperAdmin, async (req,res)=
     if(!application)return res.status(404).json({error:"Application not found."});
     const [files]=await pool.execute("SELECT id,file_type,original_name,mime_type,file_size,created_at FROM supplier_files WHERE application_id=? ORDER BY created_at",[req.params.id]);
     const [[verification]]=await pool.execute("SELECT * FROM supplier_verification WHERE application_id=?",[req.params.id]);
-    res.json({application,files,verification});
+    const onboarding=await adminOnboardingBlock(req.params.id);
+    res.json({application,files,verification,onboarding});
   }catch(error){console.error(error);res.status(500).json({error:"Could not load confidential supplier details."});}
 });
 
@@ -3173,6 +3566,11 @@ app.patch("/api/admin/applications/:id", requireAdmin, async (req, res) => {
     }
 
     if (status === "approved") {
+      const [[existingProfile]] = await conn.execute("SELECT agreement_signed_at FROM supplier_profiles WHERE application_id=?", [req.params.id]);
+      if (req.body?.agreementSigned !== true && !existingProfile?.agreement_signed_at) {
+        await conn.rollback();
+        return res.status(400).json({ error: "Confirm that the SupplyDesk supplier agreement is signed before approving this supplier." });
+      }
       const [[verification]] = await conn.execute(
         "SELECT registration_checked,documents_checked,photos_checked,address_checked FROM supplier_verification WHERE application_id=?",
         [req.params.id]
@@ -3219,10 +3617,15 @@ app.patch("/api/admin/applications/:id", requireAdmin, async (req, res) => {
           application.subcategory
         ]
       );
-    } else {
       await conn.execute(
-        "UPDATE supplier_profiles SET verified = 0, published = 0 WHERE application_id = ?",
-        [req.params.id]
+        "UPDATE supplier_profiles SET onboarding_status='supplydesk_approved', agreement_signed_at=COALESCE(agreement_signed_at,NOW()), email_verified_at=COALESCE(email_verified_at,NOW()), status_note=NULL, status_updated_at=NOW(), status_updated_by=? WHERE application_id=?",
+        [req.admin.admin_id, req.params.id]
+      );
+    } else {
+      const mapped = { rejected: "rejected", suspended: "rejected", query: "needs_resubmission", under_review: "business_verification_pending" }[status];
+      await conn.execute(
+        "UPDATE supplier_profiles SET verified = 0, published = 0, onboarding_status=COALESCE(?,onboarding_status), status_note=?, status_updated_at=NOW(), status_updated_by=? WHERE application_id = ?",
+        [mapped || null, notes || null, req.admin.admin_id, req.params.id]
       );
     }
 
@@ -3469,7 +3872,8 @@ async function ensureDashboardSchema() {
   await ensureRequirementSchema();
   await ensureCapacitySchema();
   await ensureRfqSchema();
-  await ensureOrderFlowSchema();
+  try{ await ensureOrderFlowSchema(); }catch(e){ console.error("MIGRATION WARNING (order flow):",e); }
+  try{ await ensureOnboardingSchema(); }catch(e){ console.error("MIGRATION WARNING (onboarding):",e); }
   await ensureAdminAuthSchema();
   await migrateLegacyCategories();
 
@@ -3821,6 +4225,75 @@ async function ensureRequirementSchema() {
   }
   // Requirements that were auto-published before review existed go back through admin review once.
   if (freshlyMigrated) await pool.query("UPDATE buyer_requirements SET status='pending_review' WHERE status='open' AND fulfilment_mode IS NULL");
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding, eligibility and capacity-hold schema. Idempotent and NON-FATAL: a failure is logged, never crashes startup.
+// ---------------------------------------------------------------------------
+const ONBOARDING_STATES=["account_verified","business_verification_pending","business_verified","capability_verification_pending","capability_verified","supplydesk_approved","rejected","needs_resubmission"];
+const ONBOARDING_LABELS={account_verified:"Account verified (email only)",business_verification_pending:"Business verification pending",business_verified:"Business verified",capability_verification_pending:"Capability verification pending",capability_verified:"Capability verified",supplydesk_approved:"SupplyDesk approved",rejected:"Rejected",needs_resubmission:"Needs resubmission"};
+// Which admin moves are allowed. supplydesk_approved additionally needs a signed agreement.
+const ONBOARDING_ADMIN_MOVES={
+  account_verified:["business_verification_pending","rejected"],
+  business_verification_pending:["business_verified","needs_resubmission","rejected"],
+  business_verified:["capability_verification_pending","needs_resubmission","rejected"],
+  capability_verification_pending:["capability_verified","needs_resubmission","rejected"],
+  capability_verified:["supplydesk_approved","needs_resubmission","rejected"],
+  supplydesk_approved:["needs_resubmission","rejected"],
+  needs_resubmission:["business_verification_pending","rejected"],
+  rejected:["needs_resubmission"]
+};
+async function ensureOnboardingSchema(){
+  const add=async(table,ddl)=>{
+    try{await pool.query("ALTER TABLE "+table+" ADD COLUMN "+ddl);return true;}
+    catch(e){if(!["ER_DUP_FIELDNAME","ER_DUP_COLUMN"].includes(e?.code))throw e;return false;}
+  };
+  await add("buyers","email_verified_at DATETIME NULL");
+  await pool.query("UPDATE buyers SET email_verified_at=COALESCE(created_at,NOW()) WHERE email_verified_at IS NULL");
+  await add("supplier_profiles","onboarding_status VARCHAR(40) NOT NULL DEFAULT 'account_verified'");
+  await add("supplier_profiles","email_verified_at DATETIME NULL");
+  await add("supplier_profiles","agreement_signed_at DATETIME NULL");
+  await add("supplier_profiles","wizard_json MEDIUMTEXT NULL");
+  await add("supplier_profiles","status_note VARCHAR(1500) NULL");
+  await add("supplier_profiles","status_updated_at DATETIME NULL");
+  await add("supplier_profiles","status_updated_by VARCHAR(120) NULL");
+  // Suppliers that were already approved and live keep working: they are grandfathered as supplydesk_approved.
+  await pool.query("UPDATE supplier_profiles SET onboarding_status='supplydesk_approved',agreement_signed_at=COALESCE(agreement_signed_at,created_at),email_verified_at=COALESCE(email_verified_at,created_at),status_updated_at=COALESCE(status_updated_at,NOW()) WHERE verified=1 AND published=1 AND onboarding_status='account_verified'");
+  const prodVerified=await add("supplier_products","product_verified TINYINT(1) NOT NULL DEFAULT 0");
+  const capVerified=await add("supplier_products","capacity_verified TINYINT(1) NOT NULL DEFAULT 0");
+  await add("supplier_products","capacity_verified_at DATETIME NULL");
+  const held=await add("supplier_products","allocated_capacity BIGINT UNSIGNED NOT NULL DEFAULT 0");
+  await add("supplier_products","committed_capacity BIGINT UNSIGNED NOT NULL DEFAULT 0");
+  // product_verified mirrors the admin-approved product status.
+  await pool.query("UPDATE supplier_products SET product_verified=IF(status='approved',1,0)");
+  if(capVerified) await pool.query("UPDATE supplier_products SET capacity_verified=1,capacity_verified_at=COALESCE(capacity_updated_at,NOW()) WHERE status='approved' AND monthly_capacity IS NOT NULL AND monthly_capacity>0");
+  if(held){
+    // One-time seed of holds from live supplier POs (issued = allocated, accepted..dispatched = committed).
+    try{
+      await pool.query("UPDATE supplier_products p SET allocated_capacity=COALESCE((SELECT SUM(CAST(REPLACE(po.quantity,',','') AS UNSIGNED)) FROM supplier_pos po WHERE po.product_id=p.id AND po.status='issued' AND po.quantity REGEXP '^[0-9,]+$'),0)");
+      await pool.query("UPDATE supplier_products p SET committed_capacity=COALESCE((SELECT SUM(CAST(REPLACE(po.quantity,',','') AS UNSIGNED)) FROM supplier_pos po WHERE po.product_id=p.id AND po.status IN ('accepted','in_production','ready_for_qc','ready_for_dispatch','dispatched') AND po.quantity REGEXP '^[0-9,]+$'),0)");
+    }catch(e){console.error("MIGRATION WARNING (capacity hold seed):",e?.message);}
+  }
+  try{await pool.query("ALTER TABLE supplier_files MODIFY file_type ENUM('business_registration','tax_registration','licence_certificate','address_proof','business_photo','certification','factory_photo') NOT NULL");}
+  catch(e){console.error("MIGRATION WARNING (supplier_files enum):",e?.message);}
+  await pool.query(`CREATE TABLE IF NOT EXISTS supplier_signup_otps (
+    id CHAR(36) PRIMARY KEY, email VARCHAR(255) NOT NULL, otp_hash CHAR(64) NOT NULL, payload_json TEXT NOT NULL,
+    expires_at DATETIME NOT NULL, attempts TINYINT UNSIGNED NOT NULL DEFAULT 0, used_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_signup_email (email)
+  ) ENGINE=InnoDB`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS supplier_onboarding_events (
+    id CHAR(36) PRIMARY KEY, supplier_id CHAR(36) NOT NULL, from_status VARCHAR(40) NULL, to_status VARCHAR(40) NOT NULL,
+    note VARCHAR(1500) NULL, actor VARCHAR(160) NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_onb_supplier (supplier_id, created_at)
+  ) ENGINE=InnoDB`);
+}
+// Single source of truth: a supplier is live-procurement eligible only when supplydesk_approved AND the agreement is signed.
+// verified/published (used by every existing gate) are derived from it here.
+async function syncSupplierEligibility(db,supplierId){
+  const [[p]]=await db.execute("SELECT onboarding_status,agreement_signed_at FROM supplier_profiles WHERE id=?",[supplierId]);
+  const eligible=!!(p&&p.onboarding_status==="supplydesk_approved"&&p.agreement_signed_at);
+  await db.execute("UPDATE supplier_profiles SET verified=?,published=? WHERE id=?",[eligible?1:0,eligible?1:0,supplierId]);
+  return eligible;
 }
 
 async function start() {

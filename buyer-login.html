@@ -19,8 +19,20 @@ label{display:block;font-size:13px;font-weight:800;margin:14px 0 6px}input{width
   <h1 id="title">Welcome back</h1>
   <p class="lead" id="lead">Enter your email and we will send a 6-digit code. New here? The same step creates your free buyer account.</p>
   <form id="f" autocomplete="on">
+    <div id="signupTop" style="display:none">
+      <label for="company">Company name</label>
+      <input id="company" autocomplete="organization" placeholder="Your company" maxlength="180">
+      <label for="contact">Contact person</label>
+      <input id="contact" autocomplete="name" placeholder="Full name" maxlength="180">
+    </div>
     <label for="email">Work email</label>
     <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="you@company.com" required>
+    <div id="signupBottom" style="display:none">
+      <label for="phone">Mobile number</label>
+      <input id="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+91 98xxxxxx" maxlength="40">
+      <label for="country">Country</label>
+      <input id="country" autocomplete="country-name" placeholder="Country" maxlength="100">
+    </div>
     <div class="step2" id="step2">
       <label for="otp">6-digit code</label>
       <input id="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456">
@@ -38,17 +50,30 @@ label{display:block;font-size:13px;font-weight:800;margin:14px 0 6px}input{width
 <script>
 const KEY="supplydesk_buyer_dashboard_token";
 const q=new URLSearchParams(location.search);
-if(q.get("mode")==="signup"){document.getElementById("eyebrow").textContent="Create buyer account";document.getElementById("title").textContent="Get started in a minute";document.getElementById("lead").textContent="Verify your email to create your free buyer account. Post requirements, request quotes and track orders in one place."}
+const SIGNUP=q.get("mode")==="signup";
+if(SIGNUP){document.getElementById("signupTop").style.display="block";document.getElementById("signupBottom").style.display="block";}
+if(SIGNUP){document.getElementById("eyebrow").textContent="Create buyer account";document.getElementById("title").textContent="Get started in a minute";document.getElementById("lead").textContent="Verify your email to create your free buyer account. Post requirements, request quotes and track orders in one place."}
 try{if(localStorage.getItem(KEY)){fetch("/api/buyer-dashboard",{headers:{"x-buyer-dashboard-token":localStorage.getItem(KEY)}}).then(r=>{if(r.ok)location.replace("buyer-dashboard.html");else localStorage.removeItem(KEY)}).catch(()=>{})}}catch{}
 const $=id=>document.getElementById(id),st=$("st");
 function show(msg,ok){st.textContent=msg;st.className="status "+(ok?"ok":"err")}
 let sent=false;
+function signupFields(){
+  if(!SIGNUP)return{body:{}};
+  const v=i=>$(i).value.trim(),body={signup:true,company:v("company"),contact:v("contact"),phone:v("phone"),country:v("country")};
+  if(!body.company)return{error:"Enter your company name."};
+  if(!body.contact)return{error:"Enter the contact person's name."};
+  if(!/^[+()\d][\d\s().-]{6,24}$/.test(body.phone))return{error:"Enter a valid mobile number."};
+  if(!body.country)return{error:"Enter your country."};
+  return{body};
+}
 async function post(url,body){const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"Something went wrong. Please try again.");return d}
 async function sendCode(){
   const email=$("email").value.trim().toLowerCase();
   if(!/^\S+@\S+\.\S+$/.test(email)){show("Enter a valid email address.",false);return}
+  const extra=signupFields();
+  if(SIGNUP&&extra.error){show(extra.error,false);return}
   const b=$("go");b.disabled=true;b.textContent="Sending...";
-  try{const d=await post("/api/buyer-email/request-otp",{email});sent=true;$("step2").style.display="block";$("resend").style.display="inline-block";$("email").readOnly=true;
+  try{const d=await post("/api/buyer-email/request-otp",{email,...extra.body});sent=true;["company","contact","phone","country"].forEach(i=>{$(i).readOnly=true});$("step2").style.display="block";$("resend").style.display="inline-block";$("email").readOnly=true;
     if(d.testOtp)$("otp").value=d.testOtp;show(d.message||"Code sent. Check your email.",true);$("otp").focus();b.textContent="Verify & continue"}
   catch(e){show(e.message,false);b.textContent="Send code"}finally{b.disabled=false}
 }
@@ -56,9 +81,9 @@ async function verify(){
   const email=$("email").value.trim().toLowerCase(),otp=$("otp").value.trim();
   if(!/^\d{6}$/.test(otp)){show("Enter the 6-digit code from your email.",false);return}
   const b=$("go");b.disabled=true;b.textContent="Verifying...";
-  try{const d=await post("/api/buyer-email/verify-otp",{email,otp});try{localStorage.setItem(KEY,d.dashboardToken)}catch{}show("Verified. Opening your dashboard...",true);location.href="buyer-dashboard.html"}
+  try{const d=await post("/api/buyer-email/verify-otp",{email,otp,...signupFields().body});try{localStorage.setItem(KEY,d.dashboardToken)}catch{}show(d.newAccount?"Account created. Opening your dashboard...":"Verified. Opening your dashboard...",true);location.href="buyer-dashboard.html"}
   catch(e){show(e.message,false);b.textContent="Verify & continue";b.disabled=false}
 }
 $("f").addEventListener("submit",e=>{e.preventDefault();sent?verify():sendCode()});
-$("resend").addEventListener("click",async()=>{$("email").readOnly=false;sent=false;await sendCode()});
+$("resend").addEventListener("click",async()=>{$("email").readOnly=false;["company","contact","phone","country"].forEach(i=>{$(i).readOnly=false});sent=false;await sendCode()});
 </script></body></html>
