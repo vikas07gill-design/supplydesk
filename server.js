@@ -1917,8 +1917,9 @@ app.post("/api/admin/requirements/:id/buyer-quote",requireAdmin,async(req,res)=>
   const conn=await pool.getConnection();
   try{
     await conn.beginTransaction();
-    const [[r]]=await conn.execute("SELECT r.id,r.title,r.rfq_code,r.rfq_state,r.status,b.email,b.name FROM buyer_requirements r JOIN buyers b ON b.id=r.buyer_id WHERE r.id=? FOR UPDATE",[id]);
+    const [[r]]=await conn.execute("SELECT r.id,r.title,r.rfq_code,r.rfq_state,r.status,r.accept_decision,r.accepted_quantity,b.email,b.name FROM buyer_requirements r JOIN buyers b ON b.id=r.buyer_id WHERE r.id=? FOR UPDATE",[id]);
     if(!r){await conn.rollback();return res.status(404).json({error:"Requirement not found."});}
+    if(r.accept_decision==="partial"){const cap=RFQ.parseQuantity(r.accepted_quantity);if(cap&&(qty==null||qty>cap)){await conn.rollback();return res.status(400).json({error:"SupplyDesk accepted only "+cap+" of this requirement; quote that quantity or less."});}}
     const st=r.rfq_state||RFQ.LEGACY_STATUS_TO_STATE[r.status]||"submitted";
     if(st!=="costing")await moveRfq(conn,req,id,"costing","preparing buyer quote");
     await conn.execute("UPDATE rfq_quotes SET status='superseded' WHERE rfq_id=? AND status='sent'",[id]);
@@ -1945,7 +1946,7 @@ app.post("/api/buyer-requirements/:id/quote/respond",requireBuyerDashboard,async
   const conn=await pool.getConnection();
   try{
     await conn.beginTransaction();
-    const [[r]]=await conn.execute("SELECT id,title FROM buyer_requirements WHERE id=? AND buyer_id=? FOR UPDATE",[id,req.buyer.id]);
+    const [[r]]=await conn.execute("SELECT id,title,quantity,accept_decision,accepted_quantity FROM buyer_requirements WHERE id=? AND buyer_id=? FOR UPDATE",[id,req.buyer.id]);
     if(!r){await conn.rollback();return res.status(404).json({error:"Requirement not found."});}
     const [[q]]=await conn.execute("SELECT * FROM rfq_quotes WHERE rfq_id=? AND status='sent' ORDER BY created_at DESC LIMIT 1 FOR UPDATE",[id]);
     if(!q){await conn.rollback();return res.status(409).json({error:"There is no open quotation to respond to."});}
@@ -1960,12 +1961,19 @@ app.post("/api/buyer-requirements/:id/quote/respond",requireBuyerDashboard,async
     await conn.execute("UPDATE rfq_quotes SET status='accepted',buyer_note=?,responded_at=NOW() WHERE id=?",[note,q.id]);
     await moveRfq(conn,actor,id,"buyer_approved",note||"buyer accepted quote");
     const oid=crypto.randomUUID();let po;
+    // SupplyDesk already accepted this requirement (full / partial): the order is accepted straight away and gets its SupplyDesk order.
+    const preAccepted=r.accept_decision==="full"||r.accept_decision==="partial";
+    const reviewState=preAccepted?(r.accept_decision==="partial"?"partially_accepted":"accepted"):"pending_review";
     for(let a=0;a<8;a++){po=RFQ.newPoNumber();try{
-      await conn.execute("INSERT INTO orders (id,po_number,rfq_id,rfq_quote_id,buyer_id,title,quantity,unit_price,currency,total_price,review_status,stage) VALUES (?,?,?,?,?,?,?,?,?,?,'pending_review','order_received')",[oid,po,id,q.id,req.buyer.id,r.title,q.quantity,q.unit_price,q.currency,q.total_price]);break;}
+      await conn.execute("INSERT INTO orders (id,po_number,rfq_id,rfq_quote_id,buyer_id,title,quantity,unit_price,currency,total_price,review_status,stage"+(preAccepted?",status,requested_quantity,reviewed_at,reviewed_by":"")+") VALUES (?,?,?,?,?,?,?,?,?,?,?,?"+(preAccepted?",'confirmed',?,NOW(),'system'":"")+")",[oid,po,id,q.id,req.buyer.id,r.title,q.quantity,q.unit_price,q.currency,q.total_price,reviewState,preAccepted?"supplydesk_accepted":"order_received"].concat(preAccepted?[r.accept_decision==="partial"?String(r.quantity):null]:[]));break;}
       catch(e){if(e?.code!=="ER_DUP_ENTRY"||a===7)throw e;}}
     await moveRfq(conn,actor,id,"converted","order "+po);
     await addOrderEvent(conn,oid,"stage","order_received",null,null,"buyer");
-    await logBuyerMessage(conn,id,"order","Order "+po+" received","Thank you. SupplyDesk is reviewing your order and will confirm it here shortly.","SupplyDesk");
+    if(preAccepted){
+      await addOrderEvent(conn,oid,"stage","supplydesk_accepted",null,null,"system");
+      await createSdOrder(conn,{},[{id:oid,po_number:po,title:r.title,quantity:q.quantity}],r.title,null);
+      await logBuyerMessage(conn,id,"order","Order "+po+" confirmed","Thank you. SupplyDesk has accepted your order and is arranging fulfilment. You can follow every step here.","SupplyDesk");
+    }else await logBuyerMessage(conn,id,"order","Order "+po+" received","Thank you. SupplyDesk is reviewing your order and will confirm it here shortly.","SupplyDesk");
     await audit(conn,actor,"order.created","order",oid,null,{poNumber:po,quoteNo:q.quote_no,quantity:q.quantity,unitPrice:q.unit_price,currency:q.currency});
     await conn.commit();
     try{await sendBrandedMail(req.buyer.email,"SupplyDesk | Order received "+po,{preheader:"Order received",title:"Order received",intro:"Thank you. SupplyDesk has received your order "+po+" for "+r.title+" and is reviewing it. We will confirm acceptance here and by email.",bodyHtml:"",textLines:["Order "+po],ctaText:"View order",ctaUrl:ORIGIN()+"/buyer-dashboard"});}catch(e){console.error("Order mail failed:",e);}
@@ -2047,7 +2055,7 @@ app.post("/api/admin/orders/:id/review",requireAdmin,async(req,res)=>{
     if(!o){await conn.rollback();return res.status(404).json({error:"Order not found."});}
     if(o.status==="cancelled"||!RFQ.reviewOpen(o.review_status||"accepted")){await conn.rollback();return res.status(409).json({error:"This order is already "+(RFQ.ORDER_REVIEW[o.review_status]||{label:o.status}).label+"; it cannot be reviewed again."});}
     const by=actorOf(req).id;
-    let qtyNote=null;
+    let qtyNote=null,autoSdOrderId=null;
     if(to==="partially_accepted"){
       const want=RFQ.parseQuantity(o.quantity),got=RFQ.parseQuantity(accQty);
       if(want==null){await conn.rollback();return res.status(400).json({error:"This order's quantity is not a plain number, so it cannot be partially accepted. Accept, reject or ask for clarification."});}
@@ -2065,12 +2073,17 @@ app.post("/api/admin/orders/:id/review",requireAdmin,async(req,res)=>{
       await addOrderEvent(conn,id,"review",null,null,"Rejected: "+note,by);
     }else await addOrderEvent(conn,id,"review",null,null,"Clarification requested: "+note,by);
     await audit(conn,req,"order.reviewed","order",id,{review:o.review_status||"pending_review"},{review:to,acceptedQuantity:to==="partially_accepted"?accQty:null,note});
+    if(RFQ.reviewAccepted(to)&&req.body?.autoSdOrder){
+      const [[o2]]=await conn.execute("SELECT id,po_number,title,quantity FROM orders WHERE id=?",[id]);
+      const [[ex]]=await conn.execute("SELECT 1 x FROM sd_order_items WHERE buyer_order_id=? LIMIT 1",[id]);
+      if(!ex)autoSdOrderId=await createSdOrder(conn,req,[o2],o2.title,null);
+    }
     const label=RFQ.ORDER_REVIEW[to].label;
     await logBuyerMessage(conn,o.rfq_id,"order","Order "+o.po_number+": "+label,[qtyNote,note].filter(Boolean).join("\n")||null,by);
     await conn.commit();
     const lead={accepted:"SupplyDesk has accepted your order.",partially_accepted:"SupplyDesk has accepted part of your order.",pending_clarification:"SupplyDesk needs a clarification before it can accept your order.",rejected:"SupplyDesk is unable to accept this order."}[to];
     try{await sendBrandedMail(o.email,"SupplyDesk | Order "+o.po_number+": "+label,{preheader:label,title:"Order "+label.toLowerCase(),intro:"Hello "+(o.name||"Buyer")+", "+lead,bodyHtml:(qtyNote||note)?'<div style="margin:18px 0;padding:16px;background:#f4f9fc;border:1px solid #dbe8ed;border-radius:12px;font-size:15px;white-space:pre-wrap">'+escapeEmailHtml([qtyNote,note].filter(Boolean).join("\n"))+'</div>':"",textLines:[o.po_number+": "+label,qtyNote||"",note||""].filter(Boolean),ctaText:"View order",ctaUrl:ORIGIN()+"/buyer-dashboard"});}catch(e){console.error("Order review mail failed:",e);}
-    res.json({ok:true,reviewStatus:to});
+    res.json({ok:true,reviewStatus:to,sdOrderId:autoSdOrderId});
   }catch(error){await conn.rollback();console.error("Order review failed:",error);res.status(500).json({error:"Could not save the review."});}
   finally{conn.release();}
 });
@@ -2185,7 +2198,7 @@ async function sdOrderDetail(req,id){
   return {sdOrder:sd,items:outItems,supplierPos:pos.map(p=>({...maskSupplierRow(req,p),statusLabel:RFQ.PO_STATES[p.status]?.label||p.status,lines:lines.filter(l=>l.supplier_po_id===p.id).map(l=>({buyerOrderId:l.buyer_order_id,buyerPo:l.buyer_po,quantity:l.quantity==null?null:Number(l.quantity)}))})),detailsRestricted:!isSuper(req)};
 }
 app.get("/api/admin/sd-orders",requireAdmin,async(req,res)=>{
-  try{const [rows]=await pool.execute("SELECT s.id,s.sd_number,s.title,s.created_at,(SELECT COUNT(*) FROM sd_order_items i WHERE i.sd_order_id=s.id) buyer_orders,(SELECT COUNT(*) FROM supplier_pos p WHERE p.sd_order_id=s.id AND p.status NOT IN ('declined','cancelled')) live_pos FROM sd_orders s ORDER BY s.created_at DESC LIMIT 200");res.json({sdOrders:rows});}
+  try{const [rows]=await pool.execute("SELECT s.id,s.sd_number,s.title,s.created_at,(SELECT COUNT(*) FROM sd_order_items i WHERE i.sd_order_id=s.id) buyer_orders,(SELECT COUNT(*) FROM supplier_pos p WHERE p.sd_order_id=s.id AND p.status NOT IN ('declined','cancelled')) live_pos,s.plan_status,(SELECT COALESCE(SUM(i.quantity),0) FROM sd_order_items i WHERE i.sd_order_id=s.id) needed,(SELECT COALESCE(SUM(l.quantity),0) FROM supplier_po_lines l JOIN supplier_pos p ON p.id=l.supplier_po_id WHERE l.sd_order_id=s.id AND p.status NOT IN ('declined','cancelled')) allocated FROM sd_orders s ORDER BY s.created_at DESC LIMIT 200");res.json({sdOrders:rows.map(r=>({...r,needed:Number(r.needed)||0,allocated:Number(r.allocated)||0}))});}
   catch(error){console.error(error);res.status(500).json({error:"Could not load SupplyDesk orders."});}
 });
 // Internal SupplyDesk view: total requirement split by region and supplier. Buyers and suppliers never see this.
@@ -2345,12 +2358,22 @@ app.get("/api/admin/requirements/:id/matches",requireAdmin,async(req,res)=>{
 
 // Admin decision: share with suppliers / handle through SupplyDesk / reject.
 app.post("/api/admin/requirements/:id/review",requireAdmin,async(req,res)=>{
-  const id=clean(req.params.id,80),action=clean(req.body?.action,30),notes=clean(req.body?.adminNotes,4000)||null,buyerNote=clean(req.body?.buyerNote,2000)||null;
-  if(!["share_suppliers","supplydesk","reject"].includes(action))return res.status(400).json({error:"Invalid action."});
+  const id=clean(req.params.id,80),rawAction=clean(req.body?.action,30),notes=clean(req.body?.adminNotes,4000)||null,buyerNote=clean(req.body?.buyerNote,2000)||null;
+  if(!["share_suppliers","supplydesk","reject","accept_full","accept_partial"].includes(rawAction))return res.status(400).json({error:"Invalid action."});
+  // accept_full / accept_partial = SupplyDesk takes the requirement as principal (no supplier is contacted at this stage).
+  const decision=rawAction==="accept_full"?"full":rawAction==="accept_partial"?"partial":null;
+  const action=decision?"supplydesk":rawAction;
+  let acceptedQty=null;
   try{
     const [[r]]=await pool.execute("SELECT r.*,b.email buyer_email,b.name buyer_name FROM buyer_requirements r JOIN buyers b ON b.id=r.buyer_id WHERE r.id=?",[id]);
     if(!r)return res.status(404).json({error:"Requirement not found."});
     if(["closed","cancelled"].includes(r.status))return res.status(409).json({error:"This requirement is already "+r.status+"."});
+    if(decision==="partial"){
+      const want=RFQ.parseQuantity(r.quantity),got=RFQ.parseQuantity(req.body?.acceptedQuantity);
+      if(want==null)return res.status(400).json({error:"This requirement's quantity is not a plain number, so it cannot be partially accepted. Accept in full or reject."});
+      if(!got||got>=want)return res.status(400).json({error:"Enter the quantity SupplyDesk will supply (more than 0 and less than "+want+")."});
+      acceptedQty=String(got);
+    }
     const admin=req.admin.admin_id;
     let targets=[];
     if(action==="share_suppliers"){
@@ -2374,7 +2397,8 @@ app.post("/api/admin/requirements/:id/review",requireAdmin,async(req,res)=>{
         await audit(conn,req,"rfq.shared_with_suppliers","rfq",id,null,{supplierCount:newlyShared.length});
       }else if(action==="supplydesk"){
         await moveRfq(conn,req,id,"costing",notes);
-        await conn.execute("UPDATE buyer_requirements SET status='fulfilling',fulfilment_mode='supplydesk',admin_notes=?,buyer_note=?,reviewed_at=NOW(),reviewed_by=?,updated_at=NOW() WHERE id=?",[notes,buyerNote,admin,id]);
+        await conn.execute("UPDATE buyer_requirements SET status='fulfilling',fulfilment_mode='supplydesk',admin_notes=?,buyer_note=?,reviewed_at=NOW(),reviewed_by=?,updated_at=NOW(),accept_decision=?,accepted_quantity=? WHERE id=?",[notes,buyerNote,admin,decision,acceptedQty,id]);
+        if(decision)await audit(conn,req,"rfq.accepted_"+decision,"rfq",id,null,{acceptedQuantity:acceptedQty,requested:r.quantity});
       }else{
         await moveRfq(conn,req,id,"rejected",notes);
         await conn.execute("UPDATE buyer_requirements SET status='rejected',admin_notes=?,buyer_note=?,reviewed_at=NOW(),reviewed_by=?,updated_at=NOW() WHERE id=?",[notes,buyerNote,admin,id]);
@@ -2383,10 +2407,12 @@ app.post("/api/admin/requirements/:id/review",requireAdmin,async(req,res)=>{
     }catch(e){await conn.rollback();if(e instanceof RfqError)return res.status(e.status).json({error:e.message});throw e;}finally{conn.release();}
 
     // Notifications are best-effort; the decision is already saved.
-    try{await logBuyerMessage(pool,id,"update",action==="share_suppliers"?"Requirement approved":action==="supplydesk"?"SupplyDesk will handle your requirement":"Requirement not accepted",buyerNote,admin);}catch(e){console.error("Message log failed:",e);}
+    try{await logBuyerMessage(pool,id,"update",action==="share_suppliers"?"Requirement approved":decision==="partial"?"Requirement partially accepted":decision==="full"?"Requirement accepted":action==="supplydesk"?"SupplyDesk will handle your requirement":"Requirement not accepted",buyerNote,admin);}catch(e){console.error("Message log failed:",e);}
     const dash=ORIGIN()+"/buyer-dashboard.html";
     const status=action==="share_suppliers"?"open":action==="supplydesk"?"fulfilling":"rejected";
     const lead=action==="share_suppliers"?"Your requirement has been approved and shared with "+(newlyShared.length||targets.length)+" matching supplier(s). Quotations will appear in your Buyer Dashboard."
+      :decision==="partial"?"SupplyDesk has accepted part of your requirement: "+acceptedQty+" of "+r.quantity+". We will send you a quotation for the accepted quantity."
+      :decision==="full"?"SupplyDesk has accepted your requirement in full. We will send you a quotation shortly."
       :action==="supplydesk"?"The SupplyDesk team will handle this requirement directly and invoice you through SupplyDesk. We will contact you with the next steps."
       :"We were unable to take this requirement forward at this time.";
     await sendBrandedMail(r.buyer_email,"SupplyDesk | Requirement update",{
@@ -2400,7 +2426,7 @@ app.post("/api/admin/requirements/:id/review",requireAdmin,async(req,res)=>{
         bodyHtml:'<table style="width:100%;border-collapse:collapse;margin:18px 0;font-size:14px"><tr><td style="padding:8px 0;color:#58717c">Requirement</td><td style="padding:8px 0;font-weight:700">'+escapeEmailHtml(r.title)+'</td></tr><tr><td style="padding:8px 0;color:#58717c">Category</td><td style="padding:8px 0;font-weight:700">'+escapeEmailHtml([r.category,r.subcategory].filter(Boolean).join(" / ")||"Custom")+'</td></tr>'+(r.quantity?'<tr><td style="padding:8px 0;color:#58717c">Quantity</td><td style="padding:8px 0;font-weight:700">'+escapeEmailHtml(r.quantity+(r.unit?" "+r.unit:""))+'</td></tr>':"")+(r.delivery_country?'<tr><td style="padding:8px 0;color:#58717c">Delivery</td><td style="padding:8px 0;font-weight:700">'+escapeEmailHtml(r.delivery_country)+'</td></tr>':"")+'</table><p style="color:#71838b;font-size:12px">The buyer\'s contact details stay private. Quotations are shared through SupplyDesk.</p>',
         textLines:["Requirement: "+r.title,"Category: "+([r.category,r.subcategory].filter(Boolean).join(" / ")||"Custom")],ctaText:"Open Supplier Dashboard",ctaUrl:ORIGIN()+"/supplier-dashboard"}))mailed++;
     }
-    res.json({ok:true,status,sharedWith:newlyShared.length,alreadyShared:targets.length-newlyShared.length,supplierEmailsSent:mailed});
+    res.json({ok:true,status,decision,acceptedQuantity:acceptedQty,sharedWith:newlyShared.length,alreadyShared:targets.length-newlyShared.length,supplierEmailsSent:mailed});
   }catch(error){console.error("Requirement review failed:",error);res.status(500).json({error:"Could not save the review decision."});}
 });
 
@@ -3874,6 +3900,7 @@ async function ensureDashboardSchema() {
   await ensureRfqSchema();
   try{ await ensureOrderFlowSchema(); }catch(e){ console.error("MIGRATION WARNING (order flow):",e); }
   try{ await ensureOnboardingSchema(); }catch(e){ console.error("MIGRATION WARNING (onboarding):",e); }
+  try{ await ensureFlowSchema(); }catch(e){ console.error("MIGRATION WARNING (admin flow):",e); }
   await ensureAdminAuthSchema();
   await migrateLegacyCategories();
 
@@ -4295,6 +4322,180 @@ async function syncSupplierEligibility(db,supplierId){
   await db.execute("UPDATE supplier_profiles SET verified=?,published=? WHERE id=?",[eligible?1:0,eligible?1:0,supplierId]);
   return eligible;
 }
+
+// ---- Admin procurement workflow: Request review -> SupplyDesk order -> Sourcing plan -> Supplier POs ----
+async function ensureFlowSchema(){
+  const add=async(table,ddl)=>{try{await pool.query("ALTER TABLE "+table+" ADD COLUMN "+ddl);return true;}catch(e){if(!["ER_DUP_FIELDNAME","ER_DUP_COLUMN"].includes(e?.code))throw e;return false;}};
+  await add("buyer_requirements","accept_decision VARCHAR(10) NULL");
+  await add("buyer_requirements","accepted_quantity VARCHAR(60) NULL");
+  const fresh=await add("sd_orders","plan_status VARCHAR(16) NOT NULL DEFAULT 'planning'");
+  await add("sd_orders","plan_json MEDIUMTEXT NULL");
+  await add("sd_orders","plan_confirmed_at DATETIME NULL");
+  await add("sd_orders","plan_confirmed_by VARCHAR(120) NULL");
+  // SD orders that already have live supplier POs were planned by hand: treat them as confirmed.
+  if(fresh)await pool.query("UPDATE sd_orders s SET plan_status='confirmed',plan_confirmed_at=COALESCE(plan_confirmed_at,s.created_at) WHERE EXISTS (SELECT 1 FROM supplier_pos p WHERE p.sd_order_id=s.id AND p.status NOT IN ('declined','cancelled'))");
+}
+const fmtN=(n)=>n==null?null:Math.round(Number(n)*100)/100;
+
+// Internal view of one SD order: need, what is already on supplier POs, eligible capacity and a recommended split.
+async function loadSourcingPlan(req,sdId){
+  const [[sd]]=await pool.execute("SELECT id,sd_number,title,plan_status,plan_json,plan_confirmed_at,created_at FROM sd_orders WHERE id=?",[sdId]);
+  if(!sd)return null;
+  const [items]=await pool.execute("SELECT o.id buyer_order_id,o.po_number,o.quantity,o.requested_quantity,o.stage,o.status,r.category,r.subcategory,r.title rtitle,r.specification,r.required_by,r.delivery_country FROM sd_order_items i JOIN orders o ON o.id=i.buyer_order_id LEFT JOIN buyer_requirements r ON r.id=o.rfq_id WHERE i.sd_order_id=?",[sdId]);
+  let total=0,allocated=0;const orders=[];
+  for(const it of items){const need=RFQ.parseQuantity(it.quantity)||0,a=await orderAllocation(pool,it.buyer_order_id);total+=need;allocated+=Math.min(a.allocated,need);
+    orders.push({buyerOrderId:it.buyer_order_id,poNumber:it.po_number,needed:need,allocated:fmtN(a.allocated),remaining:fmtN(Math.max(need-a.allocated,0)),stageLabel:RFQ.stageLabel(it.stage||"supplydesk_accepted"),partial:!!it.requested_quantity});}
+  const unallocated=Math.max(fmtN(total-allocated),0);
+  const rfqLike={category:items[0]?.category||"",subcategory:items[0]?.subcategory||"",title:items.map(i=>i.rtitle).join(" "),specification:items.map(i=>i.specification).join(" "),quantity:String(total||""),required_by:items[0]?.required_by||null};
+  const [caps]=await pool.execute(
+    `SELECT p.id,p.capability_code,p.product_name,p.description,p.category,p.subcategory,p.moq,p.unit,p.monthly_capacity,p.available_capacity,p.allocated_capacity,p.committed_capacity,p.capacity_unit,p.lead_time_days,p.origin_region,p.capacity_updated_at,
+            s.id supplier_id,s.legal_name,s.trade_name,s.country,s.city,
+            (SELECT COUNT(*) FROM supplier_pos po WHERE po.sd_order_id=? AND po.supplier_id=s.id AND po.status NOT IN ('declined','cancelled')) live_po
+     FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id
+     WHERE p.status='approved' AND p.product_verified=1 AND p.capacity_verified=1 AND s.verified=1 AND s.published=1 AND p.capability_code IS NOT NULL
+       AND p.capacity_updated_at IS NOT NULL AND p.capacity_updated_at>=DATE_SUB(NOW(),INTERVAL ${CAPACITY_STALE_DAYS} DAY) AND p.monthly_capacity>0 LIMIT 2000`,[sdId]);
+  const sup=isSuper(req);
+  const candidates=caps.map(c=>({c,sc:RFQ.scoreCapability(rfqLike,c)})).filter(x=>x.sc.eligible&&x.sc.score>0).map(({c,sc})=>{
+    const free=Math.max(Number(c.available_capacity||0)-Number(c.allocated_capacity||0)-Number(c.committed_capacity||0),0);
+    return {capabilityCode:c.capability_code,productName:c.product_name,supplier:sup?(c.trade_name||c.legal_name):supplierAlias(c.supplier_id),supplierId:sup?c.supplier_id:null,
+      region:c.origin_region||c.city||c.country||"Other",country:sup?c.country:"",freeCapacity:free,monthlyCapacity:Number(c.monthly_capacity)||0,unit:c.capacity_unit||c.unit||"",leadTimeDays:c.lead_time_days,moq:c.moq,
+      score:sc.score,reasons:sc.reasons,hasLivePo:Number(c.live_po)>0,updatedAt:c.capacity_updated_at};
+  }).filter(x=>x.freeCapacity>0).sort((a,b)=>b.score-a.score||(a.leadTimeDays??9999)-(b.leadTimeDays??9999)||b.freeCapacity-a.freeCapacity);
+  // Recommended split: best-fit capabilities first (score, then lead time, then free capacity), one PO per supplier, until the need is covered.
+  const recommended=[];let left=unallocated;const usedSup=new Set();
+  for(const c of candidates){if(left<=0)break;if(c.hasLivePo)continue;const key=c.supplierId||c.supplier;if(usedSup.has(key))continue;const q=Math.min(c.freeCapacity,left);if(q<=0)continue;recommended.push({capabilityCode:c.capabilityCode,quantity:q});usedSup.add(key);left-=q;}
+  let draft=[];try{draft=JSON.parse(sd.plan_json||"[]");}catch{}
+  return {sdOrder:{id:sd.id,sdNumber:sd.sd_number,title:sd.title,planStatus:sd.plan_status||"planning",planConfirmedAt:sd.plan_confirmed_at,createdAt:sd.created_at},
+    orders,totalRequirement:total,allocated:fmtN(allocated),unallocated,candidates,recommended,recommendedShortfall:Math.max(fmtN(left),0),draft:Array.isArray(draft)?draft:[],detailsRestricted:!sup};
+}
+app.get("/api/admin/sd-orders/:id/sourcing-plan",requireAdmin,async(req,res)=>{
+  try{const d=await loadSourcingPlan(req,clean(req.params.id,80));if(!d)return res.status(404).json({error:"SupplyDesk order not found."});res.json(d);}
+  catch(error){console.error("Sourcing plan failed:",error);res.status(500).json({error:"Could not load the sourcing plan."});}
+});
+function planLines(body,d){
+  const raw=Array.isArray(body?.lines)?body.lines.slice(0,40):[];
+  const byCode=new Map(d.candidates.map(c=>[c.capabilityCode,c]));const seen=new Set();const out=[];
+  for(const l of raw){
+    const code=clean(l?.capabilityCode,30).toUpperCase(),qty=Number(l?.quantity),cost=l?.unitCost===""||l?.unitCost==null?null:Number(l.unitCost);
+    const c=byCode.get(code);
+    if(!c)throw Object.assign(new Error("A selected capability is not eligible (verified, approved and fresh capacity required)."),{http:400});
+    if(seen.has(code))throw Object.assign(new Error("A capability appears twice in the plan."),{http:400});seen.add(code);
+    if(!Number.isFinite(qty)||qty<=0||!Number.isInteger(qty))throw Object.assign(new Error("Enter a whole-number quantity for every allocation line."),{http:400});
+    if(qty>c.freeCapacity)throw Object.assign(new Error("Allocation exceeds the free capacity of "+c.productName+" ("+c.freeCapacity.toLocaleString("en-IN")+")."),{http:409});
+    if(c.hasLivePo)throw Object.assign(new Error("That supplier already has an active PO on this order."),{http:409});
+    if(cost!=null&&(!Number.isFinite(cost)||cost<=0))throw Object.assign(new Error("Enter a valid unit cost."),{http:400});
+    out.push({capabilityCode:code,quantity:qty,unitCost:cost});
+  }
+  const sum=out.reduce((t,l)=>t+l.quantity,0);
+  if(sum>d.unallocated+1e-9)throw Object.assign(new Error("The plan allocates "+sum.toLocaleString("en-IN")+" but only "+d.unallocated.toLocaleString("en-IN")+" is still unallocated."),{http:409});
+  return {lines:out,sum};
+}
+// Save the editable draft (no supplier is contacted).
+app.put("/api/admin/sd-orders/:id/sourcing-plan",requireAdmin,async(req,res)=>{
+  try{
+    const id=clean(req.params.id,80),d=await loadSourcingPlan(req,id);
+    if(!d)return res.status(404).json({error:"SupplyDesk order not found."});
+    const {lines,sum}=planLines(req.body,d);
+    await pool.execute("UPDATE sd_orders SET plan_json=? WHERE id=?",[JSON.stringify(lines),id]);
+    await audit(pool,req,"sd_order.plan_saved","sd_order",id,null,{lines:lines.length,quantity:sum});
+    res.json({ok:true,allocated:sum,unallocated:Math.max(fmtN(d.unallocated-sum),0)});
+  }catch(error){if(error.http)return res.status(error.http).json({error:error.message});console.error("Plan save failed:",error);res.status(500).json({error:"Could not save the plan."});}
+});
+// Confirm the allocation: one SupplyDesk-customer PO per supplier, each tied to the exact buyer orders it covers.
+app.post("/api/admin/sd-orders/:id/sourcing-plan/confirm",requireAdmin,async(req,res)=>{
+  const id=clean(req.params.id,80),b=req.body||{};
+  const currency=(clean(b.currency,10)||"INR").toUpperCase(),deliveryBy=clean(b.deliveryBy,10)||null,terms=clean(b.terms,2000)||null;
+  if(deliveryBy&&(!/^\d{4}-\d{2}-\d{2}$/.test(deliveryBy)||new Date(deliveryBy)<new Date(new Date().toDateString())))return res.status(400).json({error:"Delivery date must be today or later."});
+  let d,plan;
+  try{
+    d=await loadSourcingPlan(req,id);if(!d)return res.status(404).json({error:"SupplyDesk order not found."});
+    plan=planLines(b,d);
+    if(!plan.lines.length)return res.status(400).json({error:"Add at least one allocation line."});
+    if(plan.lines.some(l=>l.unitCost==null))return res.status(400).json({error:"Enter the unit cost for every supplier PO."});
+    if(plan.sum<d.unallocated-1e-9&&!b.allowShortfall)return res.status(409).json({error:"The plan covers "+plan.sum.toLocaleString("en-IN")+" of "+d.unallocated.toLocaleString("en-IN")+". Confirm that you accept the shortfall or allocate the rest.",code:"shortfall",shortfall:fmtN(d.unallocated-plan.sum)});
+  }catch(error){if(error.http)return res.status(error.http).json({error:error.message});console.error(error);return res.status(500).json({error:"Could not check the plan."});}
+  const conn=await pool.getConnection();const created=[];
+  try{
+    await conn.beginTransaction();
+    const [items]=await conn.execute("SELECT i.buyer_order_id,o.quantity FROM sd_order_items i JOIN orders o ON o.id=i.buyer_order_id WHERE i.sd_order_id=? ORDER BY o.created_at FOR UPDATE",[id]);
+    for(const l of plan.lines){
+      let left=l.quantity;const allocations=[];
+      for(const it of items){if(left<=0)break;const need=RFQ.parseQuantity(it.quantity)||0,a=await orderAllocation(conn,it.buyer_order_id),room=Math.max(need-a.allocated,0);if(room<=0)continue;const q=Math.min(room,left);allocations.push({buyerOrderId:it.buyer_order_id,quantity:q});left-=q;}
+      if(left>1e-9)throw Object.assign(new Error("The buyer orders no longer have room for this allocation. Reload the plan."),{http:409});
+      const r=await createSupplierPo(conn,req,{sdOrderId:id,code:l.capabilityCode,sid:"",unitCost:l.unitCost,currency,quantityText:null,deliveryBy,terms,allocations});
+      created.push(r);
+    }
+    await conn.execute("UPDATE sd_orders SET plan_status='confirmed',plan_json=?,plan_confirmed_at=NOW(),plan_confirmed_by=? WHERE id=?",[JSON.stringify(plan.lines),actorOf(req).id,id]);
+    await audit(conn,req,"sd_order.plan_confirmed","sd_order",id,null,{lines:plan.lines.length,quantity:plan.sum,shortfall:Math.max(fmtN(d.unallocated-plan.sum),0)});
+    await conn.commit();
+  }catch(error){await conn.rollback();if(error.http)return res.status(error.http).json({error:error.message});console.error("Plan confirm failed:",error);return res.status(500).json({error:"Could not confirm the allocation."});}
+  finally{conn.release();}
+  for(const r of created){try{await supplierPoMail(r.sup,r.po,r.sd.title,r.quantity);}catch(e){console.error("Supplier PO mail failed:",e);}}
+  res.status(201).json({ok:true,supplierPos:created.map(r=>({poNumber:r.po,supplierPoId:r.pid,quantity:r.quantity})),planStatus:"confirmed"});
+});
+
+// Pipeline counts for the Overview dashboard and the Exceptions list share one definition.
+async function adminExceptions(req){
+  const out=[];const push=(type,label,title,ref,ageH,screen,id)=>out.push({type,label,title,ref,ageHours:ageH==null?null:Math.floor(Number(ageH)),screen,id});
+  const [a]=await pool.execute("SELECT id,title,rfq_code,TIMESTAMPDIFF(HOUR,created_at,NOW()) h FROM buyer_requirements WHERE status='pending_review' AND created_at<DATE_SUB(NOW(),INTERVAL 48 HOUR) ORDER BY created_at LIMIT 50");
+  for(const r of a)push("overdue_review","Review overdue",r.title,r.rfq_code,r.h,"requests",r.id);
+  const [b]=await pool.execute("SELECT s.id,s.sd_number,s.title,TIMESTAMPDIFF(HOUR,s.created_at,NOW()) h FROM sd_orders s WHERE s.plan_status='planning' AND s.created_at<DATE_SUB(NOW(),INTERVAL 24 HOUR) ORDER BY s.created_at LIMIT 50");
+  for(const r of b)push("sourcing_stalled","Sourcing not planned",r.title,r.sd_number,r.h,"sourcing",r.id);
+  const [c]=await pool.execute("SELECT po.id,po.po_number,po.title,po.sd_order_id,po.supplier_id,TIMESTAMPDIFF(HOUR,po.status_changed_at,NOW()) h FROM supplier_pos po WHERE po.status='declined' AND EXISTS (SELECT 1 FROM sd_orders s WHERE s.id=po.sd_order_id) ORDER BY po.status_changed_at DESC LIMIT 50");
+  for(const r of c)push("po_declined","Supplier declined PO - re-source",r.title,r.po_number,r.h,"sourcing",r.sd_order_id);
+  const [d]=await pool.execute("SELECT po.id,po.po_number,po.title,po.sd_order_id,TIMESTAMPDIFF(HOUR,po.created_at,NOW()) h FROM supplier_pos po WHERE po.status='issued' AND po.created_at<DATE_SUB(NOW(),INTERVAL 48 HOUR) ORDER BY po.created_at LIMIT 50");
+  for(const r of d)push("po_unanswered","Supplier has not responded",r.title,r.po_number,r.h,"sourcing",r.sd_order_id);
+  const [e]=await pool.execute("SELECT o.id,o.po_number,o.title,TIMESTAMPDIFF(HOUR,o.created_at,NOW()) h FROM orders o WHERE o.review_status='pending_clarification' AND o.status<>'cancelled' ORDER BY o.created_at LIMIT 50");
+  for(const r of e)push("awaiting_buyer","Waiting for buyer clarification",r.title,r.po_number,r.h,"orders",r.id);
+  const [f]=await pool.execute(`SELECT p.id,p.capability_code,p.product_name,TIMESTAMPDIFF(HOUR,p.capacity_updated_at,NOW()) h FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id WHERE p.status='approved' AND s.verified=1 AND s.published=1 AND (p.capacity_updated_at IS NULL OR p.capacity_updated_at<DATE_SUB(NOW(),INTERVAL ${CAPACITY_STALE_DAYS} DAY)) ORDER BY p.capacity_updated_at LIMIT 50`);
+  for(const r of f)push("capacity_stale","Capacity not updated",r.product_name,r.capability_code,r.h,"capacity",r.id);
+  return out;
+}
+app.get("/api/admin/exceptions",requireAdmin,async(req,res)=>{
+  try{res.json({exceptions:await adminExceptions(req)});}
+  catch(error){console.error("Exceptions failed:",error);res.status(500).json({error:"Could not load exceptions."});}
+});
+app.get("/api/admin/pipeline",requireAdmin,async(req,res)=>{
+  try{
+    const n=async(sql,params=[])=>Number((await pool.execute(sql,params))[0][0].n)||0;
+    const stages=[
+      {key:"new_requests",label:"New Requests",screen:"requests",count:await n("SELECT COUNT(*) n FROM buyer_requirements WHERE status='pending_review'")},
+      {key:"review",label:"Review",screen:"orders",count:await n("SELECT COUNT(*) n FROM orders WHERE review_status IN ('pending_review','pending_clarification') AND status<>'cancelled'")},
+      {key:"accepted",label:"Accepted",screen:"requests",count:await n("SELECT COUNT(*) n FROM buyer_requirements WHERE status='fulfilling' AND rfq_state IN ('costing','quote_sent')")+await n("SELECT COUNT(*) n FROM orders o WHERE o.review_status IN ('accepted','partially_accepted') AND o.status<>'cancelled' AND NOT EXISTS (SELECT 1 FROM sd_order_items i WHERE i.buyer_order_id=o.id)")},
+      {key:"sourcing",label:"Sourcing",screen:"sourcing",count:await n("SELECT COUNT(*) n FROM sd_orders s WHERE s.plan_status='planning' AND EXISTS (SELECT 1 FROM sd_order_items i JOIN orders o ON o.id=i.buyer_order_id WHERE i.sd_order_id=s.id AND o.status<>'cancelled')")},
+      {key:"supplier_po",label:"Supplier PO",screen:"sourcing",count:await n("SELECT COUNT(*) n FROM supplier_pos WHERE status='issued'")},
+      {key:"production",label:"Production",screen:"production",count:await n("SELECT COUNT(*) n FROM supplier_pos WHERE status IN ('accepted','partially_accepted','in_production')")},
+      {key:"qc",label:"QC",screen:"qc",count:await n("SELECT COUNT(*) n FROM supplier_pos WHERE status='ready_for_qc'")},
+      {key:"transit",label:"Transit",screen:"logistics",count:await n("SELECT COUNT(*) n FROM orders WHERE status<>'cancelled' AND stage IN ('qc_completed','ready_for_transport','transport_booked','insurance_completed','in_transit','out_for_delivery')")},
+      {key:"delivery",label:"Delivery",screen:"logistics",count:await n("SELECT COUNT(*) n FROM orders WHERE status<>'cancelled' AND stage='delivered'")}
+    ];
+    const ex=await adminExceptions(req);
+    res.json({stages,exceptions:ex.length});
+  }catch(error){console.error("Pipeline failed:",error);res.status(500).json({error:"Could not load the pipeline."});}
+});
+
+// Supplier-network views (internal): capacity, capabilities and agreements.
+app.get("/api/admin/capacity",requireAdmin,async(req,res)=>{
+  try{
+    const [rows]=await pool.execute(`SELECT p.id,p.capability_code,p.product_name,p.category,p.subcategory,p.status,p.product_verified,p.capacity_verified,p.monthly_capacity,p.available_capacity,p.allocated_capacity,p.committed_capacity,p.capacity_unit,p.unit,p.lead_time_days,p.origin_region,p.capacity_updated_at,
+        s.id supplier_id,s.legal_name,s.trade_name,s.country,s.city,s.verified,s.published,s.onboarding_status
+      FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id WHERE p.status<>'archived' ORDER BY s.created_at DESC,p.created_at DESC LIMIT 1000`);
+    const sup=isSuper(req),now=Date.now();
+    res.json({items:rows.map(r=>{const upd=r.capacity_updated_at?new Date(r.capacity_updated_at).getTime():null;
+      const free=Math.max(Number(r.available_capacity||0)-Number(r.allocated_capacity||0)-Number(r.committed_capacity||0),0);
+      return {id:r.id,capabilityCode:r.capability_code,product:r.product_name,category:r.category,subcategory:r.subcategory,productStatus:r.status,productVerified:!!r.product_verified,capacityVerified:!!r.capacity_verified,
+        installed:r.monthly_capacity==null?null:Number(r.monthly_capacity),available:r.available_capacity==null?null:Number(r.available_capacity),allocated:Number(r.allocated_capacity||0),committed:Number(r.committed_capacity||0),free,unit:r.capacity_unit||r.unit||"",
+        leadTimeDays:r.lead_time_days,region:r.origin_region||r.city||r.country||"",updatedAt:r.capacity_updated_at,stale:!upd||now-upd>CAPACITY_STALE_DAYS*86400000,
+        supplier:sup?(r.trade_name||r.legal_name):supplierAlias(r.supplier_id),supplierId:sup?r.supplier_id:null,eligible:!!(r.verified&&r.published),onboardingStatus:r.onboarding_status};})});
+  }catch(error){console.error("Capacity list failed:",error);res.status(500).json({error:"Could not load capacity."});}
+});
+app.get("/api/admin/agreements",requireAdmin,async(req,res)=>{
+  try{
+    const [rows]=await pool.execute("SELECT id,legal_name,trade_name,country,city,onboarding_status,agreement_signed_at,verified,published,status_updated_at FROM supplier_profiles ORDER BY (agreement_signed_at IS NULL) DESC,created_at DESC LIMIT 500");
+    const sup=isSuper(req);
+    res.json({items:rows.map(r=>({id:r.id,supplier:sup?(r.trade_name||r.legal_name):supplierAlias(r.id),country:sup?r.country:"",onboardingStatus:r.onboarding_status,agreementSignedAt:r.agreement_signed_at,eligible:!!(r.verified&&r.published),updatedAt:r.status_updated_at}))});
+  }catch(error){console.error("Agreements failed:",error);res.status(500).json({error:"Could not load agreements."});}
+});
 
 async function start() {
   // The dashboard schema is idempotent. This repairs an older production DB

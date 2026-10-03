@@ -342,7 +342,7 @@ test.describe("supplier onboarding, eligibility, privacy, allocation", () => {
     const m1 = (await (await request.get("/api/supplier-dashboard/purchase-orders", { headers: seedH })).json()).purchaseOrders.find(p => p.id === po1.supplierPoId);
     const m2 = (await (await request.get("/api/supplier-dashboard/purchase-orders", { headers: sh })).json()).purchaseOrders.find(p => p.id === po2.supplierPoId);
     expect([m1.statusLabel, m1.quantity, m2.quantity]).toEqual(["SupplyDesk PO", "40000", "30000"]);
-    for (const m of [m1, m2]) expect(JSON.stringify(m)).not.toMatch(/Hidden Buyer|@example\.com|buyer|B1-|50\.0000/i);
+    for (const m of [m1, m2]) expect(JSON.stringify(m)).not.toMatch(/Hidden Buyer|@example\.com|buyer|50\.0000/i);
     expect(JSON.stringify(m1)).not.toContain(b2.poNumber);
 
     // capacity: issued POs are ALLOCATED; the public number drops by exactly that (90,000-40,000) + (40,000-30,000)

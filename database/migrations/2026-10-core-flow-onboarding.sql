@@ -28,3 +28,12 @@ CREATE TABLE IF NOT EXISTS supplier_onboarding_events (
 UPDATE supplier_profiles SET onboarding_status='supplydesk_approved', agreement_signed_at=COALESCE(agreement_signed_at,created_at), email_verified_at=COALESCE(email_verified_at,created_at) WHERE verified=1 AND published=1 AND onboarding_status='account_verified';
 UPDATE supplier_products SET product_verified=IF(status='approved',1,0);
 UPDATE supplier_products SET capacity_verified=1, capacity_verified_at=COALESCE(capacity_updated_at,NOW()) WHERE status='approved' AND monthly_capacity IS NOT NULL AND monthly_capacity>0;
+
+-- Admin procurement workflow (accept full/partial, sourcing plan)
+ALTER TABLE buyer_requirements ADD COLUMN accept_decision VARCHAR(10) NULL;
+ALTER TABLE buyer_requirements ADD COLUMN accepted_quantity VARCHAR(60) NULL;
+ALTER TABLE sd_orders ADD COLUMN plan_status VARCHAR(16) NOT NULL DEFAULT 'planning';
+ALTER TABLE sd_orders ADD COLUMN plan_json MEDIUMTEXT NULL;
+ALTER TABLE sd_orders ADD COLUMN plan_confirmed_at DATETIME NULL;
+ALTER TABLE sd_orders ADD COLUMN plan_confirmed_by VARCHAR(120) NULL;
+UPDATE sd_orders s SET plan_status='confirmed', plan_confirmed_at=COALESCE(plan_confirmed_at,s.created_at) WHERE EXISTS (SELECT 1 FROM supplier_pos p WHERE p.sd_order_id=s.id AND p.status NOT IN ('declined','cancelled'));
