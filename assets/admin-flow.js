@@ -43,7 +43,70 @@ async function saveAssign(type,id,desk,el){
   catch(e){flowMsg(e.message);hydrateAssign(type,id)}
 }
 
+
+// ---- Disclosure approvals + My Desk ----
+const DESK_KIND={buyer_desk:["supplier_identity","supplier details"],procurement:["buyer_contact","buyer contact details"]};
+function discBox(type,id){
+  const k=DESK_KIND[role()];if(!k||(role()==="buyer_desk"&&type!=="requirement"))return "";
+  setTimeout(()=>hydrateDisc(type,id),0);
+  return '<div class="as-box" id="dcBox" data-i="'+esc(id)+'"><span class="muted">Loading...</span></div>';
+}
+async function hydrateDisc(type,id){
+  const box=document.getElementById("dcBox");if(!box||box.dataset.i!==id)return;
+  const k=DESK_KIND[role()];
+  try{
+    const d=await api("/api/admin/disclosure-requests?entityId="+encodeURIComponent(id));
+    const rows=(d.requests||[]).filter(r=>r.kind===k[0]);
+    const act=rows.find(r=>r.status==="approved"&&!r.expired),pend=rows.find(r=>r.status==="pending"),last=rows[0];
+    box.innerHTML='<div><b>'+esc(k[1])+'</b><div class="muted">Shown only with Management approval.</div></div>'
+      +(act?'<button onclick="revealDisc(\''+esc(act.id)+'\')">View (approved until '+esc(String(act.expires_at).replace("T"," ").slice(0,16))+')</button>'
+        :pend?'<span class="pill">Request pending</span>'
+        :'<button onclick="requestDisc(\''+type+'\',\''+esc(id)+'\')">Request '+esc(k[1])+'</button>'+(last&&last.status==="rejected"?' <span class="muted">Last request rejected'+(last.decision_note?': '+esc(last.decision_note):'')+'</span>':''))
+      +'<div id="dcOut"></div>';
+  }catch(e){box.innerHTML='<span class="muted">'+esc(e.message)+'</span>'}
+}
+async function requestDisc(type,id){
+  const reason=prompt("Why do you need these details? (Management will see this)");if(!reason)return;
+  try{await api("/api/admin/disclosure-requests",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({entityType:type,entityId:id,reason})});flowMsg("Request sent to Management.");hydrateDisc(type,id)}
+  catch(e){flowMsg(e.message)}
+}
+async function revealDisc(rid){
+  try{
+    const d=await api("/api/admin/disclosure-requests/"+rid+"/reveal");
+    const rows=(d.buyers||d.suppliers||[]).map(x=>'<div class="muted" style="margin-top:4px">'+Object.values(x).filter(Boolean).map(esc).join(" · ")+'</div>').join("")||'<div class="muted">Nothing on file.</div>';
+    document.getElementById("dcOut").innerHTML=rows;
+  }catch(e){flowMsg(e.message)}
+}
+async function loadApprovals(){
+  setTab("approvals");CUR.screen="approvals";
+  if(needSignIn())return;
+  try{
+    const d=await api("/api/admin/disclosure-requests?status=pending");
+    const rows=d.requests||[];
+    document.getElementById("detail").innerHTML='<h2>Disclosure approvals</h2><div class="muted">A desk is asking to see the other side. Approve only what the work needs; access expires automatically.</div>'
+      +(rows.length?rows.map(r=>'<div class="pl-card" style="margin-top:12px"><h3>'+esc(r.requested_by)+' <small class="muted">('+esc(r.requester_role)+')</small> wants '+(r.kind==="buyer_contact"?"buyer contact details":"supplier identity")+'</h3><div class="muted">'+esc(r.sd_ref||r.req_ref||"")+'</div><p>'+esc(r.reason)+'</p><div class="actions"><select id="dh'+esc(r.id)+'"><option value="4">4 hours</option><option value="24" selected>24 hours</option><option value="72">3 days</option></select><button class="approve" onclick="decideDisc(\''+esc(r.id)+'\',\'approve\')">Approve</button><button class="reject" onclick="decideDisc(\''+esc(r.id)+'\',\'reject\')">Reject</button></div></div>').join(""):'<div class="pl-card" style="margin-top:12px">No pending requests.</div>');
+    flowMsg("");
+  }catch(err){flowErr(err)}
+}
+async function decideDisc(id,decision){
+  const note=decision==="reject"?prompt("Reason (optional)")||"":"";
+  try{await api("/api/admin/disclosure-requests/"+id+"/decision",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({decision,note,hours:Number((document.getElementById("dh"+id)||{}).value)||24})});await loadApprovals();flowMsg(decision==="approve"?"Approved.":"Rejected.")}
+  catch(e){flowMsg(e.message)}
+}
+async function loadMyDesk(){
+  setTab("overview");CUR.screen="overview";
+  try{
+    const d=await api("/api/admin/my-desk"),buyer=d.desk==="buyer";
+    const open=it=>buyer?"openBuyerRequirementAdmin('"+esc(it.id)+"')":"openSourcingPlan('"+esc(it.id)+"')";
+    const tiles=buyer?[["To review",(d.counts.submitted||0)],["Total assigned",d.items.length]]:[["To plan",d.counts.to_plan||0],["Planned",d.counts.planned||0],["Declined POs",d.counts.declined||0]];
+    document.getElementById("detail").innerHTML='<h2>My desk</h2><div class="muted">'+(buyer?"Buyer requirements assigned to you.":"SupplyDesk orders assigned to you for sourcing.")+'</div>'
+      +'<div class="sp-sum">'+tiles.map(t=>'<div><small>'+t[0]+'</small><b>'+t[1]+'</b></div>').join("")+'</div>'
+      +(d.items.length?'<div class="pl-card">'+d.items.map(it=>'<div class="pl-ex" onclick="'+open(it)+'"><span>'+(it.needsAction?'<b>● </b>':'')+esc(it.title||"")+' <small>· '+esc(buyer?(it.rfq_code||""):(it.sd_number||""))+'</small></span><small>'+(buyer?esc(it.stateLabel):fnum(it.allocated)+' / '+fnum(it.needed))+'</small></div>').join("")+'</div>':'<div class="pl-card">Nothing is assigned to you yet. Management assigns work to your desk.</div>');
+  }catch(err){flowErr(err)}
+}
+
 async function loadOverview(){
+  if(DESK_KIND[role()]&&role()!=="finance")return loadMyDesk();
   setTab("overview");CUR.screen="overview";
   if(needSignIn())return;
   try{
@@ -119,7 +182,7 @@ async function openBuyerRequirementAdmin(id,openSec){
       +rqFact("Delivery",esc([r.delivery_city,r.delivery_country].filter(Boolean).join(", ")))+rqFact("Required by",esc(day(r.required_by)))
       +(r.quality_standards?rqFact("Quality",esc(r.quality_standards)):"")+(r.certifications?rqFact("Certifications",esc(r.certifications)):"")+(r.packaging?rqFact("Packaging",esc(r.packaging)):"")
       +(r.payment_terms?rqFact("Payment terms",esc(r.payment_terms)):"")+(r.incoterm?rqFact("Delivery terms",esc(r.incoterm)):"");
-    const head='<div class="rq-head"><div><h2>'+esc(r.title)+'</h2><div class="muted">'+(r.rfq_code?'RFQ '+esc(r.rfq_code)+' · ':"")+'Received '+esc(new Date(r.created_at).toLocaleDateString())+'</div></div><span class="pill rq-pill">'+esc(reviewing?"Needs review":stLabel)+'</span></div>'+assignBox("requirement",id);
+    const head='<div class="rq-head"><div><h2>'+esc(r.title)+'</h2><div class="muted">'+(r.rfq_code?'RFQ '+esc(r.rfq_code)+' · ':"")+'Received '+esc(new Date(r.created_at).toLocaleDateString())+'</div></div><span class="pill rq-pill">'+esc(reviewing?"Needs review":stLabel)+'</span></div>'+assignBox("requirement",id)+discBox("requirement",id);
     const summary='<div class="rq-facts">'+facts+'</div>'+(r.description?'<div class="rq-desc">'+esc(r.description)+'</div>':"");
     const timeline=reqTimeline(r,au);
     if(reviewing){
@@ -227,7 +290,7 @@ async function openSourcingPlan(id){
     const [plan,sd,al,ords]=await Promise.all([api("/api/admin/sd-orders/"+enc+"/sourcing-plan"),api("/api/admin/sd-orders/"+enc),api("/api/admin/sd-orders/"+enc+"/allocation"),api("/api/admin/orders")]);
     ordData=ords;
     const o=plan.sdOrder,un=plan.unallocated,pct=plan.totalRequirement?Math.min(100,Math.round(plan.allocated/plan.totalRequirement*100)):0;
-    const head='<div class="rq-head"><div><h2>'+esc(o.title)+'</h2><div class="muted">'+esc(o.sdNumber)+' · SupplyDesk order · '+plan.orders.length+' buyer order(s)</div></div><span class="rq-pill">'+esc(un>0?(plan.allocated>0?"Partly planned":"To plan"):"Planned")+'</span></div>'+assignBox("sd_order",id);
+    const head='<div class="rq-head"><div><h2>'+esc(o.title)+'</h2><div class="muted">'+esc(o.sdNumber)+' · SupplyDesk order · '+plan.orders.length+' buyer order(s)</div></div><span class="rq-pill">'+esc(un>0?(plan.allocated>0?"Partly planned":"To plan"):"Planned")+'</span></div>'+assignBox("sd_order",id)+discBox("sd_order",id);
     const sum='<div class="sp-sum"><div><small>Total requirement</small><b>'+fnum(plan.totalRequirement)+'</b></div><div><small>On supplier POs</small><b>'+fnum(plan.allocated)+'</b></div><div><small>Still to allocate</small><b>'+fnum(un)+'</b></div></div><div class="sp-bar"><i style="width:'+pct+'%"></i></div>';
     const bo='<div class="nt-wrap"><table class="nt-t"><tr><th>Buyer PO</th><th class="n">Needed</th><th class="n">Allocated</th><th class="n">Remaining</th><th>Stage</th></tr>'+plan.orders.map(i=>'<tr><td><a href="#" onclick="openOrderAdmin(\''+esc(i.buyerOrderId)+'\');return false"><b>'+esc(i.poNumber)+'</b></a>'+(i.partial?' <span class="muted">(partial)</span>':'')+'</td><td class="n">'+fnum(i.needed)+'</td><td class="n">'+fnum(i.allocated)+'</td><td class="n">'+fnum(i.remaining)+'</td><td>'+esc(i.stageLabel)+'</td></tr>').join("")+'</table></div>';
     let editor="";

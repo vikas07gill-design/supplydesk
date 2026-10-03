@@ -466,14 +466,16 @@ function stripKeys(v,keys){
 }
 const DESK_POLICY={
   buyer_desk:[
-    ["GET",/^\/api\/admin\/pipeline$/],
+    ["GET",/^\/api\/admin\/(pipeline|my-desk)$/],
+    ["*",/^\/api\/admin\/disclosure-requests(\/[^/]+(\/reveal)?)?$/],
     ["*",/^\/api\/admin\/requirements$/],
     ["*",/^\/api\/admin\/requirements\/[^/]+\/(messages|message|buyer-quote|review)$/],
     ["GET",/^\/api\/admin\/orders$/],
     ["*",/^\/api\/admin\/orders\/[^/]+\/(review|status|stage)$/]
   ],
   procurement:[
-    ["GET",/^\/api\/admin\/(pipeline|capacity|agreements|procurement\/queue)$/],
+    ["GET",/^\/api\/admin\/(pipeline|my-desk|capacity|agreements|procurement\/queue)$/],
+    ["*",/^\/api\/admin\/disclosure-requests(\/[^/]+(\/reveal)?)?$/],
     ["GET",/^\/api\/admin\/sd-orders$/],
     ["*",/^\/api\/admin\/sd-orders\/[^/]+(\/(allocation|supplier-pos|sourcing-plan|sourcing-plan\/confirm))?$/],
     ["*",/^\/api\/admin\/orders\/[^/]+\/(supplier-pos?|trace)$/],
@@ -1929,6 +1931,113 @@ app.put("/api/admin/assignments",requireAssigner,async(req,res)=>{
     await audit(pool,req,"assignment.changed",type,id,{desk,adminId:old?.admin_id||null},{desk,adminId});
     res.json({ok:true});
   }catch(error){console.error(error);res.status(500).json({error:"Could not save the assignment."});}
+});
+
+// ---- Approval-controlled disclosure ----
+// A desk that is not entitled to the other side's identity asks Management; an approval opens a time-boxed reveal.
+async function ownsEntity(session,type,id){
+  const aid=session.admin_id;
+  if(session.role==="buyer_desk")return type==="requirement"&&(await assignedIds(aid,"buyer","requirement")).has(id);
+  if(session.role==="procurement"){
+    if(type==="sd_order")return (await assignedIds(aid,"procurement","sd_order")).has(id);
+    if(type==="requirement"){
+      if((await assignedIds(aid,"procurement","requirement")).has(id))return true;
+      return (await requirementsOfSd([...await assignedIds(aid,"procurement","sd_order")])).includes(id);
+    }
+  }
+  return false;
+}
+const DISCLOSURE_KIND={buyer_desk:"supplier_identity",procurement:"buyer_contact"};
+app.post("/api/admin/disclosure-requests",requireAdmin,async(req,res)=>{
+  const role=req.admin.role,type=clean(req.body?.entityType,20),id=clean(req.body?.entityId,80),reason=clean(req.body?.reason,500);
+  const kind=DISCLOSURE_KIND[role];
+  if(!kind)return res.status(403).json({error:"Only the Buyer Desk or Procurement Desk can request disclosure."});
+  if(!["requirement","sd_order"].includes(type)||!id)return res.status(400).json({error:"Choose what you need details for."});
+  if(reason.length<10)return res.status(400).json({error:"Say why you need this (at least a short sentence)."});
+  try{
+    if(!(await ownsEntity(req.admin,type,id)))return res.status(403).json({error:"This work is not assigned to you."});
+    const [[open]]=await pool.execute("SELECT id FROM disclosure_requests WHERE requested_by=? AND entity_type=? AND entity_id=? AND kind=? AND status='pending'",[req.admin.admin_id,type,id,kind]);
+    if(open)return res.status(409).json({error:"You already have a pending request for this."});
+    const rid=crypto.randomUUID();
+    await pool.execute("INSERT INTO disclosure_requests (id,requested_by,requester_role,entity_type,entity_id,kind,reason) VALUES (?,?,?,?,?,?,?)",[rid,req.admin.admin_id,role,type,id,kind,reason]);
+    await audit(pool,req,"disclosure.requested",type,id,null,{kind,reason});
+    res.status(201).json({ok:true,id:rid,kind});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not send the request."});}
+});
+app.get("/api/admin/disclosure-requests",requireAdmin,async(req,res)=>{
+  try{
+    const mgr=["super_admin","management"].includes(req.admin.role),status=clean(req.query.status,12),entityId=clean(req.query.entityId,80);
+    const where=[],params=[];
+    if(!mgr){where.push("requested_by=?");params.push(req.admin.admin_id);}
+    if(["pending","approved","rejected"].includes(status)){where.push("status=?");params.push(status);}
+    if(entityId){where.push("entity_id=?");params.push(entityId);}
+    const [rows]=await pool.execute("SELECT id,requested_by,requester_role,entity_type,entity_id,kind,reason,status,decided_by,decision_note,decided_at,expires_at,created_at,(expires_at IS NOT NULL AND expires_at<NOW()) expired,(SELECT COALESCE(r.rfq_code,r.title) FROM buyer_requirements r WHERE r.id=d.entity_id AND d.entity_type='requirement') req_ref,(SELECT s.sd_number FROM sd_orders s WHERE s.id=d.entity_id AND d.entity_type='sd_order') sd_ref FROM disclosure_requests d"+(where.length?" WHERE "+where.join(" AND "):"")+" ORDER BY (status='pending') DESC, created_at DESC LIMIT 200",params);
+    res.json({requests:rows});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not load requests."});}
+});
+app.post("/api/admin/disclosure-requests/:id/decision",requireAssigner,async(req,res)=>{
+  const id=clean(req.params.id,80),decision=clean(req.body?.decision,10),note=clean(req.body?.note,500)||null;
+  const hours=Math.min(168,Math.max(1,Number(req.body?.hours)||24));
+  if(!["approve","reject"].includes(decision))return res.status(400).json({error:"Choose approve or reject."});
+  try{
+    const [[d]]=await pool.execute("SELECT id,status,entity_type,entity_id,kind FROM disclosure_requests WHERE id=?",[id]);
+    if(!d)return res.status(404).json({error:"Request not found."});
+    if(d.status!=="pending")return res.status(409).json({error:"This request was already decided."});
+    await pool.execute("UPDATE disclosure_requests SET status=?,decided_by=?,decision_note=?,decided_at=NOW(),expires_at="+(decision==="approve"?"DATE_ADD(NOW(),INTERVAL ? HOUR)":"NULL ")+" WHERE id=?",decision==="approve"?[decision==="approve"?"approved":"rejected",req.admin.admin_id,note,hours,id]:["rejected",req.admin.admin_id,note,id]);
+    await audit(pool,req,"disclosure."+(decision==="approve"?"approved":"rejected"),d.entity_type,d.entity_id,{kind:d.kind},{note,hours:decision==="approve"?hours:null});
+    res.json({ok:true});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not save the decision."});}
+});
+app.get("/api/admin/disclosure-requests/:id/reveal",requireAdmin,async(req,res)=>{
+  try{
+    const [[d]]=await pool.execute("SELECT * FROM disclosure_requests WHERE id=?",[clean(req.params.id,80)]);
+    if(!d||d.requested_by!==req.admin.admin_id)return res.status(404).json({error:"Request not found."});
+    if(d.status!=="approved"||!d.expires_at||new Date(d.expires_at)<new Date())return res.status(403).json({error:"This approval is not active."});
+    let data;
+    if(d.kind==="buyer_contact"){
+      const [rows]=d.entity_type==="requirement"
+        ?await pool.execute("SELECT DISTINCT b.name,b.company,b.email,b.phone FROM buyer_requirements r JOIN buyers b ON b.id=r.buyer_id WHERE r.id=?",[d.entity_id])
+        :await pool.execute("SELECT DISTINCT b.name,b.company,b.email,b.phone FROM sd_order_items i JOIN orders o ON o.id=i.buyer_order_id JOIN buyers b ON b.id=o.buyer_id WHERE i.sd_order_id=?",[d.entity_id]);
+      data={buyers:rows};
+    }else{
+      const [rows]=d.entity_type==="sd_order"
+        ?await pool.execute("SELECT DISTINCT s.legal_name,s.trade_name,s.business_email,s.business_phone,s.city,s.country FROM supplier_pos p JOIN supplier_profiles s ON s.id=p.supplier_id WHERE p.sd_order_id=?",[d.entity_id])
+        :await pool.execute("SELECT DISTINCT s.legal_name,s.trade_name,s.business_email,s.business_phone,s.city,s.country FROM supplier_po_lines l JOIN supplier_pos p ON p.id=l.supplier_po_id JOIN supplier_profiles s ON s.id=p.supplier_id JOIN orders o ON o.id=l.buyer_order_id WHERE o.rfq_id=?",[d.entity_id]);
+      data={suppliers:rows};
+    }
+    await audit(pool,req,"identity.revealed",d.entity_type,d.entity_id,null,{kind:d.kind,requestId:d.id});
+    res.json({kind:d.kind,expiresAt:d.expires_at,...data});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not load the details."});}
+});
+
+// ---- My Desk: one dashboard per desk, limited to assigned work ----
+app.get("/api/admin/my-desk",requireAdmin,async(req,res)=>{
+  const role=req.admin.role,aid=req.admin.admin_id;
+  try{
+    if(role==="buyer_desk"){
+      const ids=[...await assignedIds(aid,"buyer","requirement")];
+      if(!ids.length)return res.json({desk:"buyer",counts:{},items:[]});
+      const [rows]=await pool.query("SELECT r.id,r.rfq_code,r.title,r.rfq_state,r.status,r.accept_decision,r.required_by,r.created_at,r.state_changed_at,b.name buyer_name,b.company buyer_company,(SELECT COUNT(*) FROM orders o WHERE o.rfq_id=r.id) orders FROM buyer_requirements r JOIN buyers b ON b.id=r.buyer_id WHERE r.id IN (?) ORDER BY r.created_at DESC",[ids]);
+      const now=Date.now(),counts={},items=rows.map(r=>{
+        const st=r.rfq_state||RFQ.LEGACY_STATUS_TO_STATE[r.status]||"submitted";counts[st]=(counts[st]||0)+1;
+        const waitingHours=Math.floor((now-new Date(r.state_changed_at||r.created_at).getTime())/3600000);
+        return {...r,rfq_state:st,stateLabel:RFQ.STATES[st]?.label||st,waitingHours,needsAction:st==="submitted"};
+      });
+      return res.json({desk:"buyer",counts,states:Object.fromEntries(Object.entries(RFQ.STATES).map(([k,v])=>[k,v.label])),items});
+    }
+    if(role==="procurement"){
+      const ids=[...await assignedIds(aid,"procurement","sd_order")];
+      if(!ids.length)return res.json({desk:"procurement",counts:{},items:[]});
+      const [rows]=await pool.query("SELECT s.id,s.sd_number,s.title,s.plan_status,s.created_at,(SELECT COALESCE(SUM(i.quantity),0) FROM sd_order_items i WHERE i.sd_order_id=s.id) needed,(SELECT COALESCE(SUM(l.quantity),0) FROM supplier_po_lines l JOIN supplier_pos p ON p.id=l.supplier_po_id WHERE l.sd_order_id=s.id AND p.status NOT IN ('declined','cancelled')) allocated,(SELECT COUNT(*) FROM supplier_pos p WHERE p.sd_order_id=s.id AND p.status NOT IN ('declined','cancelled')) live_pos,(SELECT COUNT(*) FROM supplier_pos p WHERE p.sd_order_id=s.id AND p.status='declined') declined_pos FROM sd_orders s WHERE s.id IN (?) ORDER BY s.created_at DESC",[ids]);
+      const counts={to_plan:0,planned:0,declined:0},items=rows.map(r=>{
+        const needed=Number(r.needed)||0,allocated=Number(r.allocated)||0,toPlan=allocated<needed;
+        if(toPlan)counts.to_plan++;else counts.planned++;if(Number(r.declined_pos))counts.declined++;
+        return {...r,needed,allocated,needsAction:toPlan||Number(r.declined_pos)>0};
+      });
+      return res.json({desk:"procurement",counts,items});
+    }
+    res.status(400).json({error:"This dashboard is for the Buyer Desk and Procurement Desk."});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not load your desk."});}
 });
 
 // ---- Invoices & payments (Phase 5): internal tracking, GST % shown. Not a statutory tax invoice (no GSTIN/HSN). ----
@@ -4582,6 +4691,7 @@ async function syncSupplierEligibility(db,supplierId){
 
 // ---- Admin procurement workflow: Request review -> SupplyDesk order -> Sourcing plan -> Supplier POs ----
 async function ensureFlowSchema(){
+  await pool.query("CREATE TABLE IF NOT EXISTS disclosure_requests (id CHAR(36) PRIMARY KEY, requested_by VARCHAR(120) NOT NULL, requester_role VARCHAR(30) NOT NULL, entity_type ENUM('requirement','sd_order') NOT NULL, entity_id CHAR(36) NOT NULL, kind ENUM('buyer_contact','supplier_identity') NOT NULL, reason VARCHAR(500) NOT NULL, status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending', decided_by VARCHAR(120) NULL, decision_note VARCHAR(500) NULL, decided_at DATETIME NULL, expires_at DATETIME NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_disc_status (status,created_at), INDEX idx_disc_user (requested_by,status)) ENGINE=InnoDB");
   await pool.query("CREATE TABLE IF NOT EXISTS employee_assignments (id CHAR(36) PRIMARY KEY, entity_type ENUM('requirement','sd_order') NOT NULL, entity_id CHAR(36) NOT NULL, desk ENUM('buyer','procurement') NOT NULL, admin_id VARCHAR(120) NOT NULL, assigned_by VARCHAR(120) NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uq_assign (entity_type,entity_id,desk), INDEX idx_assign_admin (admin_id,desk,entity_type)) ENGINE=InnoDB");
   const add=async(table,ddl)=>{try{await pool.query("ALTER TABLE "+table+" ADD COLUMN "+ddl);return true;}catch(e){if(!["ER_DUP_FIELDNAME","ER_DUP_COLUMN"].includes(e?.code))throw e;return false;}};
   await add("buyer_requirements","accept_decision VARCHAR(10) NULL");
