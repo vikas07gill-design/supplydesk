@@ -140,6 +140,33 @@ test("denied attempts and assignment changes are audited", async ({ request }) =
   expect(entries.some(e => e.action === "access.denied")).toBe(true);
 });
 
+test("phase 2: contact details are blocked in outgoing messages (except Management / Super Admin)", async ({ request }) => {
+  const url = `/api/admin/requirements/${w1.requirementId}/message`;
+  for (const text of ["mail me at john@supplier.com", "call +91 98100 12345", "see www.supplier.com", "whatsapp 9810012345", "ring 98100 12345 67"]) {
+    const r = await request.post(url, { headers: H(admin), data: { message: text } });
+    expect(r.status(), text).toBe(422);
+    expect((await r.json()).code).toBe("contact_blocked");
+  }
+  // ordinary quantities, prices and Indian-format numbers are fine
+  const ok = await request.post(url, { headers: H(admin), data: { message: "We can supply 1,00,000 pcs at Rs 42.50 per unit within 30 days." } });
+  expect(ok.status()).toBe(201);
+  expect((await request.post(url, { headers: H(U.management.token), data: { message: "Direct line approved: +91 98100 12345" } })).status()).toBe(201);
+  // contact details may not reach suppliers through PO terms either
+  expect((await request.post(`/api/admin/sd-orders/${w1.sdOrderId}/supplier-pos`, { headers: H(admin), data: { terms: "contact buyer@example.com" } })).status()).toBe(422);
+});
+
+test("phase 2: sensitive views, downloads and writes are audited", async ({ request }) => {
+  await request.get("/api/admin/requirements", { headers: H(U.management.token) });
+  await request.get("/api/super-admin/margin-report", { headers: H(U.finance.token) });
+  await new Promise(r => setTimeout(r, 300));
+  const entries = (await (await request.get("/api/admin/audit", { headers: H(su) })).json()).entries;
+  const has = (a, role) => entries.some(e => e.action === a && (!role || e.actor_role === role));
+  expect(has("buyer_contacts.view", "management")).toBe(true);
+  expect(has("margin.view", "finance")).toBe(true);
+  expect(has("communication.sent")).toBe(true);
+  expect(has("disclosure.blocked")).toBe(true);
+});
+
 test("UI: buyer desk gets a trimmed menu; management can assign from a requirement", async ({ page, request }) => {
   const login = await makeUser(request, "buyer_desk", ".ui");
   await page.addInitScript(([t, r]) => { sessionStorage.setItem("supplydesk_admin_token", t); sessionStorage.setItem("supplydesk_admin_role", r); }, [login.token, "buyer_desk"]);

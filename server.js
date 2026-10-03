@@ -551,6 +551,53 @@ async function deskFilterBody(session,path,body){
   return body;
 }
 
+// ---- Sensitive-access audit and contact-disclosure guard ----
+// Views of buyer contacts / supplier identity, file downloads, contact lists and margin are logged; so are commercial
+// and external-communication writes. Outgoing text from non-management roles may not carry phone/email/links
+// (SupplyDesk relays communication; direct contact details are shared only by Management / Super Admin).
+const SENSITIVE_VIEWS=[
+  [/^\/api\/admin\/requirements$/,"buyer_contacts.view","buyer_contact"],
+  [/^\/api\/admin\/(orders|sd-orders)\/[^/]+\/(trace|allocation)$/,"trace.view",null],
+  [/^\/api\/(admin|super-admin)\/(applications|suppliers)\/[^/]+$/,"supplier_detail.view","supplier_identity"],
+  [/^\/api\/super-admin\/suppliers$/,"supplier_list.view","supplier_identity"],
+  [/^\/api\/admin\/(files|product-files|supplier-update-files)\/[^/]+$/,"file.download",null],
+  [/^\/api\/admin\/potential-contacts$/,"contact_list.view",null],
+  [/^\/api\/super-admin\/margin-report$/,"margin.view",null]
+];
+const AUDITED_WRITES=/^\/api\/(admin|super-admin)\/(requirements\/[^/]+\/(buyer-quote|review|message|state)|orders\/[^/]+\/(review|status|stage|invoice|supplier-po)|invoices\/|sd-orders\/[^/]+\/(supplier-pos|sourcing-plan)|supplier-pos\/[^/]+\/cancel|suppliers\/[^/]+\/(onboarding|email)|potential-contacts\/import|invite|bulk-invite)/;
+function auditSensitive(req,res){
+  const path=req.path,method=req.method;
+  let action=null;
+  if(method==="GET"){const hit=SENSITIVE_VIEWS.find(([re,,perm])=>re.test(path)&&(!perm||canSee(req,perm)));if(hit)action=hit[1];}
+  else if(AUDITED_WRITES.test(path))action=/\/message$/.test(path)?"communication.sent":"admin.write";
+  if(!action)return;
+  res.on("finish",()=>{
+    if(res.statusCode>=400)return;
+    audit(pool,req,action,"admin_route",path.slice(0,80),null,{method,path,query:method==="GET"?Object.keys(req.query||{}).join(","):undefined}).catch(()=>{});
+  });
+}
+const CONTACT_FIELDS=["message","subject","note","terms","reviewNote","review_note","notes","comment","deliveryNote"];
+const CONTACT_PATHS=/^\/api\/admin\/(requirements\/[^/]+\/(message|buyer-quote|review)|orders\/[^/]+\/(review|supplier-po)|sd-orders\/[^/]+\/(supplier-pos|sourcing-plan\/confirm|sourcing-plan))$/;
+function hasContactDetails(text){
+  const t=String(text||"");
+  if(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(t)||/\b(?:https?:\/\/|www\.)\S+/i.test(t))return true;
+  if(/(?<!\d)[6-9]\d{9}(?!\d)/.test(t))return true;                       // bare Indian mobile number
+  for(const m of t.match(/\+?\d[\d ()-]{8,}\d/g)||[]){                        // spaced / dashed / international numbers
+    const digits=m.replace(/\D/g,"").length;
+    if(digits>=10&&digits<=15&&(m.startsWith("+")||/[ ()-]/.test(m)))return true;
+  }
+  return false;
+}
+async function contactGuard(req,res){
+  if(["super_admin","management"].includes(req.admin?.role)||req.method==="GET"||!CONTACT_PATHS.test(req.path))return false;
+  const b=req.body||{};
+  const bad=CONTACT_FIELDS.find(k=>typeof b[k]==="string"&&hasContactDetails(b[k]));
+  if(!bad)return false;
+  try{await audit(pool,req,"disclosure.blocked","admin_route",req.path.slice(0,80),null,{field:bad});}catch{}
+  res.status(422).json({error:"Phone numbers, email addresses and links can't be sent through SupplyDesk messages. Communication is relayed by SupplyDesk; ask Management to approve any direct disclosure.",code:"contact_blocked",field:bad});
+  return true;
+}
+
 async function requireAdmin(req,res,next){
   try{
     const session=await getAdminSession(req);
@@ -565,6 +612,8 @@ async function requireAdmin(req,res,next){
         return res.status(403).json({error:"Your role does not have access to this."});
       }
     }
+    if(await contactGuard(req,res))return;
+    auditSensitive(req,res);
     const drop=new Set();
     for(const perm of Object.keys(STRIP_KEYS))if(!canSee(req,perm)&&(perm!=="margin"||DESK_ROLES.includes(role)))for(const k of STRIP_KEYS[perm])drop.add(k);
     const filter=DESK_ROLES.includes(role)&&role!=="finance";
@@ -589,6 +638,7 @@ const requirePerm=(perm)=>async(req,res,next)=>{
     if(!session)return res.status(401).json({error:"Unauthorized"});
     req.admin=session;
     if(!canSee(req,perm))return res.status(403).json({error:"Your role does not have access to this."});
+    auditSensitive(req,res);
     next();
   }catch(error){console.error("Permission check failed:",error);res.status(500).json({error:"Could not authenticate."});}
 };
@@ -606,7 +656,7 @@ async function requireSuperAdmin(req,res,next){
   try{
     const session=await getAdminSession(req);
     if(!session || session.role!=="super_admin")return res.status(403).json({error:"Super Admin access required."});
-    req.admin=session; next();
+    req.admin=session; auditSensitive(req,res); next();
   }catch(error){console.error("Super Admin auth failed:",error);res.status(500).json({error:"Could not authenticate Super Admin."});}
 }
 
