@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS supplier_profiles (
 CREATE TABLE IF NOT EXISTS admin_sessions (
   id CHAR(36) PRIMARY KEY,
   token_hash CHAR(64) NOT NULL UNIQUE,
-  role ENUM('admin','super_admin') NOT NULL,
+  role ENUM('admin','super_admin','tester','buyer_desk','procurement','finance','management') NOT NULL,
   admin_id VARCHAR(120) NOT NULL,
   expires_at DATETIME NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -526,4 +526,17 @@ CREATE TABLE IF NOT EXISTS supplier_quotes (
   CONSTRAINT fk_quote_supplier FOREIGN KEY (supplier_id) REFERENCES supplier_profiles(id) ON DELETE CASCADE,
   INDEX idx_quote_requirement (requirement_id, status, created_at),
   INDEX idx_quote_supplier (supplier_id, created_at)
+) ENGINE=InnoDB;
+
+-- Work assignment for the Buyer Desk / Procurement Desk roles
+CREATE TABLE IF NOT EXISTS employee_assignments (
+  id CHAR(36) PRIMARY KEY,
+  entity_type ENUM('requirement','sd_order') NOT NULL,
+  entity_id CHAR(36) NOT NULL,
+  desk ENUM('buyer','procurement') NOT NULL,
+  admin_id VARCHAR(120) NOT NULL,
+  assigned_by VARCHAR(120) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_assign (entity_type, entity_id, desk),
+  INDEX idx_assign_admin (admin_id, desk, entity_type)
 ) ENGINE=InnoDB;

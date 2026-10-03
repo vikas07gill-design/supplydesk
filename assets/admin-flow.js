@@ -18,11 +18,36 @@ function goScreen(s){
 }
 
 // ---------- Overview: pipeline ----------
+
+// ---- Work assignment (Management / Super Admin) ----
+function canAssign(){return ["super_admin","management"].includes(role())}
+function assignBox(type,id){
+  if(!canAssign())return "";
+  setTimeout(()=>hydrateAssign(type,id),0);
+  return '<div class="as-box" id="asBox" data-t="'+esc(type)+'" data-i="'+esc(id)+'"><span class="muted">Loading assignment...</span></div>';
+}
+async function hydrateAssign(type,id){
+  const box=document.getElementById("asBox");if(!box||box.dataset.i!==id)return;
+  try{
+    const [a,t]=await Promise.all([api("/api/admin/assignments?entityType="+type+"&entityId="+encodeURIComponent(id)),api("/api/admin/assignees")]);
+    const cur=d=>((a.assignments||[]).find(x=>x.desk===d)||{}).admin_id||"";
+    const sel=(desk,label,r)=>{
+      const users=(t.users||[]).filter(u=>u.role===r);
+      return '<label>'+label+'<select data-desk="'+desk+'" onchange="saveAssign(\''+type+'\',\''+esc(id)+'\',\''+desk+'\',this)"><option value="">Unassigned</option>'+users.map(u=>'<option value="'+esc(u.admin_id)+'"'+(u.admin_id===cur(desk)?' selected':'')+'>'+esc(u.display_name||u.admin_id)+'</option>').join("")+'</select></label>';
+    };
+    box.innerHTML=(type==="requirement"?sel("buyer","Buyer Desk","buyer_desk"):"")+sel("procurement","Sourcing Desk","procurement");
+  }catch(e){box.innerHTML='<span class="muted">'+esc(e.message)+'</span>'}
+}
+async function saveAssign(type,id,desk,el){
+  try{await api("/api/admin/assignments",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({entityType:type,entityId:id,desk,adminId:el.value||null})});flowMsg("Assignment saved.")}
+  catch(e){flowMsg(e.message);hydrateAssign(type,id)}
+}
+
 async function loadOverview(){
   setTab("overview");CUR.screen="overview";
   if(needSignIn())return;
   try{
-    const [p,e]=await Promise.all([api("/api/admin/pipeline"),api("/api/admin/exceptions")]);
+    const [p,e]=await Promise.all([api("/api/admin/pipeline"),api("/api/admin/exceptions").catch(()=>({exceptions:[]}))]);
     CUR.ex=e.exceptions||[];setExBadge(CUR.ex.length);
     const hot=new Set(["new_requests","review","sourcing"]);
     const flow=p.stages.map(s=>'<button class="pl-stage'+(s.count?"":" zero")+(s.count&&hot.has(s.key)?" hot":"")+'" data-stage="'+esc(s.key)+'" onclick="goScreen(\''+esc(s.screen)+'\')"><b>'+s.count+'</b><span>'+esc(s.label)+'</span></button>').join("");
@@ -94,7 +119,7 @@ async function openBuyerRequirementAdmin(id,openSec){
       +rqFact("Delivery",esc([r.delivery_city,r.delivery_country].filter(Boolean).join(", ")))+rqFact("Required by",esc(day(r.required_by)))
       +(r.quality_standards?rqFact("Quality",esc(r.quality_standards)):"")+(r.certifications?rqFact("Certifications",esc(r.certifications)):"")+(r.packaging?rqFact("Packaging",esc(r.packaging)):"")
       +(r.payment_terms?rqFact("Payment terms",esc(r.payment_terms)):"")+(r.incoterm?rqFact("Delivery terms",esc(r.incoterm)):"");
-    const head='<div class="rq-head"><div><h2>'+esc(r.title)+'</h2><div class="muted">'+(r.rfq_code?'RFQ '+esc(r.rfq_code)+' · ':"")+'Received '+esc(new Date(r.created_at).toLocaleDateString())+'</div></div><span class="pill rq-pill">'+esc(reviewing?"Needs review":stLabel)+'</span></div>';
+    const head='<div class="rq-head"><div><h2>'+esc(r.title)+'</h2><div class="muted">'+(r.rfq_code?'RFQ '+esc(r.rfq_code)+' · ':"")+'Received '+esc(new Date(r.created_at).toLocaleDateString())+'</div></div><span class="pill rq-pill">'+esc(reviewing?"Needs review":stLabel)+'</span></div>'+assignBox("requirement",id);
     const summary='<div class="rq-facts">'+facts+'</div>'+(r.description?'<div class="rq-desc">'+esc(r.description)+'</div>':"");
     const timeline=reqTimeline(r,au);
     if(reviewing){
@@ -202,7 +227,7 @@ async function openSourcingPlan(id){
     const [plan,sd,al,ords]=await Promise.all([api("/api/admin/sd-orders/"+enc+"/sourcing-plan"),api("/api/admin/sd-orders/"+enc),api("/api/admin/sd-orders/"+enc+"/allocation"),api("/api/admin/orders")]);
     ordData=ords;
     const o=plan.sdOrder,un=plan.unallocated,pct=plan.totalRequirement?Math.min(100,Math.round(plan.allocated/plan.totalRequirement*100)):0;
-    const head='<div class="rq-head"><div><h2>'+esc(o.title)+'</h2><div class="muted">'+esc(o.sdNumber)+' · SupplyDesk order · '+plan.orders.length+' buyer order(s)</div></div><span class="rq-pill">'+esc(un>0?(plan.allocated>0?"Partly planned":"To plan"):"Planned")+'</span></div>';
+    const head='<div class="rq-head"><div><h2>'+esc(o.title)+'</h2><div class="muted">'+esc(o.sdNumber)+' · SupplyDesk order · '+plan.orders.length+' buyer order(s)</div></div><span class="rq-pill">'+esc(un>0?(plan.allocated>0?"Partly planned":"To plan"):"Planned")+'</span></div>'+assignBox("sd_order",id);
     const sum='<div class="sp-sum"><div><small>Total requirement</small><b>'+fnum(plan.totalRequirement)+'</b></div><div><small>On supplier POs</small><b>'+fnum(plan.allocated)+'</b></div><div><small>Still to allocate</small><b>'+fnum(un)+'</b></div></div><div class="sp-bar"><i style="width:'+pct+'%"></i></div>';
     const bo='<div class="nt-wrap"><table class="nt-t"><tr><th>Buyer PO</th><th class="n">Needed</th><th class="n">Allocated</th><th class="n">Remaining</th><th>Stage</th></tr>'+plan.orders.map(i=>'<tr><td><a href="#" onclick="openOrderAdmin(\''+esc(i.buyerOrderId)+'\');return false"><b>'+esc(i.poNumber)+'</b></a>'+(i.partial?' <span class="muted">(partial)</span>':'')+'</td><td class="n">'+fnum(i.needed)+'</td><td class="n">'+fnum(i.allocated)+'</td><td class="n">'+fnum(i.remaining)+'</td><td>'+esc(i.stageLabel)+'</td></tr>').join("")+'</table></div>';
     let editor="";

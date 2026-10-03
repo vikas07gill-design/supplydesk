@@ -439,13 +439,168 @@ async function getAdminSession(req){
   return null;
 }
 
+// ---- Roles, permissions and desk segregation ----
+// Super Admin keeps everything. Desk roles (buyer_desk / procurement / finance) are default-deny: only the
+// routes listed in DESK_POLICY work, and desk users only see requirements / SD orders assigned to them.
+const TEAM_ROLES=["admin","tester","buyer_desk","procurement","finance","management"];
+const ROLE_LABELS={super_admin:"Super Admin",management:"Management",admin:"Admin",tester:"Test Admin",buyer_desk:"Buyer / Enquiry Desk",procurement:"Procurement / Sourcing Desk",finance:"Finance"};
+const ALL_PERMS=["buyer_contact","supplier_identity","purchase_price","selling_price","margin"];
+const ROLE_PERMS={
+  super_admin:ALL_PERMS,management:ALL_PERMS,
+  buyer_desk:["buyer_contact","selling_price"],
+  procurement:["supplier_identity","purchase_price"],
+  finance:["buyer_contact","purchase_price","selling_price","margin"],
+  admin:["purchase_price","selling_price"],tester:["purchase_price","selling_price"]
+};
+const fullView=(req)=>canSee(req,"buyer_contact")&&canSee(req,"supplier_identity");
+const canSee=(req,perm)=>(ROLE_PERMS[req.admin?.role]||[]).includes(perm);
+const STRIP_KEYS={
+  purchase_price:["unit_cost","total_cost","unitCost","totalCost","cost_unit_price","costUnitPrice","po_cost","supplier_cost"],
+  selling_price:["unit_price","total_price","unitPrice","totalPrice","target_price","targetPrice"],
+  margin:["margin","markup_pct","markupPct","marginPct","marginPctOnPrice","margin_pct"]
+};
+function stripKeys(v,keys){
+  if(Array.isArray(v))return v.map(x=>stripKeys(x,keys));
+  if(v&&typeof v==="object"&&!(v instanceof Date)){const o={};for(const k of Object.keys(v)){if(keys.has(k))continue;o[k]=stripKeys(v[k],keys);}return o;}
+  return v;
+}
+const DESK_POLICY={
+  buyer_desk:[
+    ["GET",/^\/api\/admin\/pipeline$/],
+    ["*",/^\/api\/admin\/requirements$/],
+    ["*",/^\/api\/admin\/requirements\/[^/]+\/(messages|message|buyer-quote|review)$/],
+    ["GET",/^\/api\/admin\/orders$/],
+    ["*",/^\/api\/admin\/orders\/[^/]+\/(review|status|stage)$/]
+  ],
+  procurement:[
+    ["GET",/^\/api\/admin\/(pipeline|capacity|agreements|procurement\/queue)$/],
+    ["GET",/^\/api\/admin\/sd-orders$/],
+    ["*",/^\/api\/admin\/sd-orders\/[^/]+(\/(allocation|supplier-pos|sourcing-plan|sourcing-plan\/confirm))?$/],
+    ["*",/^\/api\/admin\/orders\/[^/]+\/(supplier-pos?|trace)$/],
+    ["PATCH",/^\/api\/admin\/supplier-pos\/[^/]+\/cancel$/],
+    ["*",/^\/api\/admin\/requirements\/[^/]+\/(capability-matches|matches|quotes|state)$/],
+    ["GET",/^\/api\/admin\/(products|applications|supplier-updates|product-files|supplier-update-files|files)(\/.*)?$/],
+    ["*",/^\/api\/admin\/products\/[^/]+(\/capacity-verification|\/images)?$/]
+  ],
+  finance:[
+    ["GET",/^\/api\/admin\/(pipeline|orders)$/],
+    ["*",/^\/api\/admin\/orders\/[^/]+\/invoice$/],
+    ["*",/^\/api\/admin\/invoices\/[^/]+(\/payments|\/void)?$/],
+    ["GET",/^\/api\/super-admin\/margin-report$/]
+  ]
+};
+const DESK_ROLES=Object.keys(DESK_POLICY);
+function deskAllowed(role,method,path){return (DESK_POLICY[role]||[]).some(([m,re])=>(m==="*"||m===method)&&re.test(path));}
+
+// Assignment lookups. desk: "buyer" (Buyer Desk) or "procurement" (Sourcing Desk).
+async function assignedIds(adminId,desk,type){
+  const [rows]=await pool.execute("SELECT entity_id FROM employee_assignments WHERE admin_id=? AND desk=? AND entity_type=?",[adminId,desk,type]);
+  return new Set(rows.map(r=>r.entity_id));
+}
+async function requirementsOfSd(sdIds){
+  if(!sdIds.length)return [];
+  const [rows]=await pool.query("SELECT DISTINCT o.rfq_id FROM sd_order_items i JOIN orders o ON o.id=i.buyer_order_id WHERE i.sd_order_id IN (?) AND o.rfq_id IS NOT NULL",[sdIds]);
+  return rows.map(r=>r.rfq_id);
+}
+// Does this desk user own the entity addressed by the URL? null = path has no entity to check.
+async function deskOwns(session,method,path){
+  const role=session.role,aid=session.admin_id;
+  let m;
+  if((m=path.match(/^\/api\/admin\/requirements\/([^/]+)/))){
+    if(role==="buyer_desk")return (await assignedIds(aid,"buyer","requirement")).has(m[1]);
+    if(role==="procurement"){
+      if((await assignedIds(aid,"procurement","requirement")).has(m[1]))return true;
+      const sd=[...await assignedIds(aid,"procurement","sd_order")];
+      return (await requirementsOfSd(sd)).includes(m[1]);
+    }
+  }
+  if((m=path.match(/^\/api\/admin\/orders\/([^/]+)/))){
+    const [[o]]=await pool.execute("SELECT rfq_id FROM orders WHERE id=?",[m[1]]);
+    if(!o)return true; // let the route return its own 404
+    if(role==="buyer_desk")return !!o.rfq_id&&(await assignedIds(aid,"buyer","requirement")).has(o.rfq_id);
+    if(role==="procurement"){
+      const [[it]]=await pool.execute("SELECT sd_order_id FROM sd_order_items WHERE buyer_order_id=? LIMIT 1",[m[1]]);
+      return !!it&&(await assignedIds(aid,"procurement","sd_order")).has(it.sd_order_id);
+    }
+  }
+  if((m=path.match(/^\/api\/admin\/sd-orders\/([^/]+)/)))return (await assignedIds(aid,"procurement","sd_order")).has(m[1]);
+  if((m=path.match(/^\/api\/admin\/supplier-pos\/([^/]+)/))){
+    const [[po]]=await pool.execute("SELECT sd_order_id FROM supplier_pos WHERE id=?",[m[1]]);
+    if(!po)return true;
+    return !!po.sd_order_id&&(await assignedIds(aid,"procurement","sd_order")).has(po.sd_order_id);
+  }
+  return null;
+}
+// Trim list responses to what the desk user is assigned to.
+async function deskFilterBody(session,path,body){
+  if(!body||typeof body!=="object")return body;
+  const role=session.role,aid=session.admin_id;
+  if(role==="buyer_desk"){
+    const set=await assignedIds(aid,"buyer","requirement");
+    if(path==="/api/admin/requirements"&&Array.isArray(body.requirements))return {...body,requirements:body.requirements.filter(r=>set.has(r.id))};
+    if(path==="/api/admin/orders"&&Array.isArray(body.orders))return {...body,orders:body.orders.filter(o=>o.rfq_id&&set.has(o.rfq_id))};
+  }
+  if(role==="procurement"){
+    if(path==="/api/admin/sd-orders"&&Array.isArray(body.sdOrders)){const set=await assignedIds(aid,"procurement","sd_order");return {...body,sdOrders:body.sdOrders.filter(r=>set.has(r.id))};}
+    if(path==="/api/admin/procurement/queue"&&Array.isArray(body.items)){
+      const sd=[...await assignedIds(aid,"procurement","sd_order")];
+      const set=new Set([...await assignedIds(aid,"procurement","requirement"),...await requirementsOfSd(sd)]);
+      return {...body,items:body.items.filter(r=>set.has(r.id))};
+    }
+  }
+  return body;
+}
+
 async function requireAdmin(req,res,next){
   try{
     const session=await getAdminSession(req);
     if(!session)return res.status(401).json({error:"Unauthorized"});
-    req.admin=session; next();
+    req.admin=session;
+    const path=req.path,role=session.role;
+    if(DESK_ROLES.includes(role)&&!/^\/api\/admin\/(logout|token-check)$/.test(path)){
+      let ok=deskAllowed(role,req.method,path);
+      if(ok&&role!=="finance"){const owns=await deskOwns(session,req.method,path);if(owns===false)ok=false;}
+      if(!ok){
+        try{await audit(pool,req,"access.denied","admin_route",path.slice(0,80),null,{method:req.method,path});}catch{}
+        return res.status(403).json({error:"Your role does not have access to this."});
+      }
+    }
+    const drop=new Set();
+    for(const perm of Object.keys(STRIP_KEYS))if(!canSee(req,perm)&&(perm!=="margin"||DESK_ROLES.includes(role)))for(const k of STRIP_KEYS[perm])drop.add(k);
+    const filter=DESK_ROLES.includes(role)&&role!=="finance";
+    if(drop.size||filter){
+      const send=res.json.bind(res);
+      res.json=(body)=>{
+        if(res.statusCode>=400)return send(body);
+        Promise.resolve(filter?deskFilterBody(session,path,body):body)
+          .then(b=>send(drop.size?stripKeys(b,drop):b))
+          .catch(e=>{console.error("Response filter failed:",e);res.status(500);send({error:"Could not load this."});});
+        return res;
+      };
+    }
+    next();
   }catch(error){console.error("Admin auth failed:",error);res.status(500).json({error:"Could not authenticate admin."});}
 }
+
+// Margin / cost visibility gate for routes that are not role-wide.
+const requirePerm=(perm)=>async(req,res,next)=>{
+  try{
+    const session=await getAdminSession(req);
+    if(!session)return res.status(401).json({error:"Unauthorized"});
+    req.admin=session;
+    if(!canSee(req,perm))return res.status(403).json({error:"Your role does not have access to this."});
+    next();
+  }catch(error){console.error("Permission check failed:",error);res.status(500).json({error:"Could not authenticate."});}
+};
+// Management / Super Admin run assignments.
+const requireAssigner=async(req,res,next)=>{
+  try{
+    const session=await getAdminSession(req);
+    if(!session)return res.status(401).json({error:"Unauthorized"});
+    if(!["super_admin","management"].includes(session.role))return res.status(403).json({error:"Only Management or Super Admin can assign work."});
+    req.admin=session;next();
+  }catch(error){console.error(error);res.status(500).json({error:"Could not authenticate."});}
+};
 
 async function requireSuperAdmin(req,res,next){
   try{
@@ -462,7 +617,7 @@ const supplierAlias=(id)=>"Supplier "+crypto.createHash("sha1").update(String(id
 // Buyer identity (name, company, email, phone) is Super Admin only. Admin works with an alias + RFQ/PO numbers.
 const buyerAlias=(id)=>"Buyer "+crypto.createHash("sha1").update(String(id||"").toLowerCase()).digest("hex").slice(0,6).toUpperCase();
 function maskBuyerRow(req,row){
-  if(isSuper(req)||!row)return row;
+  if(canSee(req,"buyer_contact")||!row)return row;
   const o={...row},alias=buyerAlias(row.buyer_id||row.customer_email||row.buyer_email);
   for(const k of ["buyer_name","customer_name"])if(k in o)o[k]=alias;
   for(const k of ["buyer_email","buyer_phone","buyer_company","customer_email","customer_phone","customer_company"])if(k in o)o[k]="";
@@ -470,7 +625,7 @@ function maskBuyerRow(req,row){
   return o;
 }
 function maskSupplierRow(req,row){
-  if(isSuper(req)||!row)return row;
+  if(canSee(req,"supplier_identity")||!row)return row;
   const o={...row},alias=supplierAlias(row.supplier_id);
   for(const k of ["legal_name","trade_name"])if(k in o)o[k]=alias;
   for(const k of ["business_email","city","country","address","website","business_phone","contact_person"])if(k in o)o[k]="";
@@ -541,7 +696,7 @@ app.get("/api/super-admin/team", requireSuperAdmin, async (req,res)=>{
 app.post("/api/super-admin/team", requireSuperAdmin, async (req,res)=>{
   const adminId=clean(req.body?.adminId,60),displayName=clean(req.body?.displayName,180)||null,role=clean(req.body?.role,20),password=String(req.body?.password||"");
   if(!ADMIN_ID_RE.test(adminId))return res.status(400).json({error:"Admin ID must be 3-60 characters: letters, numbers, . _ @ -"});
-  if(!["admin","tester"].includes(role))return res.status(400).json({error:"Role must be Admin or Test Admin."});
+  if(!TEAM_ROLES.includes(role))return res.status(400).json({error:"Invalid role."});
   if(password.length<10||password.length>200)return res.status(400).json({error:"Password must be at least 10 characters."});
   if(envAdminIds().includes(adminId.toLowerCase()))return res.status(409).json({error:"This ID is reserved. Choose another."});
   try{
@@ -559,7 +714,7 @@ app.patch("/api/super-admin/team/:id", requireSuperAdmin, async (req,res)=>{
     const [[u]]=await pool.execute("SELECT id,admin_id FROM admin_users WHERE id=?",[id]);
     if(!u)return res.status(404).json({error:"Account not found."});
     if(typeof req.body?.active==="boolean"){sets.push("active=?");params.push(req.body.active?1:0);if(!req.body.active)endSessions=true;}
-    if(req.body?.role!==undefined){const role=clean(req.body.role,20);if(!["admin","tester"].includes(role))return res.status(400).json({error:"Invalid role."});sets.push("role=?");params.push(role);endSessions=true;}
+    if(req.body?.role!==undefined){const role=clean(req.body.role,20);if(!TEAM_ROLES.includes(role))return res.status(400).json({error:"Invalid role."});sets.push("role=?");params.push(role);endSessions=true;}
     if(req.body?.displayName!==undefined){sets.push("display_name=?");params.push(clean(req.body.displayName,180)||null);}
     if(req.body?.password!==undefined){
       const pw=String(req.body.password);if(pw.length<10||pw.length>200)return res.status(400).json({error:"Password must be at least 10 characters."});
@@ -1432,7 +1587,7 @@ app.get("/api/admin/connect-requests", requireAdmin, async (req,res)=>{
   sql+=" ORDER BY c.created_at DESC LIMIT 300";
   try{
     const [rows]=await pool.execute(sql,params);
-    res.json({requests:rows.map(r=>maskBuyerRow(req,maskSupplierRow(req,r))),detailsRestricted:!isSuper(req)});
+    res.json({requests:rows.map(r=>maskBuyerRow(req,maskSupplierRow(req,r))),detailsRestricted:!fullView(req)});
   }catch(error){
     console.error("Admin connection requests failed:",error);
     res.status(500).json({error:"Could not load connection requests."});
@@ -1545,7 +1700,7 @@ app.post("/api/supplier-dashboard/requirements/:id/quote",requireSupplierDashboa
   }catch(error){console.error("Supplier quote failed:",error);res.status(500).json({error:"Could not submit the quotation."});}
 });
 app.patch("/api/buyer-requirements/:id",requireBuyerDashboard,async(req,res)=>{const status=clean(req.body?.status,20);if(!["closed","cancelled"].includes(status))return res.status(400).json({error:"Invalid requirement status."});const rid=clean(req.params.id,80);const conn=await pool.getConnection();try{await conn.beginTransaction();const [[own]]=await conn.execute("SELECT id FROM buyer_requirements WHERE id=? AND buyer_id=?",[rid,req.buyer.id]);if(!own){await conn.rollback();return res.status(404).json({error:"Requirement not found."});}await moveRfq(conn,req,rid,status==="cancelled"?"cancelled":"closed","buyer request");await conn.execute("UPDATE buyer_requirements SET status=?,updated_at=NOW() WHERE id=?",[status,rid]);await conn.commit();res.json({ok:true,status});}catch(error){await conn.rollback();if(error instanceof RfqError)return res.status(error.status).json({error:error.message});console.error("Buyer requirement update failed:",error);res.status(500).json({error:"Could not update requirement."});}finally{conn.release();}});
-app.get("/api/admin/requirements",requireAdmin,async(req,res)=>{try{const [requirements]=await pool.execute("SELECT r.*,b.email buyer_email,b.name buyer_name,b.company buyer_company,b.phone buyer_phone,(SELECT COUNT(*) FROM supplier_quotes q WHERE q.requirement_id=r.id AND q.status='submitted') quote_count FROM buyer_requirements r JOIN buyers b ON b.id=r.buyer_id ORDER BY r.created_at DESC LIMIT 300");res.json({requirements:requirements.map(r=>maskBuyerRow(req,r)),detailsRestricted:!isSuper(req)});}catch(error){res.status(500).json({error:"Could not load buyer requirements."});}});
+app.get("/api/admin/requirements",requireAdmin,async(req,res)=>{try{const [requirements]=await pool.execute("SELECT r.*,b.email buyer_email,b.name buyer_name,b.company buyer_company,b.phone buyer_phone,(SELECT COUNT(*) FROM supplier_quotes q WHERE q.requirement_id=r.id AND q.status='submitted') quote_count FROM buyer_requirements r JOIN buyers b ON b.id=r.buyer_id ORDER BY r.created_at DESC LIMIT 300");res.json({requirements:requirements.map(r=>maskBuyerRow(req,r)),detailsRestricted:!canSee(req,"buyer_contact")});}catch(error){res.status(500).json({error:"Could not load buyer requirements."});}});
 
 async function sendBrandedMail(to,subject,opts){
   if(!to||!process.env.SMTP_HOST||!process.env.SMTP_USER||!process.env.SMTP_PASSWORD||!process.env.SMTP_FROM)return false;
@@ -1647,14 +1802,14 @@ async function createSupplierPo(conn,req,{sdOrderId,code,sid,unitCost,currency,q
     catch(e){if(e?.code!=="ER_DUP_ENTRY"||a===7)throw e;}}
   await applyCapacityHold(conn,sup.product_id,{a:0,c:0},capacityHold("issued",quantity));
   for(const a of alloc)await conn.execute("INSERT INTO supplier_po_lines (id,supplier_po_id,sd_order_id,buyer_order_id,quantity) VALUES (?,?,?,?,?)",[crypto.randomUUID(),pid,sdOrderId,a.buyerOrderId,a.quantity==null?null:a.quantity]);
-  await audit(conn,req,"supplier_po.issued","supplier_po",pid,null,{poNumber:po,sdNumber:sd.sd_number,buyerOrders:alloc.map(a=>({order:byId.get(a.buyerOrderId).po_number,quantity:a.quantity})),supplierRef:isSuper(req)?sup.id:supplierAlias(sup.id),quantity,unitCost,currency});
+  await audit(conn,req,"supplier_po.issued","supplier_po",pid,null,{poNumber:po,sdNumber:sd.sd_number,buyerOrders:alloc.map(a=>({order:byId.get(a.buyerOrderId).po_number,quantity:a.quantity})),supplierRef:canSee(req,"supplier_identity")?sup.id:supplierAlias(sup.id),quantity,unitCost,currency});
   for(const a of alloc)await addOrderEvent(conn,a.buyerOrderId,"backend",null,null,"Supplier PO "+po+" issued under "+sd.sd_number,actorOf(req).id);
   return {pid,po,sd,sup,quantity};
 }
 const supplierPoMail=(sup,po,title,quantity)=>sendBrandedMail(sup.business_email,"SupplyDesk | New purchase order "+po,{preheader:"New purchase order",title:"New purchase order",intro:"SupplyDesk has issued purchase order "+po+" for "+title+" ("+quantity+"). Please review and accept, partially accept or decline it in your Supplier Dashboard.",bodyHtml:"",textLines:["PO "+po],ctaText:"Open Supplier Dashboard",ctaUrl:ORIGIN()+"/supplier-dashboard#purchase-orders"});
 
 // Margin report: Super Admin only. Revenue = accepted SupplyDesk price; cost = supplier PO cost (active POs) or the cost noted on the quote.
-app.get("/api/super-admin/margin-report",requireSuperAdmin,async(req,res)=>{
+app.get("/api/super-admin/margin-report",requirePerm("margin"),async(req,res)=>{
   try{
     const [rows]=await pool.execute(`SELECT o.id,o.po_number,o.title,o.quantity,o.unit_price,o.currency,o.total_price,o.status,o.created_at,b.company buyer_company,b.name buyer_name,
         q.cost_unit_price,q.markup_pct,
@@ -1674,6 +1829,56 @@ app.get("/api/super-admin/margin-report",requireSuperAdmin,async(req,res)=>{
     for(const t of Object.values(totals)){t.revenue=Math.round(t.revenue*100)/100;t.cost=Math.round(t.cost*100)/100;t.margin=Math.round(t.margin*100)/100;t.marginPctOnPrice=t.revenue?Math.round(t.margin/t.revenue*10000)/100:null;}
     res.json({items,totals});
   }catch(error){console.error("Margin report failed:",error);res.status(500).json({error:"Could not load the margin report."});}
+});
+
+
+// ---- Work assignment (Management / Super Admin) ----
+// Buyer Desk works requirements it is assigned; Procurement works SupplyDesk orders it is assigned.
+// The same person may not hold both desks on linked work (segregation of duties).
+const DESK_ROLE={buyer:"buyer_desk",procurement:"procurement"};
+async function assignmentConflict(db,type,entityId,desk,adminId){
+  const other=desk==="buyer"?"procurement":"buyer";
+  let reqIds=[],sdIds=[];
+  if(type==="requirement"){
+    reqIds=[entityId];
+    const [r]=await db.execute("SELECT DISTINCT i.sd_order_id FROM sd_order_items i JOIN orders o ON o.id=i.buyer_order_id WHERE o.rfq_id=?",[entityId]);sdIds=r.map(x=>x.sd_order_id);
+  }else{
+    sdIds=[entityId];reqIds=await requirementsOfSd([entityId]);
+  }
+  const q=async(t,ids,d)=>ids.length?(await db.query("SELECT 1 FROM employee_assignments WHERE entity_type=? AND entity_id IN (?) AND desk=? AND admin_id=? LIMIT 1",[t,ids,d,adminId]))[0].length>0:false;
+  return desk==="buyer"?(await q("requirement",reqIds,"procurement")||await q("sd_order",sdIds,"procurement")):(await q("requirement",reqIds,"buyer"));
+}
+app.get("/api/admin/assignees",requireAssigner,async(req,res)=>{
+  try{const [users]=await pool.execute("SELECT admin_id,display_name,role FROM admin_users WHERE active=1 AND role IN ('buyer_desk','procurement') ORDER BY admin_id LIMIT 200");res.json({users});}
+  catch(error){console.error(error);res.status(500).json({error:"Could not load the team."});}
+});
+app.get("/api/admin/assignments",requireAssigner,async(req,res)=>{
+  const type=clean(req.query.entityType,20),id=clean(req.query.entityId,80);
+  if(!["requirement","sd_order"].includes(type)||!id)return res.status(400).json({error:"Choose what to look up."});
+  try{const [rows]=await pool.execute("SELECT desk,admin_id,assigned_by,created_at FROM employee_assignments WHERE entity_type=? AND entity_id=?",[type,id]);res.json({assignments:rows});}
+  catch(error){console.error(error);res.status(500).json({error:"Could not load assignments."});}
+});
+app.put("/api/admin/assignments",requireAssigner,async(req,res)=>{
+  const type=clean(req.body?.entityType,20),id=clean(req.body?.entityId,80),desk=clean(req.body?.desk,20),adminId=req.body?.adminId?clean(req.body.adminId,120):null;
+  if(!["requirement","sd_order"].includes(type)||!id)return res.status(400).json({error:"Choose what to assign."});
+  if(!DESK_ROLE[desk])return res.status(400).json({error:"Choose a desk."});
+  if(desk==="buyer"&&type!=="requirement")return res.status(400).json({error:"The Buyer Desk is assigned to requirements."});
+  try{
+    const table=type==="requirement"?"buyer_requirements":"sd_orders";
+    const [[ent]]=await pool.execute("SELECT id FROM "+table+" WHERE id=?",[id]);
+    if(!ent)return res.status(404).json({error:"Not found."});
+    const [[old]]=await pool.execute("SELECT admin_id FROM employee_assignments WHERE entity_type=? AND entity_id=? AND desk=?",[type,id,desk]);
+    if(!adminId){
+      await pool.execute("DELETE FROM employee_assignments WHERE entity_type=? AND entity_id=? AND desk=?",[type,id,desk]);
+    }else{
+      const [[u]]=await pool.execute("SELECT admin_id,role FROM admin_users WHERE admin_id=? AND active=1",[adminId]);
+      if(!u||u.role!==DESK_ROLE[desk])return res.status(400).json({error:"Choose an active "+ROLE_LABELS[DESK_ROLE[desk]]+" team member."});
+      if(await assignmentConflict(pool,type,id,desk,u.admin_id))return res.status(409).json({error:"Segregation of duties: this person already works the other desk on this transaction."});
+      await pool.execute("INSERT INTO employee_assignments (id,entity_type,entity_id,desk,admin_id,assigned_by) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE admin_id=VALUES(admin_id),assigned_by=VALUES(assigned_by),created_at=NOW()",[crypto.randomUUID(),type,id,desk,u.admin_id,req.admin.admin_id]);
+    }
+    await audit(pool,req,"assignment.changed",type,id,{desk,adminId:old?.admin_id||null},{desk,adminId});
+    res.json({ok:true});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not save the assignment."});}
 });
 
 // ---- Invoices & payments (Phase 5): internal tracking, GST % shown. Not a statutory tax invoice (no GSTIN/HSN). ----
@@ -1777,7 +1982,7 @@ app.post("/api/admin/orders/:id/supplier-po",requireAdmin,async(req,res)=>{
   if(!Number.isFinite(unitCost)||unitCost<=0)return res.status(400).json({error:"Enter a valid unit cost."});
   if(!quantity)return res.status(400).json({error:"Quantity is required."});
   if(deliveryBy&&(!/^\d{4}-\d{2}-\d{2}$/.test(deliveryBy)||new Date(deliveryBy)<new Date(new Date().toDateString())))return res.status(400).json({error:"Delivery date must be today or later."});
-  if(!code&&!(sid&&isSuper(req)))return res.status(400).json({error:"Choose a capability (capability ID)."});
+  if(!code&&!(sid&&canSee(req,"supplier_identity")))return res.status(400).json({error:"Choose a capability (capability ID)."});
   const conn=await pool.getConnection();
   try{
     await conn.beginTransaction();
@@ -1797,7 +2002,7 @@ app.post("/api/admin/orders/:id/supplier-po",requireAdmin,async(req,res)=>{
 
 app.get("/api/admin/orders/:id/supplier-pos",requireAdmin,async(req,res)=>{
   try{const [rows]=await pool.execute("SELECT po.id,po.po_number,po.sd_order_id,po.supplier_id,po.quantity,po.unit_cost,po.currency,po.total_cost,po.delivery_by,po.terms,po.status,po.supplier_note,po.accepted_quantity,po.batch_no,po.production_started_at,po.expected_completion,po.status_changed_at,po.created_at,l.quantity line_quantity,s.legal_name,s.trade_name,s.country,s.city FROM supplier_po_lines l JOIN supplier_pos po ON po.id=l.supplier_po_id JOIN supplier_profiles s ON s.id=po.supplier_id WHERE l.buyer_order_id=? ORDER BY po.created_at DESC",[clean(req.params.id,80)]);
-    res.json({supplierPos:rows.map(r=>({...maskSupplierRow(req,r),statusLabel:RFQ.PO_STATES[r.status]?.label||r.status})),detailsRestricted:!isSuper(req)});}
+    res.json({supplierPos:rows.map(r=>({...maskSupplierRow(req,r),statusLabel:RFQ.PO_STATES[r.status]?.label||r.status})),detailsRestricted:!canSee(req,"supplier_identity")});}
   catch(error){console.error(error);res.status(500).json({error:"Could not load supplier purchase orders."});}
 });
 
@@ -1901,8 +2106,9 @@ app.post("/api/admin/requirements/:id/buyer-quote",requireAdmin,async(req,res)=>
   const costUnit=b.costUnitPrice===""||b.costUnitPrice==null?null:Number(b.costUnitPrice);
   const markupPct=b.marginPct===""||b.marginPct==null?null:Number(b.marginPct);   // margin % on selling price (stored in markup_pct)
   if(costUnit!=null&&(!Number.isFinite(costUnit)||costUnit<=0))return res.status(400).json({error:"Enter a valid supplier cost."});
+  if(costUnit!=null&&!canSee(req,"purchase_price"))return res.status(403).json({error:"Your role cannot enter supplier cost."});
   if(markupPct!=null){
-    if(!isSuper(req))return res.status(403).json({error:"Only Super Admin can price by margin."});
+    if(!canSee(req,"margin"))return res.status(403).json({error:"Your role cannot price by margin."});
     if(costUnit==null)return res.status(400).json({error:"Supplier cost is required to apply a margin."});
     if(!Number.isFinite(markupPct)||markupPct<0||markupPct>90)return res.status(400).json({error:"Margin must be between 0 and 90 percent of the selling price."});
   }
@@ -2195,7 +2401,7 @@ async function sdOrderDetail(req,id){
     outItems.push(maskBuyerRow(req,{...it,stageLabel:RFQ.stageLabel(it.stage||"supplydesk_accepted"),needed:need,allocated:a.allocated,remaining:need==null?null:Math.max(0,Math.round((need-a.allocated)*100)/100)}));}
   const [pos]=await pool.execute("SELECT po.id,po.po_number,po.supplier_id,po.quantity,po.accepted_quantity,po.unit_cost,po.currency,po.total_cost,po.status,po.batch_no,po.production_started_at,po.expected_completion,po.delivery_by,po.supplier_note,po.created_at,s.legal_name,s.trade_name,s.country,s.city FROM supplier_pos po JOIN supplier_profiles s ON s.id=po.supplier_id WHERE po.sd_order_id=? ORDER BY po.created_at",[id]);
   const [lines]=pos.length?await pool.query("SELECT l.supplier_po_id,l.buyer_order_id,l.quantity,o.po_number buyer_po FROM supplier_po_lines l JOIN orders o ON o.id=l.buyer_order_id WHERE l.supplier_po_id IN (?)",[pos.map(p=>p.id)]):[[]];
-  return {sdOrder:sd,items:outItems,supplierPos:pos.map(p=>({...maskSupplierRow(req,p),statusLabel:RFQ.PO_STATES[p.status]?.label||p.status,lines:lines.filter(l=>l.supplier_po_id===p.id).map(l=>({buyerOrderId:l.buyer_order_id,buyerPo:l.buyer_po,quantity:l.quantity==null?null:Number(l.quantity)}))})),detailsRestricted:!isSuper(req)};
+  return {sdOrder:sd,items:outItems,supplierPos:pos.map(p=>({...maskSupplierRow(req,p),statusLabel:RFQ.PO_STATES[p.status]?.label||p.status,lines:lines.filter(l=>l.supplier_po_id===p.id).map(l=>({buyerOrderId:l.buyer_order_id,buyerPo:l.buyer_po,quantity:l.quantity==null?null:Number(l.quantity)}))})),detailsRestricted:!canSee(req,"supplier_identity")};
 }
 app.get("/api/admin/sd-orders",requireAdmin,async(req,res)=>{
   try{const [rows]=await pool.execute("SELECT s.id,s.sd_number,s.title,s.created_at,(SELECT COUNT(*) FROM sd_order_items i WHERE i.sd_order_id=s.id) buyer_orders,(SELECT COUNT(*) FROM supplier_pos p WHERE p.sd_order_id=s.id AND p.status NOT IN ('declined','cancelled')) live_pos,s.plan_status,(SELECT COALESCE(SUM(i.quantity),0) FROM sd_order_items i WHERE i.sd_order_id=s.id) needed,(SELECT COALESCE(SUM(l.quantity),0) FROM supplier_po_lines l JOIN supplier_pos p ON p.id=l.supplier_po_id WHERE l.sd_order_id=s.id AND p.status NOT IN ('declined','cancelled')) allocated FROM sd_orders s ORDER BY s.created_at DESC LIMIT 200");res.json({sdOrders:rows.map(r=>({...r,needed:Number(r.needed)||0,allocated:Number(r.allocated)||0}))});}
@@ -2220,10 +2426,10 @@ app.get("/api/admin/sd-orders/:id/allocation",requireAdmin,async(req,res)=>{
       const qty=Number(po.line_qty)||RFQ.parseQuantity(po.quantity)||0;allocated+=qty;
       const r=regions.get(po.region)||{region:po.region,total:0,suppliers:[]};
       r.total+=qty;
-      r.suppliers.push({supplier:isSuper(req)?(po.trade_name||po.legal_name):supplierAlias(po.supplier_id),quantity:qty,poNumber:po.po_number,status:po.status,statusLabel:RFQ.PO_STATES[po.status]?.label||po.status});
+      r.suppliers.push({supplier:canSee(req,"supplier_identity")?(po.trade_name||po.legal_name):supplierAlias(po.supplier_id),quantity:qty,poNumber:po.po_number,status:po.status,statusLabel:RFQ.PO_STATES[po.status]?.label||po.status});
       regions.set(po.region,r);
     }
-    res.json({sdOrder:sd,totalRequirement,allocated,unallocated:Math.max(0,Math.round((totalRequirement-allocated)*100)/100),regions:[...regions.values()],detailsRestricted:!isSuper(req)});
+    res.json({sdOrder:sd,totalRequirement,allocated,unallocated:Math.max(0,Math.round((totalRequirement-allocated)*100)/100),regions:[...regions.values()],detailsRestricted:!canSee(req,"supplier_identity")});
   }catch(error){console.error("Allocation view failed:",error);res.status(500).json({error:"Could not load the allocation view."});}
 });
 app.get("/api/admin/sd-orders/:id",requireAdmin,async(req,res)=>{
@@ -2238,7 +2444,7 @@ app.post("/api/admin/sd-orders/:id/supplier-pos",requireAdmin,async(req,res)=>{
   const code=clean(b.capabilityCode,30).toUpperCase(),sid=clean(b.supplierId,80);
   if(!Number.isFinite(unitCost)||unitCost<=0)return res.status(400).json({error:"Enter a valid unit cost."});
   if(deliveryBy&&(!/^\d{4}-\d{2}-\d{2}$/.test(deliveryBy)||new Date(deliveryBy)<new Date(new Date().toDateString())))return res.status(400).json({error:"Delivery date must be today or later."});
-  if(!code&&!(sid&&isSuper(req)))return res.status(400).json({error:"Choose a capability (capability ID)."});
+  if(!code&&!(sid&&canSee(req,"supplier_identity")))return res.status(400).json({error:"Choose a capability (capability ID)."});
   let allocations=null;
   if(Array.isArray(b.allocations)&&b.allocations.length)allocations=b.allocations.slice(0,50).map(a=>({buyerOrderId:clean(a?.buyerOrderId,80),quantity:a?.quantity===""||a?.quantity==null?null:Number(a.quantity)}));
   const conn=await pool.getConnection();
@@ -2264,7 +2470,7 @@ app.get("/api/admin/orders/:id/trace",requireAdmin,async(req,res)=>{
     const shipment=events.filter(e=>["transport_booked","insurance_completed","in_transit","out_for_delivery","delivered"].includes(e.stage)).map(e=>({stage:e.stage,label:RFQ.stageLabel(e.stage),ref:e.ref,at:e.created_at}));
     res.json({buyerOrder:{...maskBuyerRow(req,o),stageLabel:RFQ.stageLabel(o.stage||"supplydesk_accepted"),reviewLabel:(RFQ.ORDER_REVIEW[o.review_status]||{}).label},sdOrder:sd||null,
       supplierPos:pos.map(p=>({...maskSupplierRow(req,p),statusLabel:RFQ.PO_STATES[p.status]?.label||p.status})),shipment,delivered:RFQ.stageIndex(o.stage||"")>=RFQ.stageIndex("delivered"),
-      events:events.map(e=>({kind:e.kind,stage:e.stage,stageLabel:e.stage?RFQ.stageLabel(e.stage):null,ref:e.ref,detail:e.detail,by:/^supplier:/.test(e.created_by||"")?"supplier":e.created_by,at:e.created_at})),detailsRestricted:!isSuper(req)});
+      events:events.map(e=>({kind:e.kind,stage:e.stage,stageLabel:e.stage?RFQ.stageLabel(e.stage):null,ref:e.ref,detail:e.detail,by:/^supplier:/.test(e.created_by||"")?"supplier":e.created_by,at:e.created_at})),detailsRestricted:!canSee(req,"supplier_identity")});
   }catch(error){console.error(error);res.status(500).json({error:"Could not load the order trace."});}
 });
 
@@ -2322,8 +2528,8 @@ app.get("/api/admin/requirements/:id/capability-matches",requireAdmin,async(req,
        WHERE p.status='approved' AND p.product_verified=1 AND p.capacity_verified=1 AND s.verified=1 AND s.published=1 LIMIT 2000`);
     const matches=caps.map(c=>({c,sc:RFQ.scoreCapability(r,c)})).filter(x=>x.sc.eligible&&x.sc.score>0)
       .sort((a,b)=>b.sc.score-a.sc.score).slice(0,30)
-      .map(({c,sc})=>({productId:c.id,capabilityCode:c.capability_code,productName:c.product_name,category:c.category,subcategory:c.subcategory,supplierId:isSuper(req)?c.supplier_id:null,supplierName:isSuper(req)?(c.trade_name||c.legal_name):supplierAlias(c.supplier_id),country:isSuper(req)?c.country:"",region:c.origin_region||"",
-        monthlyCapacity:isSuper(req)?c.monthly_capacity:null,availableCapacity:isSuper(req)?c.available_capacity:null,capacityBand:capacityBand(c.available_capacity),capacityUnit:c.capacity_unit||c.unit||"",leadTimeDays:c.lead_time_days,moq:c.moq,score:sc.score,reasons:sc.reasons,coversFull:sc.coversFull,stale:sc.stale}));
+      .map(({c,sc})=>({productId:c.id,capabilityCode:c.capability_code,productName:c.product_name,category:c.category,subcategory:c.subcategory,supplierId:canSee(req,"supplier_identity")?c.supplier_id:null,supplierName:canSee(req,"supplier_identity")?(c.trade_name||c.legal_name):supplierAlias(c.supplier_id),country:canSee(req,"supplier_identity")?c.country:"",region:c.origin_region||"",
+        monthlyCapacity:canSee(req,"supplier_identity")?c.monthly_capacity:null,availableCapacity:canSee(req,"supplier_identity")?c.available_capacity:null,capacityBand:capacityBand(c.available_capacity),capacityUnit:c.capacity_unit||c.unit||"",leadTimeDays:c.lead_time_days,moq:c.moq,score:sc.score,reasons:sc.reasons,coversFull:sc.coversFull,stale:sc.stale}));
     res.json({rfq:{id:r.id,rfqCode:r.rfq_code,title:r.title,quantity:r.quantity,requiredBy:r.required_by},totalCapabilities:caps.length,matches});
   }catch(error){console.error("Capability matching failed:",error);res.status(500).json({error:"Could not match capabilities."});}
 });
@@ -2335,7 +2541,7 @@ app.get("/api/admin/audit",requireAdmin,async(req,res)=>{
     const [rows]=entity&&entityId
       ?await pool.execute("SELECT id,actor,actor_role,action,entity,entity_id,old_value,new_value,created_at FROM audit_log WHERE entity=? AND entity_id=? ORDER BY id DESC LIMIT 200",[entity,entityId])
       :await pool.execute("SELECT id,actor,actor_role,action,entity,entity_id,old_value,new_value,created_at FROM audit_log ORDER BY id DESC LIMIT 200");
-    res.json({entries:isSuper(req)?rows:rows.map(e=>{const o=/^buyer:/.test(e.actor||"")?{...e,actor:"buyer"}:/^supplier:/.test(e.actor||"")?{...e,actor:"supplier"}:{...e};if(o.entity==="supplier"){o.old_value=null;o.new_value=null;}return o;})});
+    res.json({entries:fullView(req)?rows:rows.map(e=>{const o=/^buyer:/.test(e.actor||"")?{...e,actor:"buyer"}:/^supplier:/.test(e.actor||"")?{...e,actor:"supplier"}:{...e};if(o.entity==="supplier"){o.old_value=null;o.new_value=null;}return o;})});
   }catch(error){console.error("Audit read failed:",error);res.status(500).json({error:"Could not load the audit trail."});}
 });
 
@@ -2352,7 +2558,7 @@ app.get("/api/admin/requirements/:id/matches",requireAdmin,async(req,res)=>{
     if(level==="subcategory"&&r.subcategory){sql+=" AND s.subcategory=?";params.push(r.subcategory);}
     sql+=" ORDER BY s.trade_name,s.legal_name LIMIT 500";
     const [suppliers]=await pool.execute(sql,params);
-    res.json({level,category:r.category,subcategory:r.subcategory,suppliers:isSuper(req)?suppliers:suppliers.map(x=>({id:x.id,legal_name:supplierAlias(x.id),trade_name:supplierAlias(x.id),country:"",city:"",category:x.category,subcategory:x.subcategory,sent_status:x.sent_status})),detailsRestricted:!isSuper(req)});
+    res.json({level,category:r.category,subcategory:r.subcategory,suppliers:canSee(req,"supplier_identity")?suppliers:suppliers.map(x=>({id:x.id,legal_name:supplierAlias(x.id),trade_name:supplierAlias(x.id),country:"",city:"",category:x.category,subcategory:x.subcategory,sent_status:x.sent_status})),detailsRestricted:!canSee(req,"supplier_identity")});
   }catch(error){console.error(error);res.status(500).json({error:"Could not load matching suppliers."});}
 });
 
@@ -2430,7 +2636,7 @@ app.post("/api/admin/requirements/:id/review",requireAdmin,async(req,res)=>{
   }catch(error){console.error("Requirement review failed:",error);res.status(500).json({error:"Could not save the review decision."});}
 });
 
-app.get("/api/admin/requirements/:id/quotes",requireAdmin,async(req,res)=>{try{const [quotes]=await pool.execute("SELECT q.*,s.trade_name,s.legal_name,s.business_email,s.country,s.city FROM supplier_quotes q JOIN supplier_profiles s ON s.id=q.supplier_id WHERE q.requirement_id=? ORDER BY q.created_at DESC",[clean(req.params.id,80)]);res.json({quotes:quotes.map(q=>maskSupplierRow(req,q)),detailsRestricted:!isSuper(req)});}catch(error){res.status(500).json({error:"Could not load requirement quotations."});}});
+app.get("/api/admin/requirements/:id/quotes",requireAdmin,async(req,res)=>{try{const [quotes]=await pool.execute("SELECT q.*,s.trade_name,s.legal_name,s.business_email,s.country,s.city FROM supplier_quotes q JOIN supplier_profiles s ON s.id=q.supplier_id WHERE q.requirement_id=? ORDER BY q.created_at DESC",[clean(req.params.id,80)]);res.json({quotes:quotes.map(q=>maskSupplierRow(req,q)),detailsRestricted:!canSee(req,"supplier_identity")});}catch(error){res.status(500).json({error:"Could not load requirement quotations."});}});
 
 app.post("/api/supplier-update/request", supplierUpdateLimiter, async (req, res) => {
   const email = clean(req.body?.email, 255).toLowerCase();
@@ -3407,7 +3613,7 @@ app.get("/api/admin/products", requireAdmin, async (req,res)=>{
     }
     sql+=" ORDER BY p.created_at DESC LIMIT 300";
     const [rows]=await pool.execute(sql,params);
-    res.json({products:rows.map(r=>maskSupplierRow(req,r)),filter:{status,q,count:rows.length},detailsRestricted:!isSuper(req)});
+    res.json({products:rows.map(r=>maskSupplierRow(req,r)),filter:{status,q,count:rows.length},detailsRestricted:!canSee(req,"supplier_identity")});
   }catch(error){
     console.error("Admin product queue load failed:",error);
     res.status(500).json({error:"Could not load products."});
@@ -3942,11 +4148,12 @@ async function migrateLegacyCategories() {
 }
 
 async function ensureAdminAuthSchema() {
-  await pool.query("CREATE TABLE IF NOT EXISTS admin_sessions (id CHAR(36) PRIMARY KEY, token_hash CHAR(64) NOT NULL UNIQUE, role ENUM('admin','super_admin','tester') NOT NULL, admin_id VARCHAR(120) NOT NULL, expires_at DATETIME NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, last_used_at DATETIME NULL, INDEX idx_admin_session_expiry (expires_at), INDEX idx_admin_session_role (role)) ENGINE=InnoDB");
-  await pool.query("ALTER TABLE admin_sessions MODIFY role ENUM('admin','super_admin','tester') NOT NULL");
+  await pool.query("CREATE TABLE IF NOT EXISTS admin_sessions (id CHAR(36) PRIMARY KEY, token_hash CHAR(64) NOT NULL UNIQUE, role ENUM('admin','super_admin','tester','buyer_desk','procurement','finance','management') NOT NULL, admin_id VARCHAR(120) NOT NULL, expires_at DATETIME NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, last_used_at DATETIME NULL, INDEX idx_admin_session_expiry (expires_at), INDEX idx_admin_session_role (role)) ENGINE=InnoDB");
+  await pool.query("ALTER TABLE admin_sessions MODIFY role ENUM('admin','super_admin','tester','buyer_desk','procurement','finance','management') NOT NULL");
   try { await pool.query("ALTER TABLE admin_sessions ADD INDEX idx_admin_session_admin (admin_id)"); }
   catch (e) { if(!["ER_DUP_KEYNAME"].includes(e?.code)) throw e; }
-  await pool.query("CREATE TABLE IF NOT EXISTS admin_users (id CHAR(36) PRIMARY KEY, admin_id VARCHAR(120) NOT NULL, display_name VARCHAR(180) NULL, role ENUM('admin','tester') NOT NULL DEFAULT 'admin', password_salt CHAR(32) NOT NULL, password_hash CHAR(128) NOT NULL, active TINYINT(1) NOT NULL DEFAULT 1, created_by VARCHAR(120) NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, last_login_at DATETIME NULL, password_changed_at DATETIME NULL, UNIQUE KEY uq_admin_user_id (admin_id)) ENGINE=InnoDB");
+  await pool.query("CREATE TABLE IF NOT EXISTS admin_users (id CHAR(36) PRIMARY KEY, admin_id VARCHAR(120) NOT NULL, display_name VARCHAR(180) NULL, role ENUM('admin','tester','buyer_desk','procurement','finance','management') NOT NULL DEFAULT 'admin', password_salt CHAR(32) NOT NULL, password_hash CHAR(128) NOT NULL, active TINYINT(1) NOT NULL DEFAULT 1, created_by VARCHAR(120) NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, last_login_at DATETIME NULL, password_changed_at DATETIME NULL, UNIQUE KEY uq_admin_user_id (admin_id)) ENGINE=InnoDB");
+  await pool.query("ALTER TABLE admin_users MODIFY role ENUM('admin','tester','buyer_desk','procurement','finance','management') NOT NULL DEFAULT 'admin'");
 }
 
 // ---- Audit log + RFQ state machine (Phase 1B) ----
@@ -4325,6 +4532,7 @@ async function syncSupplierEligibility(db,supplierId){
 
 // ---- Admin procurement workflow: Request review -> SupplyDesk order -> Sourcing plan -> Supplier POs ----
 async function ensureFlowSchema(){
+  await pool.query("CREATE TABLE IF NOT EXISTS employee_assignments (id CHAR(36) PRIMARY KEY, entity_type ENUM('requirement','sd_order') NOT NULL, entity_id CHAR(36) NOT NULL, desk ENUM('buyer','procurement') NOT NULL, admin_id VARCHAR(120) NOT NULL, assigned_by VARCHAR(120) NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uq_assign (entity_type,entity_id,desk), INDEX idx_assign_admin (admin_id,desk,entity_type)) ENGINE=InnoDB");
   const add=async(table,ddl)=>{try{await pool.query("ALTER TABLE "+table+" ADD COLUMN "+ddl);return true;}catch(e){if(!["ER_DUP_FIELDNAME","ER_DUP_COLUMN"].includes(e?.code))throw e;return false;}};
   await add("buyer_requirements","accept_decision VARCHAR(10) NULL");
   await add("buyer_requirements","accepted_quantity VARCHAR(60) NULL");
@@ -4354,7 +4562,7 @@ async function loadSourcingPlan(req,sdId){
      FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id
      WHERE p.status='approved' AND p.product_verified=1 AND p.capacity_verified=1 AND s.verified=1 AND s.published=1 AND p.capability_code IS NOT NULL
        AND p.capacity_updated_at IS NOT NULL AND p.capacity_updated_at>=DATE_SUB(NOW(),INTERVAL ${CAPACITY_STALE_DAYS} DAY) AND p.monthly_capacity>0 LIMIT 2000`,[sdId]);
-  const sup=isSuper(req);
+  const sup=canSee(req,"supplier_identity");
   const candidates=caps.map(c=>({c,sc:RFQ.scoreCapability(rfqLike,c)})).filter(x=>x.sc.eligible&&x.sc.score>0).map(({c,sc})=>{
     const free=Math.max(Number(c.available_capacity||0)-Number(c.allocated_capacity||0)-Number(c.committed_capacity||0),0);
     return {capabilityCode:c.capability_code,productName:c.product_name,supplier:sup?(c.trade_name||c.legal_name):supplierAlias(c.supplier_id),supplierId:sup?c.supplier_id:null,
@@ -4480,7 +4688,7 @@ app.get("/api/admin/capacity",requireAdmin,async(req,res)=>{
     const [rows]=await pool.execute(`SELECT p.id,p.capability_code,p.product_name,p.category,p.subcategory,p.status,p.product_verified,p.capacity_verified,p.monthly_capacity,p.available_capacity,p.allocated_capacity,p.committed_capacity,p.capacity_unit,p.unit,p.lead_time_days,p.origin_region,p.capacity_updated_at,
         s.id supplier_id,s.legal_name,s.trade_name,s.country,s.city,s.verified,s.published,s.onboarding_status
       FROM supplier_products p JOIN supplier_profiles s ON s.id=p.supplier_id WHERE p.status<>'archived' ORDER BY s.created_at DESC,p.created_at DESC LIMIT 1000`);
-    const sup=isSuper(req),now=Date.now();
+    const sup=canSee(req,"supplier_identity"),now=Date.now();
     res.json({items:rows.map(r=>{const upd=r.capacity_updated_at?new Date(r.capacity_updated_at).getTime():null;
       const free=Math.max(Number(r.available_capacity||0)-Number(r.allocated_capacity||0)-Number(r.committed_capacity||0),0);
       return {id:r.id,capabilityCode:r.capability_code,product:r.product_name,category:r.category,subcategory:r.subcategory,productStatus:r.status,productVerified:!!r.product_verified,capacityVerified:!!r.capacity_verified,
@@ -4492,7 +4700,7 @@ app.get("/api/admin/capacity",requireAdmin,async(req,res)=>{
 app.get("/api/admin/agreements",requireAdmin,async(req,res)=>{
   try{
     const [rows]=await pool.execute("SELECT id,legal_name,trade_name,country,city,onboarding_status,agreement_signed_at,verified,published,status_updated_at FROM supplier_profiles ORDER BY (agreement_signed_at IS NULL) DESC,created_at DESC LIMIT 500");
-    const sup=isSuper(req);
+    const sup=canSee(req,"supplier_identity");
     res.json({items:rows.map(r=>({id:r.id,supplier:sup?(r.trade_name||r.legal_name):supplierAlias(r.id),country:sup?r.country:"",onboardingStatus:r.onboarding_status,agreementSignedAt:r.agreement_signed_at,eligible:!!(r.verified&&r.published),updatedAt:r.status_updated_at}))});
   }catch(error){console.error("Agreements failed:",error);res.status(500).json({error:"Could not load agreements."});}
 });
