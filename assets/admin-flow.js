@@ -44,6 +44,51 @@ async function saveAssign(type,id,desk,el){
 }
 
 
+
+// ---- Supplier payables, scorecards, who-did-what ----
+const PAY_LABEL={pending_approval:"Awaiting approval",approved:"Approved - ready to pay",paid:"Paid",rejected:"Rejected"};
+async function payRaise(poId,sdId){
+  const amt=(document.getElementById("payAmt_"+poId)||{}).value||"";
+  try{await api("/api/admin/supplier-pos/"+encodeURIComponent(poId)+"/payable",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({amount:amt})});await openSourcingPlan(sdId);flowMsg("Payable raised. Management will approve it.")}
+  catch(e){flowErr(e)}
+}
+async function payDecide(id,action,after){
+  let note="";if(action==="reject"){note=prompt("Why are you rejecting it?")||"";if(!note)return}
+  try{await api("/api/admin/payables/"+encodeURIComponent(id)+"/"+action,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({note})});flowMsg(action==="approve"?"Approved. Finance can now pay it.":"Rejected.");if(after==="approvals")loadApprovals()}
+  catch(e){flowErr(e)}
+}
+async function payPay(id){
+  const ref=prompt("Bank / UTR reference of the payment:");if(!ref)return;
+  try{await api("/api/admin/payables/"+encodeURIComponent(id)+"/pay",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reference:ref})});flowMsg("Payment recorded.");loadMyDesk()}
+  catch(e){flowErr(e)}
+}
+function payTable(rows,mode){
+  if(!rows.length)return '<div class="muted">None.</div>';
+  return '<div class="nt-wrap"><table class="nt-t"><tr><th>PO</th><th>Supplier</th><th class="n">Amount</th><th>Status</th><th></th></tr>'+rows.map(r=>'<tr><td>'+esc(r.poNumber)+(r.sdNumber?'<div class="sp-why">'+esc(r.sdNumber)+'</div>':'')+'</td><td>'+esc(r.supplier)+'</td><td class="n">'+fnum(r.amount)+' '+esc(r.currency)+'</td><td>'+esc(PAY_LABEL[r.status]||r.status)+(r.paymentRef?'<div class="sp-why">Ref '+esc(r.paymentRef)+'</div>':'')+(r.decisionNote?'<div class="sp-why">'+esc(r.decisionNote)+'</div>':'')+'</td><td>'
+    +(r.status==="pending_approval"&&["super_admin","management"].includes(role())?'<button onclick="payDecide(\''+esc(r.id)+'\',\'approve\',\''+(mode||"")+'\')">Approve</button> <button onclick="payDecide(\''+esc(r.id)+'\',\'reject\',\''+(mode||"")+'\')">Reject</button>':'')
+    +(r.status==="approved"&&["finance","super_admin"].includes(role())?'<button class="approve" onclick="payPay(\''+esc(r.id)+'\')">Record payment</button>':'')+'</td></tr>').join("")+'</table></div>';
+}
+async function loadScorecards(){
+  setTab("scorecards");CUR.screen="scorecards";
+  if(needSignIn())return;
+  try{
+    const d=await api("/api/admin/scorecards"),h=v=>v==null?'<span class="muted">-</span>':fnum(v);
+    const tbl=(title,help,head,rows)=>'<div class="pl-card" style="margin-top:12px"><h3>'+title+'</h3><div class="sp-note">'+help+'</div>'+(rows.length?'<div class="nt-wrap"><table class="nt-t"><tr>'+head.map((x,i)=>'<th'+(i?' class="n"':'')+'>'+x+'</th>').join("")+'</tr>'+rows.map(r=>'<tr>'+r.map((x,i)=>'<td'+(i?' class="n"':'')+'>'+x+'</td>').join("")+'</tr>').join("")+'</table></div>':'<div class="muted">No activity yet.</div>')+'</div>';
+    document.getElementById("detail").innerHTML='<h2>Desk scorecards</h2><div class="muted">Speed and results per person. Nobody sees another desk\'s prices here.</div>'
+      +tbl("Procurement","Saving = how far the final rates landed under the buy-below price.",["Person","Assigned","Proposed","Released","Hours to final choice","Saving %","Payables raised"],d.procurement.map(r=>[esc(r.name),r.assigned,r.proposed,r.released,h(r.avgHoursToProposal),h(r.avgSavingPct),r.payablesRaised]))
+      +tbl("Buyer Desk","From QC completed to delivered.",["Person","Orders","QC done","Delivered","Hours QC to delivery"],d.buyer.map(r=>[esc(r.name),r.orders,r.qcDone,r.delivered,h(r.avgHoursQcToDelivery)]))
+      +tbl("Finance","From QC completed to invoice, invoice to release, and approval to payment.",["Person","Invoices","Hours QC to invoice","Hours to release","Payables paid","Hours approved to paid"],d.finance.map(r=>[esc(r.name),r.invoices,h(r.avgHoursQcToInvoice),h(r.avgHoursToRelease),r.payablesPaid,h(r.avgHoursApprovedToPaid)]));
+    flowMsg("");
+  }catch(e){flowErr(e)}
+}
+async function spTimeline(id){
+  const box=document.getElementById("spTrail");if(!box)return;
+  try{
+    const d=await api("/api/admin/sd-orders/"+encodeURIComponent(id)+"/timeline");
+    box.innerHTML=d.events.length?'<div class="tl">'+d.events.map(e=>'<div class="tl-i"><b>'+esc(e.label)+'</b><small>'+esc(String(e.at).replace("T"," ").slice(0,16))+' · '+esc(e.by||"")+(e.role&&e.role!==e.by?' ('+esc(e.role)+')':'')+'</small></div>').join("")+'</div>':'<div class="muted">No events yet.</div>';
+  }catch(e){box.innerHTML='<span class="muted">'+esc(e.message)+'</span>'}
+}
+
 // ---- Disclosure approvals + My Desk ----
 async function openFinanceOrder(id){try{await ensureOrders();await openInvoice(id)}catch(e){flowErr(e)}}
 const DESK_KIND={buyer_desk:["supplier_identity","supplier details"],procurement:["buyer_contact","buyer contact details"]};
@@ -83,9 +128,11 @@ async function loadApprovals(){
   if(needSignIn())return;
   try{
     const d=await api("/api/admin/disclosure-requests?status=pending");
+    const pp=await api("/api/admin/payables?status=pending_approval").catch(()=>({payables:[]}));
     const rows=d.requests||[];
     document.getElementById("detail").innerHTML='<h2>Disclosure approvals</h2><div class="muted">A desk is asking to see the other side. Approve only what the work needs; access expires automatically.</div>'
-      +(rows.length?rows.map(r=>'<div class="pl-card" style="margin-top:12px"><h3>'+esc(r.requested_by)+' <small class="muted">('+esc(r.requester_role)+')</small> wants '+(r.kind==="buyer_contact"?"buyer contact details":"supplier identity")+'</h3><div class="muted">'+esc(r.sd_ref||r.req_ref||"")+'</div><p>'+esc(r.reason)+'</p><div class="actions"><select id="dh'+esc(r.id)+'"><option value="4">4 hours</option><option value="24" selected>24 hours</option><option value="72">3 days</option></select><button class="approve" onclick="decideDisc(\''+esc(r.id)+'\',\'approve\')">Approve</button><button class="reject" onclick="decideDisc(\''+esc(r.id)+'\',\'reject\')">Reject</button></div></div>').join(""):'<div class="pl-card" style="margin-top:12px">No pending requests.</div>');
+      +(rows.length?rows.map(r=>'<div class="pl-card" style="margin-top:12px"><h3>'+esc(r.requested_by)+' <small class="muted">('+esc(r.requester_role)+')</small> wants '+(r.kind==="buyer_contact"?"buyer contact details":"supplier identity")+'</h3><div class="muted">'+esc(r.sd_ref||r.req_ref||"")+'</div><p>'+esc(r.reason)+'</p><div class="actions"><select id="dh'+esc(r.id)+'"><option value="4">4 hours</option><option value="24" selected>24 hours</option><option value="72">3 days</option></select><button class="approve" onclick="decideDisc(\''+esc(r.id)+'\',\'approve\')">Approve</button><button class="reject" onclick="decideDisc(\''+esc(r.id)+'\',\'reject\')">Reject</button></div></div>').join(""):'<div class="pl-card" style="margin-top:12px">No pending disclosure requests.</div>')
+      +'<h2 style="margin-top:22px">Supplier payables to approve</h2>'+payTable(pp.payables,"approvals");
     flowMsg("");
   }catch(err){flowErr(err)}
 }
@@ -98,11 +145,12 @@ async function loadMyDesk(){
   setTab("overview");CUR.screen="overview";
   try{
     const d=await api("/api/admin/my-desk"),buyer=d.desk==="buyer";
+    if(d.desk==="finance"){const pp=await api("/api/admin/payables?status=approved").catch(()=>({payables:[]}));d.payables=pp.payables}
     if(d.desk==="finance"){
       document.getElementById("detail").innerHTML='<h2>My desk</h2><div class="muted">Orders that finished QC are ready for billing. Release each invoice to the Buyer Desk when it is final.</div>'
         +'<div class="sp-sum"><div><small>To bill</small><b>'+d.counts.to_bill+'</b></div><div><small>Issued, not released</small><b>'+d.counts.to_release+'</b></div><div><small>Outstanding</small><b>'+d.counts.outstanding+'</b></div></div>'
         +'<div class="pl-card"><h3>Ready to invoice (QC completed)</h3>'+(d.toBill.length?d.toBill.map(o=>'<div class="pl-ex" onclick="openFinanceOrder(\''+esc(o.id)+'\')"><span><b>● </b>'+esc(o.title||"")+' <small>· '+esc(o.po_number)+' · '+esc(o.buyer_company||o.buyer_name||"")+'</small></span><small>'+fnum(o.total_price)+' '+esc(o.currency||"")+'</small></div>').join(""):'<div class="muted">Nothing waiting for billing.</div>')+'</div>'
-        +'<div class="pl-card" style="margin-top:12px"><h3>Invoices issued but not yet released</h3>'+(d.unreleased.length?d.unreleased.map(i=>'<div class="pl-ex"><span>'+esc(i.invoice_no)+' <small>· '+esc(i.po_number)+' · '+esc(i.title||"")+'</small></span><span><small>'+fnum(i.total)+' '+esc(i.currency||"")+'</small> <button onclick="releaseInvoice(\''+esc(i.id)+'\')">Release to team</button></span></div>').join(""):'<div class="muted">All issued invoices are released.</div>')+'</div>';
+        +'<div class="pl-card" style="margin-top:12px"><h3>Supplier payments to make (approved)</h3>'+payTable(d.payables||[],"")+'</div><div class="pl-card" style="margin-top:12px"><h3>Invoices issued but not yet released</h3>'+(d.unreleased.length?d.unreleased.map(i=>'<div class="pl-ex"><span>'+esc(i.invoice_no)+' <small>· '+esc(i.po_number)+' · '+esc(i.title||"")+'</small></span><span><small>'+fnum(i.total)+' '+esc(i.currency||"")+'</small> <button onclick="releaseInvoice(\''+esc(i.id)+'\')">Release to team</button></span></div>').join(""):'<div class="muted">All issued invoices are released.</div>')+'</div>';
       return;
     }
     const open=it=>buyer?"openBuyerRequirementAdmin('"+esc(it.id)+"')":"openSourcingPlan('"+esc(it.id)+"')";
@@ -334,7 +382,7 @@ async function openSourcingPlan(id){
   try{
     if(CUR.screen!=="sourcing")await loadSourcing();
     const enc=encodeURIComponent(id);
-    const [plan,sd,al,ords]=await Promise.all([api("/api/admin/sd-orders/"+enc+"/sourcing-plan"),api("/api/admin/sd-orders/"+enc),api("/api/admin/sd-orders/"+enc+"/allocation"),api("/api/admin/orders").catch(()=>({orders:[]}))]);
+    const [plan,sd,al,ords,pays]=await Promise.all([api("/api/admin/sd-orders/"+enc+"/sourcing-plan"),api("/api/admin/sd-orders/"+enc),api("/api/admin/sd-orders/"+enc+"/allocation"),api("/api/admin/orders").catch(()=>({orders:[]})),api("/api/admin/payables").catch(()=>({payables:[]}))]);
     ordData=ords;
     const o=plan.sdOrder,un=plan.unallocated,pct=plan.totalRequirement?Math.min(100,Math.round(plan.allocated/plan.totalRequirement*100)):0;
     const head='<div class="rq-head"><div><h2>'+esc(o.title)+'</h2><div class="muted">'+esc(o.sdNumber)+' · SupplyDesk order · '+plan.orders.length+' buyer order(s)</div></div><span class="rq-pill">'+esc(un>0?(plan.allocated>0?"Partly planned":"To plan"):"Planned")+'</span></div>'+assignBox("sd_order",id)+discBox("sd_order",id);
@@ -375,8 +423,15 @@ async function openSourcingPlan(id){
     const regHtml=al.regions.length?al.regions.map(r=>'<div class="rq-q"><b>'+esc(r.region)+'</b> <span class="muted">'+fnum(r.total)+'</span>'+r.suppliers.map(s=>'<div>'+esc(s.supplier)+': '+fnum(s.quantity)+' <span class="muted">'+esc(s.poNumber)+' · '+esc(s.statusLabel)+'</span></div>').join("")+'</div>').join("")+'<div><b>Total = '+fnum(al.allocated)+'</b> of '+fnum(al.totalRequirement)+'</div>':"";
     const spare=(ords.orders||[]).filter(x=>["accepted","partially_accepted"].includes(x.review_status)&&x.status!=="cancelled"&&!x.sd_order_id);
     const merge=spare.length?'<div class="rq-grid"><label>Add another accepted buyer order<select id="sdAddSel"><option value="">Choose…</option>'+spare.map(x=>'<option value="'+esc(x.id)+'">'+esc(x.po_number+" · "+x.title+" · "+x.quantity)+'</option>').join("")+'</select></label></div><div class="actions"><button onclick="spAddOrder(\''+esc(id)+'\')">Add to this SupplyDesk order</button></div>':"";
+    const myPays=(pays.payables||[]).filter(x=>x.sdNumber===o.sdNumber),havePay=new Set(myPays.map(x=>x.poNumber));
+    const raisable=(sd.supplierPos||[]).filter(x=>!["declined","cancelled","issued"].includes(x.status)&&!havePay.has(x.po_number));
+    const canRaise=["procurement","super_admin","management"].includes(role());
+    const payBox=(myPays.length||(canRaise&&raisable.length))?'<h3 style="margin:18px 0 4px;font-size:15px">Supplier payables</h3><div class="sp-note">Raised by Procurement after QC, approved by Management, paid by Finance.</div>'+payTable(myPays,"")
+      +(canRaise&&raisable.length?'<div class="nt-wrap"><table class="nt-t"><tr><th>Raise for PO</th><th>Amount (blank = full PO value)</th><th></th></tr>'+raisable.map(x=>'<tr><td>'+esc(x.po_number)+' · '+esc(x.statusLabel||x.status)+'</td><td><input id="payAmt_'+esc(x.id)+'" type="number" min="0" step="0.01" style="width:140px"></td><td><button onclick="payRaise(\''+esc(x.id)+'\',\''+esc(id)+'\')">Raise payable</button></td></tr>').join("")+'</table></div>':''):"";
+    const trail=mgr?'<div class="actions"><button onclick="spTimeline(\''+esc(id)+'\')">Who did what</button></div><div id="spTrail"></div>':"";
     document.getElementById("detail").innerHTML=head+ceilBox+econ+proposed+sum+bo+ratesBox+editor
       +(pos?rqSec("Supplier POs",pos,true,sd.supplierPos.length)+rqSec("Allocation by region (SupplyDesk only)",regHtml,false,null):"")
+      +payBox+trail
       +(merge?rqSec("Combine with another buyer order",merge,false,null):"");
     if(un>0&&plan.candidates.length){spApply(window.__start||[]);}
     document.getElementById("detail").scrollIntoView({behavior:"smooth",block:"start"});

@@ -17,3 +17,23 @@ CREATE TABLE IF NOT EXISTS sd_rate_quotes (
 ) ENGINE=InnoDB;
 ALTER TABLE invoices ADD COLUMN released_at DATETIME NULL, ADD COLUMN released_by VARCHAR(120) NULL;
 UPDATE invoices SET released_at = created_at WHERE released_at IS NULL;
+CREATE TABLE IF NOT EXISTS supplier_payables (
+  id CHAR(36) PRIMARY KEY,
+  supplier_po_id CHAR(36) NOT NULL,
+  sd_order_id CHAR(36) NULL,
+  supplier_id CHAR(36) NOT NULL,
+  amount DECIMAL(16,2) NOT NULL,
+  currency VARCHAR(10) NOT NULL,
+  status ENUM('pending_approval','approved','rejected','paid') NOT NULL DEFAULT 'pending_approval',
+  note VARCHAR(300) NULL,
+  raised_by VARCHAR(120) NOT NULL,
+  raised_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  decided_by VARCHAR(120) NULL,
+  decided_at DATETIME NULL,
+  decision_note VARCHAR(300) NULL,
+  paid_by VARCHAR(120) NULL,
+  paid_at DATETIME NULL,
+  payment_ref VARCHAR(120) NULL,
+  UNIQUE KEY uq_payable_po (supplier_po_id),
+  INDEX idx_payable_status (status, raised_at)
+) ENGINE=InnoDB;

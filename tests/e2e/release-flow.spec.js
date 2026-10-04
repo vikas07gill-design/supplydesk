@@ -198,3 +198,65 @@ test("QC hands the order to Finance and tells the Buyer Desk; Finance releases t
   const audits = (await (await request.get("/api/admin/audit", { headers: su })).json()).entries.map(e => e.action);
   for (const a of ["sd_order.ceiling_set", "sd_order.rate_quoted", "sd_order.plan_proposed", "invoice.released"]) expect(audits, a).toContain(a);
 });
+
+test("supplier payables: Procurement raises, Management approves, Finance pays - three different hands", async ({ request }) => {
+  const poIds = {};
+  for (const k of ["A", "B"]) poIds[k] = (await (await request.get("/api/supplier-dashboard/purchase-orders", { headers: SUP[k].sh })).json()).purchaseOrders[0].id;
+  const raise = (h, k, data = {}) => request.post(`/api/admin/supplier-pos/${poIds[k]}/payable`, { headers: h, data });
+  expect((await raise(H(B), "A")).status()).toBe(403);                       // Buyer Desk has nothing to do with supplier money
+  expect((await raise(H(P), "A", { amount: 99999 })).status()).toBe(409);     // cannot exceed the PO value
+  const r = await raise(H(P), "A");
+  expect(r.status()).toBe(201); expect((await r.json()).amount).toBe(15200);  // 400 x 38
+  expect((await raise(H(P), "A")).status()).toBe(409);                        // one payable per PO
+  const pid = (await r.json()).id;
+  expect((await request.get("/api/admin/payables", { headers: H(B) })).status()).toBe(403);
+  expect((await (await request.get("/api/admin/payables", { headers: H(P) })).json()).payables.length).toBe(1);
+  // order matters: approval before payment
+  expect((await request.post(`/api/admin/payables/${pid}/pay`, { headers: H(F), data: { reference: "UTR1" } })).status()).toBe(409);
+  expect((await request.post(`/api/admin/payables/${pid}/approve`, { headers: H(P) })).status()).toBe(403);
+  expect((await request.post(`/api/admin/payables/${pid}/reject`, { headers: H(M), data: {} })).status()).toBe(400);   // a reason is required
+  expect((await request.post(`/api/admin/payables/${pid}/approve`, { headers: H(M) })).status()).toBe(200);
+  expect((await request.post(`/api/admin/payables/${pid}/pay`, { headers: H(M), data: { reference: "UTR1" } })).status()).toBe(403);   // only Finance pays
+  expect((await request.post(`/api/admin/payables/${pid}/pay`, { headers: H(F), data: {} })).status()).toBe(400);
+  expect((await request.post(`/api/admin/payables/${pid}/pay`, { headers: H(F), data: { reference: "UTR-" + stamp } })).status()).toBe(200);
+  const fin = (await (await request.get("/api/admin/payables?status=paid", { headers: H(F) })).json()).payables[0];
+  expect(fin.status).toBe("paid"); expect(fin.paymentRef).toBe("UTR-" + stamp);
+  expect(fin.supplier).toMatch(/^Supplier [0-9A-F]{6}$/);                      // Finance pays against an alias, not a name
+  // the same person cannot raise and approve (Management raising for B, then approving their own)
+  const own = await raise(H(M), "B");
+  expect(own.status()).toBe(201);
+  const oid = (await own.json()).id;
+  const self = await request.post(`/api/admin/payables/${oid}/approve`, { headers: H(M) });
+  expect(self.status()).toBe(409); expect((await self.json()).error).toMatch(/segregation/i);
+  expect((await request.post(`/api/admin/payables/${oid}/approve`, { headers: su })).status()).toBe(200);   // the owner can step in
+});
+
+test("scorecards show speed and saving per person; only Management / Super Admin can read them", async ({ request }) => {
+  expect((await request.get("/api/admin/scorecards", { headers: H(P) })).status()).toBe(403);
+  expect((await request.get("/api/admin/scorecards", { headers: H(F) })).status()).toBe(403);
+  const d = await (await request.get("/api/admin/scorecards", { headers: H(M) })).json();
+  const pr = d.procurement.find(x => x.adminId === P.adminId);
+  expect(pr).toMatchObject({ assigned: 1, proposed: 1, released: 1 });
+  expect(pr.avgSavingPct).toBe(8);               // final rates averaged 36.8 against a buy-below price of 40
+  expect(pr.payablesRaised).toBe(1);
+  expect(d.finance.find(x => x.adminId === F.adminId)).toMatchObject({ invoices: 1, payablesPaid: 1 });
+  expect(d.buyer.find(x => x.adminId === B.adminId).qcDone).toBe(1);
+});
+
+test("who did what: Management reads the full trail of the order; desks cannot", async ({ request }) => {
+  expect((await request.get(`/api/admin/sd-orders/${w.sdOrderId}/timeline`, { headers: H(P) })).status()).toBe(403);
+  const ev = (await (await request.get(`/api/admin/sd-orders/${w.sdOrderId}/timeline`, { headers: H(M) })).json()).events;
+  const labels = ev.map(e => e.label);
+  for (const l of ["sd order ceiling set", "sd order rate quoted", "sd order plan proposed", "order stage change", "invoice released", "payable raised", "payable paid"]) expect(labels, l).toContain(l);
+  expect(ev.find(e => e.label === "sd order plan proposed").by).toBe(P.adminId);
+  expect(ev.find(e => e.label === "invoice released").role).toBe("finance");
+});
+
+test("UI: Management opens Scorecards; Finance sees payables on My Desk", async ({ page }) => {
+  const go = async (u) => { await page.addInitScript(([t, r]) => { sessionStorage.setItem("supplydesk_admin_token", t); sessionStorage.setItem("supplydesk_admin_role", r); }, [u.token, u.role]); await page.goto("/admin.html"); };
+  await go(M);
+  await page.locator("#toolsGroup button", { hasText: /^Scorecards$/ }).click();
+  await expect(page.locator("#detail h2")).toHaveText("Desk scorecards");
+  await expect(page.locator("#detail")).toContainText("Saving %");
+  await expect(page.locator("#detail tr", { hasText: /^procurement/ })).toContainText("8");
+});

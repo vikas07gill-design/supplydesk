@@ -481,13 +481,16 @@ const DESK_POLICY={
     ["*",/^\/api\/admin\/sd-orders\/[^/]+(\/(allocation|supplier-pos|sourcing-plan|sourcing-plan\/submit|rate-quotes|rate-quotes\/[^/]+))?$/],
     ["*",/^\/api\/admin\/orders\/[^/]+\/(supplier-pos?|trace)$/],
     ["POST",/^\/api\/admin\/orders\/[^/]+\/stage$/],
+    ["POST",/^\/api\/admin\/supplier-pos\/[^/]+\/payable$/],
+    ["GET",/^\/api\/admin\/payables$/],
     ["PATCH",/^\/api\/admin\/supplier-pos\/[^/]+\/cancel$/],
     ["*",/^\/api\/admin\/requirements\/[^/]+\/(capability-matches|matches|quotes|state)$/],
     ["GET",/^\/api\/admin\/(products|applications|supplier-updates|product-files|supplier-update-files|files)(\/.*)?$/],
     ["*",/^\/api\/admin\/products\/[^/]+(\/capacity-verification|\/images)?$/]
   ],
   finance:[
-    ["GET",/^\/api\/admin\/(pipeline|orders|my-desk)$/],
+    ["GET",/^\/api\/admin\/(pipeline|orders|my-desk|payables)$/],
+    ["POST",/^\/api\/admin\/payables\/[^/]+\/pay$/],
     ["*",/^\/api\/admin\/orders\/[^/]+\/invoice$/],
     ["*",/^\/api\/admin\/invoices\/[^/]+(\/payments|\/void|\/release)?$/],
     ["GET",/^\/api\/super-admin\/margin-report$/]
@@ -2139,6 +2142,121 @@ app.post("/api/admin/invoices/:id/release",requireAdmin,async(req,res)=>{
     await audit(pool,req,"invoice.released","invoice",id,null,{invoiceNo:inv.invoice_no});
     res.json({ok:true});
   }catch(error){console.error(error);res.status(500).json({error:"Could not release the invoice."});}
+});
+
+// ---- Supplier payables: Procurement raises, Management approves, Finance pays (three different people) ----
+const poValue=(po)=>{const q=RFQ.parseQuantity(po.quantity);return po.unit_cost!=null&&q?Math.round(Number(po.unit_cost)*q*100)/100:(po.total_cost==null?null:Number(po.total_cost));};
+app.post("/api/admin/supplier-pos/:id/payable",requireAdmin,async(req,res)=>{
+  const id=clean(req.params.id,80),note=clean(req.body?.note,300)||null;
+  if(!["procurement","management","super_admin"].includes(req.admin.role))return res.status(403).json({error:"Only Procurement or Management can raise a supplier payable."});
+  try{
+    const [[po]]=await pool.execute("SELECT id,po_number,sd_order_id,supplier_id,quantity,unit_cost,total_cost,currency,status FROM supplier_pos WHERE id=?",[id]);
+    if(!po)return res.status(404).json({error:"Supplier PO not found."});
+    if(["declined","cancelled"].includes(po.status))return res.status(409).json({error:"This PO is "+po.status+"."});
+    const [stages]=await pool.execute("SELECT o.stage FROM supplier_po_lines l JOIN orders o ON o.id=l.buyer_order_id WHERE l.supplier_po_id=?",[id]);
+    const qcI=RFQ.stageIndex("qc_completed");
+    if(!stages.length||stages.some(o=>RFQ.stageIndex(o.stage||"supplydesk_accepted")<qcI))return res.status(409).json({error:"A payable can be raised only after QC is completed on the orders this PO covers."});
+    const value=poValue(po);
+    const amount=req.body?.amount===""||req.body?.amount==null?value:Number(req.body.amount);
+    if(!Number.isFinite(amount)||amount<=0)return res.status(400).json({error:"Enter a valid amount."});
+    if(value!=null&&amount>value+0.005)return res.status(409).json({error:"The payable cannot be more than the PO value ("+value+" "+po.currency+")."});
+    const [[dup]]=await pool.execute("SELECT id FROM supplier_payables WHERE supplier_po_id=?",[id]);
+    if(dup)return res.status(409).json({error:"A payable already exists for this PO."});
+    const pid=crypto.randomUUID();
+    await pool.execute("INSERT INTO supplier_payables (id,supplier_po_id,sd_order_id,supplier_id,amount,currency,note,raised_by) VALUES (?,?,?,?,?,?,?,?)",[pid,id,po.sd_order_id,po.supplier_id,amount,po.currency,note,req.admin.admin_id]);
+    await audit(pool,req,"payable.raised","supplier_po",id,null,{payableId:pid,amount,currency:po.currency});
+    res.status(201).json({ok:true,id:pid,amount});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not raise the payable."});}
+});
+app.get("/api/admin/payables",requireAdmin,async(req,res)=>{
+  try{
+    const status=clean(req.query.status,20),where=[],params=[];
+    if(["pending_approval","approved","rejected","paid"].includes(status)){where.push("p.status=?");params.push(status);}
+    if(req.admin.role==="procurement"){where.push("p.raised_by=?");params.push(req.admin.admin_id);}
+    const [rows]=await pool.execute("SELECT p.id,p.supplier_po_id,p.amount,p.currency,p.status,p.note,p.raised_by,p.raised_at,p.decided_by,p.decided_at,p.decision_note,p.paid_by,p.paid_at,p.payment_ref,p.supplier_id,po.po_number,s.sd_number,sp.legal_name,sp.trade_name FROM supplier_payables p JOIN supplier_pos po ON po.id=p.supplier_po_id LEFT JOIN sd_orders s ON s.id=p.sd_order_id LEFT JOIN supplier_profiles sp ON sp.id=p.supplier_id"+(where.length?" WHERE "+where.join(" AND "):"")+" ORDER BY FIELD(p.status,'pending_approval','approved','paid','rejected'),p.raised_at DESC LIMIT 200",params);
+    const sup=canSee(req,"supplier_identity");
+    res.json({payables:rows.map(r=>({id:r.id,poNumber:r.po_number,sdNumber:r.sd_number,supplier:sup?(r.trade_name||r.legal_name):supplierAlias(r.supplier_id),amount:Number(r.amount),currency:r.currency,status:r.status,note:r.note,raisedBy:r.raised_by,raisedAt:r.raised_at,decidedBy:r.decided_by,decidedAt:r.decided_at,decisionNote:r.decision_note,paidBy:r.paid_by,paidAt:r.paid_at,paymentRef:r.payment_ref}))});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not load payables."});}
+});
+// Super Admin is the owner and may test alone; everyone else needs three different people.
+const sameHand=(req,other)=>req.admin.role!=="super_admin"&&other&&other===req.admin.admin_id;
+for(const action of ["approve","reject"])app.post("/api/admin/payables/:id/"+action,requireAssigner,async(req,res)=>{
+  const id=clean(req.params.id,80),note=clean(req.body?.note,300)||null;
+  if(action==="reject"&&!note)return res.status(400).json({error:"Say why you are rejecting it."});
+  try{
+    const [[p]]=await pool.execute("SELECT id,status,raised_by,supplier_po_id FROM supplier_payables WHERE id=?",[id]);
+    if(!p)return res.status(404).json({error:"Payable not found."});
+    if(p.status!=="pending_approval")return res.status(409).json({error:"This payable was already decided."});
+    if(sameHand(req,p.raised_by))return res.status(409).json({error:"Segregation of duties: the person who raised a payable cannot approve it."});
+    await pool.execute("UPDATE supplier_payables SET status=?,decided_by=?,decided_at=NOW(),decision_note=? WHERE id=?",[action==="approve"?"approved":"rejected",req.admin.admin_id,note,id]);
+    await audit(pool,req,"payable."+(action==="approve"?"approved":"rejected"),"supplier_po",p.supplier_po_id,null,{payableId:id,note});
+    res.json({ok:true});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not save the decision."});}
+});
+app.post("/api/admin/payables/:id/pay",requireAdmin,async(req,res)=>{
+  const id=clean(req.params.id,80),ref=clean(req.body?.reference,120);
+  if(!["finance","super_admin"].includes(req.admin.role))return res.status(403).json({error:"Only Finance can record a supplier payment."});
+  if(!ref)return res.status(400).json({error:"Enter the bank / UTR reference."});
+  try{
+    const [[p]]=await pool.execute("SELECT id,status,raised_by,decided_by,supplier_po_id,amount FROM supplier_payables WHERE id=?",[id]);
+    if(!p)return res.status(404).json({error:"Payable not found."});
+    if(p.status!=="approved")return res.status(409).json({error:p.status==="paid"?"Already paid.":"Management must approve this payable first."});
+    if(sameHand(req,p.raised_by)||sameHand(req,p.decided_by))return res.status(409).json({error:"Segregation of duties: the person who raised or approved a payable cannot pay it."});
+    await pool.execute("UPDATE supplier_payables SET status='paid',paid_by=?,paid_at=NOW(),payment_ref=? WHERE id=?",[req.admin.admin_id,ref,id]);
+    await audit(pool,req,"payable.paid","supplier_po",p.supplier_po_id,null,{payableId:id,amount:Number(p.amount),reference:ref});
+    res.json({ok:true});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not record the payment."});}
+});
+
+// ---- Desk scorecards (Management / Super Admin only): speed and saving per person, never anyone's prices ----
+const avg=(a)=>a.length?Math.round(a.reduce((t,x)=>t+x,0)/a.length*10)/10:null;
+app.get("/api/admin/scorecards",requireAssigner,async(req,res)=>{
+  try{
+    const [users]=await pool.execute("SELECT admin_id,display_name,role FROM admin_users WHERE role IN ('buyer_desk','procurement','finance')");
+    const name=new Map(users.map(u=>[u.admin_id,u.display_name||u.admin_id]));
+    const by=(rows,key)=>{const m=new Map();for(const r of rows){const k=r[key];if(!m.has(k))m.set(k,[]);m.get(k).push(r);}return m;};
+    // Procurement: speed to a final choice and how far under the buy-below price the final rates landed.
+    const [pr]=await pool.execute("SELECT a.admin_id,s.id,a.created_at assigned_at,s.plan_status,s.plan_proposed_at,s.plan_json,s.buy_ceiling FROM employee_assignments a JOIN sd_orders s ON s.id=a.entity_id WHERE a.entity_type='sd_order' AND a.desk='procurement'");
+    const [pay]=await pool.execute("SELECT raised_by,paid_by,TIMESTAMPDIFF(MINUTE,decided_at,paid_at) mins,status FROM supplier_payables");
+    const procurement=[...by(pr,"admin_id")].map(([id,rows])=>{
+      const hours=rows.filter(r=>r.plan_proposed_at).map(r=>(new Date(r.plan_proposed_at)-new Date(r.assigned_at))/3600000);
+      const saving=[];
+      for(const r of rows){if(!r.buy_ceiling||!r.plan_json)continue;let lines=[];try{lines=JSON.parse(r.plan_json);}catch{}
+        const q=lines.reduce((t,l)=>t+(Number(l.quantity)||0),0);if(!q)continue;
+        const w=lines.reduce((t,l)=>t+(Number(l.quantity)||0)*(Number(l.unitCost)||0),0)/q;
+        saving.push((Number(r.buy_ceiling)-w)/Number(r.buy_ceiling)*100);}
+      return {adminId:id,name:name.get(id)||id,assigned:rows.length,proposed:rows.filter(r=>r.plan_proposed_at).length,released:rows.filter(r=>r.plan_status==="confirmed").length,avgHoursToProposal:avg(hours),avgSavingPct:avg(saving),payablesRaised:pay.filter(x=>x.raised_by===id).length};
+    });
+    // Buyer Desk: QC-complete to delivered.
+    const [bd]=await pool.execute("SELECT a.admin_id,o.id order_id,(SELECT MIN(e.created_at) FROM order_events e WHERE e.order_id=o.id AND e.stage='qc_completed') qc_at,(SELECT MIN(e.created_at) FROM order_events e WHERE e.order_id=o.id AND e.stage='delivered') del_at FROM employee_assignments a JOIN orders o ON o.rfq_id=a.entity_id WHERE a.entity_type='requirement' AND a.desk='buyer'");
+    const buyer=[...by(bd,"admin_id")].map(([id,rows])=>({adminId:id,name:name.get(id)||id,orders:rows.length,qcDone:rows.filter(r=>r.qc_at).length,delivered:rows.filter(r=>r.del_at).length,avgHoursQcToDelivery:avg(rows.filter(r=>r.qc_at&&r.del_at).map(r=>(new Date(r.del_at)-new Date(r.qc_at))/3600000))}));
+    // Finance: QC to invoice, invoice to release, approved to paid.
+    const [inv]=await pool.execute("SELECT i.created_by actor,i.created_at,i.released_at,(SELECT MIN(e.created_at) FROM order_events e WHERE e.order_id=i.order_id AND e.stage='qc_completed') qc_at FROM invoices i WHERE i.status<>'void'");
+    const finIds=new Set([...inv.map(r=>r.actor),...pay.map(r=>r.paid_by).filter(Boolean)].filter(x=>name.get(x)&&users.find(u=>u.admin_id===x&&u.role==="finance")));
+    const finance=[...finIds].map(id=>{const mine=inv.filter(r=>r.actor===id),paid=pay.filter(x=>x.paid_by===id);
+      return {adminId:id,name:name.get(id)||id,invoices:mine.length,avgHoursQcToInvoice:avg(mine.filter(r=>r.qc_at).map(r=>(new Date(r.created_at)-new Date(r.qc_at))/3600000)),avgHoursToRelease:avg(mine.filter(r=>r.released_at).map(r=>(new Date(r.released_at)-new Date(r.created_at))/3600000)),payablesPaid:paid.length,avgHoursApprovedToPaid:avg(paid.filter(x=>x.mins!=null).map(x=>x.mins/60))};});
+    res.json({procurement,buyer,finance});
+  }catch(error){console.error("Scorecards failed:",error);res.status(500).json({error:"Could not load scorecards."});}
+});
+
+// ---- Who did what: the full trail of one SupplyDesk order (Management / Super Admin only) ----
+async function trailFor(orderIds,sdId){
+  const ids=new Set(orderIds);if(sdId)ids.add(sdId);
+  if(orderIds.length){
+    const [o]=await pool.query("SELECT DISTINCT rfq_id FROM orders WHERE id IN (?) AND rfq_id IS NOT NULL",[orderIds]);o.forEach(r=>ids.add(r.rfq_id));
+    const [s]=await pool.query("SELECT DISTINCT sd_order_id FROM sd_order_items WHERE buyer_order_id IN (?)",[orderIds]);s.forEach(r=>ids.add(r.sd_order_id));
+    const [p]=await pool.query("SELECT DISTINCT supplier_po_id FROM supplier_po_lines WHERE buyer_order_id IN (?)",[orderIds]);p.forEach(r=>ids.add(r.supplier_po_id));
+    const [i]=await pool.query("SELECT id FROM invoices WHERE order_id IN (?)",[orderIds]);i.forEach(r=>ids.add(r.id));
+  }
+  const [rows]=await pool.query("SELECT actor,actor_role,action,entity,created_at FROM audit_log WHERE entity_id IN (?) AND action NOT IN ('access.denied') ORDER BY id",[[...ids]]);
+  return rows.map(r=>({at:r.created_at,by:/^(buyer|supplier):/.test(r.actor||"")?String(r.actor).split(":")[0]:r.actor,role:r.actor_role,action:r.action,label:String(r.action).replace(/[._]/g," ")}));
+}
+app.get("/api/admin/orders/:id/timeline",requireAssigner,async(req,res)=>{
+  try{res.json({events:await trailFor([clean(req.params.id,80)],null)});}catch(error){console.error(error);res.status(500).json({error:"Could not load the trail."});}
+});
+app.get("/api/admin/sd-orders/:id/timeline",requireAssigner,async(req,res)=>{
+  try{const id=clean(req.params.id,80),[o]=await pool.execute("SELECT buyer_order_id FROM sd_order_items WHERE sd_order_id=?",[id]);res.json({events:await trailFor(o.map(r=>r.buyer_order_id),id)});}
+  catch(error){console.error(error);res.status(500).json({error:"Could not load the trail."});}
 });
 
 // ---- Invoices & payments (Phase 5): internal tracking, GST % shown. Not a statutory tax invoice (no GSTIN/HSN). ----
@@ -4793,6 +4911,7 @@ async function syncSupplierEligibility(db,supplierId){
 
 // ---- Admin procurement workflow: Request review -> SupplyDesk order -> Sourcing plan -> Supplier POs ----
 async function ensureFlowSchema(){
+  await pool.query("CREATE TABLE IF NOT EXISTS supplier_payables (id CHAR(36) PRIMARY KEY, supplier_po_id CHAR(36) NOT NULL, sd_order_id CHAR(36) NULL, supplier_id CHAR(36) NOT NULL, amount DECIMAL(16,2) NOT NULL, currency VARCHAR(10) NOT NULL, status ENUM('pending_approval','approved','rejected','paid') NOT NULL DEFAULT 'pending_approval', note VARCHAR(300) NULL, raised_by VARCHAR(120) NOT NULL, raised_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, decided_by VARCHAR(120) NULL, decided_at DATETIME NULL, decision_note VARCHAR(300) NULL, paid_by VARCHAR(120) NULL, paid_at DATETIME NULL, payment_ref VARCHAR(120) NULL, UNIQUE KEY uq_payable_po (supplier_po_id), INDEX idx_payable_status (status,raised_at)) ENGINE=InnoDB");
   await pool.query("CREATE TABLE IF NOT EXISTS disclosure_requests (id CHAR(36) PRIMARY KEY, requested_by VARCHAR(120) NOT NULL, requester_role VARCHAR(30) NOT NULL, entity_type ENUM('requirement','sd_order') NOT NULL, entity_id CHAR(36) NOT NULL, kind ENUM('buyer_contact','supplier_identity') NOT NULL, reason VARCHAR(500) NOT NULL, status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending', decided_by VARCHAR(120) NULL, decision_note VARCHAR(500) NULL, decided_at DATETIME NULL, expires_at DATETIME NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_disc_status (status,created_at), INDEX idx_disc_user (requested_by,status)) ENGINE=InnoDB");
   await pool.query("CREATE TABLE IF NOT EXISTS employee_assignments (id CHAR(36) PRIMARY KEY, entity_type ENUM('requirement','sd_order') NOT NULL, entity_id CHAR(36) NOT NULL, desk ENUM('buyer','procurement') NOT NULL, admin_id VARCHAR(120) NOT NULL, assigned_by VARCHAR(120) NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uq_assign (entity_type,entity_id,desk), INDEX idx_assign_admin (admin_id,desk,entity_type)) ENGINE=InnoDB");
   const add=async(table,ddl)=>{try{await pool.query("ALTER TABLE "+table+" ADD COLUMN "+ddl);return true;}catch(e){if(!["ER_DUP_FIELDNAME","ER_DUP_COLUMN"].includes(e?.code))throw e;return false;}};
