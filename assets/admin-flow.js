@@ -45,6 +45,7 @@ async function saveAssign(type,id,desk,el){
 
 
 // ---- Disclosure approvals + My Desk ----
+async function openFinanceOrder(id){try{await ensureOrders();await openInvoice(id)}catch(e){flowErr(e)}}
 const DESK_KIND={buyer_desk:["supplier_identity","supplier details"],procurement:["buyer_contact","buyer contact details"]};
 function discBox(type,id){
   const k=DESK_KIND[role()];if(!k||(role()==="buyer_desk"&&type!=="requirement"))return "";
@@ -97,16 +98,23 @@ async function loadMyDesk(){
   setTab("overview");CUR.screen="overview";
   try{
     const d=await api("/api/admin/my-desk"),buyer=d.desk==="buyer";
+    if(d.desk==="finance"){
+      document.getElementById("detail").innerHTML='<h2>My desk</h2><div class="muted">Orders that finished QC are ready for billing. Release each invoice to the Buyer Desk when it is final.</div>'
+        +'<div class="sp-sum"><div><small>To bill</small><b>'+d.counts.to_bill+'</b></div><div><small>Issued, not released</small><b>'+d.counts.to_release+'</b></div><div><small>Outstanding</small><b>'+d.counts.outstanding+'</b></div></div>'
+        +'<div class="pl-card"><h3>Ready to invoice (QC completed)</h3>'+(d.toBill.length?d.toBill.map(o=>'<div class="pl-ex" onclick="openFinanceOrder(\''+esc(o.id)+'\')"><span><b>● </b>'+esc(o.title||"")+' <small>· '+esc(o.po_number)+' · '+esc(o.buyer_company||o.buyer_name||"")+'</small></span><small>'+fnum(o.total_price)+' '+esc(o.currency||"")+'</small></div>').join(""):'<div class="muted">Nothing waiting for billing.</div>')+'</div>'
+        +'<div class="pl-card" style="margin-top:12px"><h3>Invoices issued but not yet released</h3>'+(d.unreleased.length?d.unreleased.map(i=>'<div class="pl-ex"><span>'+esc(i.invoice_no)+' <small>· '+esc(i.po_number)+' · '+esc(i.title||"")+'</small></span><span><small>'+fnum(i.total)+' '+esc(i.currency||"")+'</small> <button onclick="releaseInvoice(\''+esc(i.id)+'\')">Release to team</button></span></div>').join(""):'<div class="muted">All issued invoices are released.</div>')+'</div>';
+      return;
+    }
     const open=it=>buyer?"openBuyerRequirementAdmin('"+esc(it.id)+"')":"openSourcingPlan('"+esc(it.id)+"')";
-    const tiles=buyer?[["To review",(d.counts.submitted||0)],["Total assigned",d.items.length]]:[["To plan",d.counts.to_plan||0],["Planned",d.counts.planned||0],["Declined POs",d.counts.declined||0]];
+    const tiles=buyer?[["To review",(d.counts.submitted||0)],["Ready for delivery",(d.counts.delivery_ready||0)],["Total assigned",d.items.length]]:[["To plan",d.counts.to_plan||0],["Awaiting release",d.counts.awaiting_release||0],["Awaiting QC",d.counts.awaiting_qc||0],["Declined POs",d.counts.declined||0]];
     document.getElementById("detail").innerHTML='<h2>My desk</h2><div class="muted">'+(buyer?"Buyer requirements assigned to you.":"SupplyDesk orders assigned to you for sourcing.")+'</div>'
       +'<div class="sp-sum">'+tiles.map(t=>'<div><small>'+t[0]+'</small><b>'+t[1]+'</b></div>').join("")+'</div>'
-      +(d.items.length?'<div class="pl-card">'+d.items.map(it=>'<div class="pl-ex" onclick="'+open(it)+'"><span>'+(it.needsAction?'<b>● </b>':'')+esc(it.title||"")+' <small>· '+esc(buyer?(it.rfq_code||""):(it.sd_number||""))+'</small></span><small>'+(buyer?esc(it.stateLabel):fnum(it.allocated)+' / '+fnum(it.needed))+'</small></div>').join("")+'</div>':'<div class="pl-card">Nothing is assigned to you yet. Management assigns work to your desk.</div>');
+      +(d.items.length?'<div class="pl-card">'+d.items.map(it=>'<div class="pl-ex" onclick="'+open(it)+'"><span>'+(it.needsAction?'<b>● </b>':'')+esc(it.title||"")+' <small>· '+esc(buyer?(it.rfq_code||""):(it.sd_number||""))+'</small></span><small>'+(buyer?(it.deliveryReady?'QC done · arrange delivery'+(it.invoicesReleased?' · invoice released':''):esc(it.stateLabel)):(it.plan_status==="proposed"?'Awaiting release · ':'')+(it.awaiting_qc?'QC due · ':'')+fnum(it.allocated)+' / '+fnum(it.needed)+(it.buy_ceiling!=null?' · buy below '+esc(it.buy_ceiling):''))+'</small></div>').join("")+'</div>':'<div class="pl-card">Nothing is assigned to you yet. Management assigns work to your desk.</div>');
   }catch(err){flowErr(err)}
 }
 
 async function loadOverview(){
-  if(DESK_KIND[role()]&&role()!=="finance")return loadMyDesk();
+  if(DESK_KIND[role()]||role()==="finance")return loadMyDesk();
   setTab("overview");CUR.screen="overview";
   if(needSignIn())return;
   try{
@@ -119,6 +127,7 @@ async function loadOverview(){
     if(by("new_requests"))todo.push(['requests',by("new_requests")+' new request(s) waiting for your decision']);
     if(by("review"))todo.push(['orders',by("review")+' buyer order(s) waiting for review']);
     if(by("sourcing"))todo.push(['sourcing',by("sourcing")+' SupplyDesk order(s) need a sourcing plan']);
+    if(p.releaseWaiting&&["super_admin","management"].includes(role()))todo.unshift(['sourcing',p.releaseWaiting+' final sourcing choice(s) waiting for your release']);
     if(by("qc"))todo.push(['qc',by("qc")+' PO(s) waiting for QC']);
     const todoHtml=todo.length?todo.map(t=>'<div class="pl-ex" onclick="goScreen(\''+t[0]+'\')"><span>'+esc(t[1])+'</span><small>Open ›</small></div>').join(""):'<div class="muted">Nothing is waiting on you right now.</div>';
     const exHtml=CUR.ex.length?CUR.ex.slice(0,6).map((x,i)=>'<div class="pl-ex" onclick="goException('+i+')"><span><b>'+esc(x.label)+'</b><br><small>'+esc(x.title||"")+(x.ref?' · '+esc(x.ref):'')+'</small></span><small>'+esc(x.ageHours==null?"":x.ageHours<48?x.ageHours+"h":Math.floor(x.ageHours/24)+"d")+'</small></div>').join(""):'<div class="muted">No exceptions.</div>';
@@ -251,6 +260,7 @@ function spTotals(){
 function spApply(lines){
   document.querySelectorAll(".sp-q").forEach(i=>{i.value=""});
   (lines||[]).forEach(l=>{const i=document.querySelector('.sp-q[data-code="'+l.capabilityCode+'"]');if(i&&!i.disabled)i.value=l.quantity;const c=document.querySelector('.sp-c[data-code="'+l.capabilityCode+'"]');if(c&&l.unitCost!=null)c.value=l.unitCost});
+  (window.__quotes||[]).forEach(q=>{const c=document.querySelector('.sp-c[data-code="'+q.capabilityCode+'"]'),i=document.querySelector('.sp-q[data-code="'+q.capabilityCode+'"]');if(c&&i&&Number(i.value)>0&&c.value==="")c.value=q.unitRate});
   spTotals();
 }
 function spCollect(){
@@ -268,9 +278,10 @@ async function spConfirm(id,allowShortfall){
   if(!allowShortfall&&!confirm("Confirm this allocation and issue "+lines.length+" supplier PO(s)? Suppliers will be emailed. The customer on each PO is SUPPLYDESK; no buyer details are sent."))return;
   const g=x=>(document.getElementById(x)||{value:""}).value.trim();
   try{
-    await api("/api/admin/sd-orders/"+encodeURIComponent(id)+"/sourcing-plan/confirm",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lines,currency:g("spCur")||"INR",deliveryBy:g("spDate"),terms:g("spTerms"),allowShortfall:!!allowShortfall})});
+    await api("/api/admin/sd-orders/"+encodeURIComponent(id)+"/sourcing-plan/confirm",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lines,currency:g("spCur")||"INR",deliveryBy:g("spDate"),terms:g("spTerms"),allowShortfall:!!allowShortfall,approveOverCeiling:!!window.__overOk})});
     await loadSourcing();await openSourcingPlan(id);flowMsg("Allocation confirmed. Supplier PO(s) issued to suppliers with SupplyDesk as the customer.");
   }catch(e){
+    if(/above the buy-below price/.test(e.message||"")&&["super_admin","management"].includes(role())&&!window.__overOk){if(confirm(e.message+"\n\nApprove this exception and issue the POs anyway?")){window.__overOk=true;try{return await spConfirm(id,allowShortfall)}finally{window.__overOk=false}}return}
     if(/covers .* of/.test(e.message||"")&&!allowShortfall){if(confirm(e.message+"\n\nIssue the POs for the quantity allocated so far?"))return spConfirm(id,true);return}
     flowErr(e);
   }
@@ -283,16 +294,66 @@ async function spAddOrder(sdId){
   const v=(document.getElementById("sdAddSel")||{}).value;if(!v)return;
   try{await api("/api/admin/sd-orders/"+encodeURIComponent(sdId)+"/orders",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({buyerOrderIds:[v]})});await loadSourcing();await openSourcingPlan(sdId)}catch(e){flowErr(e)}
 }
+
+// ---- Buy-below price, supplier rates, submit / release ----
+async function spSetCeiling(id){
+  const v=(document.getElementById("spCeil")||{}).value,cur=(document.getElementById("spCeilCur")||{}).value||"INR";
+  try{await api("/api/admin/sd-orders/"+encodeURIComponent(id)+"/buy-ceiling",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({unitPrice:v,currency:cur})});await openSourcingPlan(id);flowMsg(v?"Buy-below price saved. Assign the order to a Procurement team member to release it.":"Buy-below price cleared.")}
+  catch(e){flowErr(e)}
+}
+async function spRate(id){
+  const g=x=>(document.getElementById(x)||{value:""}).value.trim();
+  try{
+    const d=await api("/api/admin/sd-orders/"+encodeURIComponent(id)+"/rate-quotes",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({capabilityCode:g("rqCode"),unitRate:g("rqRate"),leadTimeDays:g("rqLead"),note:g("rqNote")})});
+    await openSourcingPlan(id);flowMsg(d.overCeiling?"Rate saved, but it is above the buy-below price, so it cannot be chosen.":"Rate saved.");
+  }catch(e){flowErr(e)}
+}
+async function spRateDel(id,code){
+  try{await api("/api/admin/sd-orders/"+encodeURIComponent(id)+"/rate-quotes/"+encodeURIComponent(code),{method:"DELETE"});await openSourcingPlan(id)}catch(e){flowErr(e)}
+}
+async function spSubmit(id){
+  const lines=spCollect().map(l=>({capabilityCode:l.capabilityCode,quantity:l.quantity}));
+  if(!lines.length){flowMsg("Choose how much to buy from each supplier first.");return}
+  let singleSourceNote="";
+  if((window.__quotes||[]).length<2){singleSourceNote=prompt("Only one supplier rate is recorded. Why can't you get a second rate?")||"";if(!singleSourceNote)return}
+  if(!confirm("Send this final choice to Management for release? No supplier is contacted yet."))return;
+  try{await api("/api/admin/sd-orders/"+encodeURIComponent(id)+"/sourcing-plan/submit",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lines,singleSourceNote})});await openSourcingPlan(id);flowMsg("Submitted. Management will review and release the Supplier POs.")}
+  catch(e){flowErr(e)}
+}
+async function spQc(orderId,sdId){
+  if(!confirm("Mark QC completed for this order? It then moves to Finance (billing) and the Buyer Desk (delivery)."))return;
+  try{await api("/api/admin/orders/"+encodeURIComponent(orderId)+"/stage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({stage:"qc_completed"})});await openSourcingPlan(sdId);flowMsg("QC completed. Finance and the Buyer Desk have it now.")}
+  catch(e){flowErr(e)}
+}
+async function releaseInvoice(id){
+  try{await api("/api/admin/invoices/"+encodeURIComponent(id)+"/release",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});flowMsg("Invoice released to the Buyer Desk and the buyer's dashboard.");if(role()==="finance")loadMyDesk()}
+  catch(e){flowErr(e)}
+}
+
 async function openSourcingPlan(id){
   try{
     if(CUR.screen!=="sourcing")await loadSourcing();
     const enc=encodeURIComponent(id);
-    const [plan,sd,al,ords]=await Promise.all([api("/api/admin/sd-orders/"+enc+"/sourcing-plan"),api("/api/admin/sd-orders/"+enc),api("/api/admin/sd-orders/"+enc+"/allocation"),api("/api/admin/orders")]);
+    const [plan,sd,al,ords]=await Promise.all([api("/api/admin/sd-orders/"+enc+"/sourcing-plan"),api("/api/admin/sd-orders/"+enc),api("/api/admin/sd-orders/"+enc+"/allocation"),api("/api/admin/orders").catch(()=>({orders:[]}))]);
     ordData=ords;
     const o=plan.sdOrder,un=plan.unallocated,pct=plan.totalRequirement?Math.min(100,Math.round(plan.allocated/plan.totalRequirement*100)):0;
     const head='<div class="rq-head"><div><h2>'+esc(o.title)+'</h2><div class="muted">'+esc(o.sdNumber)+' · SupplyDesk order · '+plan.orders.length+' buyer order(s)</div></div><span class="rq-pill">'+esc(un>0?(plan.allocated>0?"Partly planned":"To plan"):"Planned")+'</span></div>'+assignBox("sd_order",id)+discBox("sd_order",id);
     const sum='<div class="sp-sum"><div><small>Total requirement</small><b>'+fnum(plan.totalRequirement)+'</b></div><div><small>On supplier POs</small><b>'+fnum(plan.allocated)+'</b></div><div><small>Still to allocate</small><b>'+fnum(un)+'</b></div></div><div class="sp-bar"><i style="width:'+pct+'%"></i></div>';
-    const bo='<div class="nt-wrap"><table class="nt-t"><tr><th>Buyer PO</th><th class="n">Needed</th><th class="n">Allocated</th><th class="n">Remaining</th><th>Stage</th></tr>'+plan.orders.map(i=>'<tr><td><a href="#" onclick="openOrderAdmin(\''+esc(i.buyerOrderId)+'\');return false"><b>'+esc(i.poNumber)+'</b></a>'+(i.partial?' <span class="muted">(partial)</span>':'')+'</td><td class="n">'+fnum(i.needed)+'</td><td class="n">'+fnum(i.allocated)+'</td><td class="n">'+fnum(i.remaining)+'</td><td>'+esc(i.stageLabel)+'</td></tr>').join("")+'</table></div>';
+    const bo='<div class="nt-wrap"><table class="nt-t"><tr><th>Buyer PO</th><th class="n">Needed</th><th class="n">Allocated</th><th class="n">Remaining</th><th>Stage</th><th></th></tr>'+plan.orders.map(i=>'<tr><td><a href="#" onclick="openOrderAdmin(\''+esc(i.buyerOrderId)+'\');return false"><b>'+esc(i.poNumber)+'</b></a>'+(i.partial?' <span class="muted">(partial)</span>':'')+'</td><td class="n">'+fnum(i.needed)+'</td><td class="n">'+fnum(i.allocated)+'</td><td class="n">'+fnum(i.remaining)+'</td><td>'+esc(i.stageLabel)+'</td><td>'+(i.stage==="production_completed"&&["procurement","super_admin","management","admin"].includes(role())?'<button onclick="spQc(\''+esc(i.buyerOrderId)+'\',\''+esc(id)+'\')">Mark QC completed</button>':'')+'</td></tr>').join("")+'</table></div>';
+    const mgr=["super_admin","management"].includes(role()),isProc=role()==="procurement",cb=plan.buyCeiling;
+    window.__quotes=plan.rateQuotes||[];
+    const ceilBox='<div class="as-box" style="align-items:flex-end"><div><b>Buy below</b><div class="muted">Procurement must buy at or under this unit price.</div></div>'
+      +(mgr&&o.planStatus!=="confirmed"?'<label>Unit price<input id="spCeil" type="number" min="0" step="0.01" value="'+(cb?esc(cb.rate):"")+'" style="width:120px"></label><label>Currency<select id="spCeilCur">'+["INR","USD","EUR","GBP","AED"].map(c=>'<option'+(cb&&cb.currency===c?" selected":"")+'>'+c+'</option>').join("")+'</select></label><button onclick="spSetCeiling(\''+esc(id)+'\')">Save price</button>'
+        :'<b style="font-size:18px">'+(cb?esc(cb.rate)+' '+esc(cb.currency)+' / unit':'Not set yet')+'</b>')+'</div>';
+    const econ=plan.economics?'<div class="sp-sum"><div><small>Selling total (buyer)</small><b>'+fnum(plan.economics.revenue)+'</b></div><div><small>Buying cost on POs</small><b>'+fnum(plan.economics.cost)+'</b></div><div><small>Margin'+(plan.economics.coversAll?'':' (so far)')+'</small><b>'+fnum(plan.economics.margin)+'</b></div></div>':"";
+    const proposed=o.planStatus==="proposed"?'<div class="sp-tot ok"><span><b>Final choice submitted'+(o.planProposedBy?' by '+esc(o.planProposedBy):'')+'.</b> '+(isProc?'Waiting for Management to release the POs.':'Review the lines below and release the Supplier POs.')+'</span></div>':"";
+    let ratesBox="";
+    if(un>0){
+      const rrows=(plan.rateQuotes||[]).map(q=>'<tr><td>'+esc(q.supplier)+'<div class="sp-why">'+esc(q.productName||"")+' · '+esc(q.capabilityCode)+'</div></td><td class="n"><b'+(q.overCeiling?' class="nt-bad"':'')+'>'+esc(q.unitRate)+'</b>'+(q.overCeiling?' <small class="nt-bad">above limit</small>':'')+'</td><td class="n">'+(q.leadTimeDays==null?"-":esc(q.leadTimeDays)+"d")+'</td><td>'+esc(q.note||"")+'</td><td><button onclick="spRateDel(\''+esc(id)+'\',\''+esc(q.capabilityCode)+'\')">Remove</button></td></tr>').join("");
+      ratesBox='<h3 style="margin:18px 0 4px;font-size:15px">Supplier rates</h3><div class="sp-note">Record the rate each supplier quoted (2-3 suppliers). Choose the final split in the allocation below; the quoted rate becomes the PO rate.</div>'
+        +(rrows?'<div class="nt-wrap"><table class="nt-t"><tr><th>Supplier</th><th class="n">Rate</th><th class="n">Lead</th><th>Note</th><th></th></tr>'+rrows+'</table></div>':'<div class="sp-note">No rates recorded yet.</div>')
+        +(o.planStatus!=="confirmed"&&plan.candidates.length?'<div class="rq-grid" style="margin-top:8px"><label>Supplier / product<select id="rqCode">'+plan.candidates.map(c=>'<option value="'+esc(c.capabilityCode)+'">'+esc(c.supplier+" · "+c.productName)+'</option>').join("")+'</select></label><label>Quoted rate<input id="rqRate" type="number" min="0" step="0.01"></label><label>Lead time (days)<input id="rqLead" type="number" min="0"></label><label>Note<input id="rqNote" maxlength="300"></label></div><div class="actions"><button onclick="spRate(\''+esc(id)+'\')">Save rate</button></div>':"");
+    }
     let editor="";
     if(un>0){
       const draftBy=new Map((plan.draft||[]).map(l=>[l.capabilityCode,l]));
@@ -306,7 +367,7 @@ async function openSourcingPlan(id){
           +'<div class="actions"><button onclick="spApply(window.__recommended)">Use recommended allocation</button><button onclick="spApply([])">Clear</button><button onclick="spSaveDraft(\''+esc(id)+'\')">Save draft</button></div>'
           +(plan.recommendedShortfall>0?'<div class="sp-note nt-warn">Eligible capacity is '+fnum(plan.recommendedShortfall)+' short of the requirement.</div>':'')
           +'<details style="margin:10px 0"><summary class="sp-note" style="cursor:pointer;font-weight:800">PO terms (optional)</summary><div class="rq-grid"><label>Currency<select id="spCur"><option>INR</option><option>USD</option><option>EUR</option><option>GBP</option><option>AED</option></select></label><label>Deliver by<input id="spDate" type="date"></label></div><label class="rq-wide">Terms (payment, packing, delivery)<textarea id="spTerms" style="min-height:48px"></textarea></label></details>'
-          +'<div class="actions"><button class="primary" id="spConfirmBtn" onclick="spConfirm(\''+esc(id)+'\')">Confirm allocation &amp; issue Supplier POs</button></div><div class="sp-note"><span class="sp-lock">Customer = SUPPLYDESK</span> Suppliers never receive the buyer name, buyer PO, contact, target price or internal notes.</div>'
+          +(isProc?'<div class="actions"><button class="primary" id="spSubmitBtn" onclick="spSubmit(\''+esc(id)+'\')">Submit final choice to Management</button></div>':'<div class="actions"><button class="primary" id="spConfirmBtn" onclick="spConfirm(\''+esc(id)+'\')">'+(o.planStatus==="proposed"?"Release Supplier POs":"Confirm allocation &amp; issue Supplier POs")+'</button></div>')+'<div class="sp-note"><span class="sp-lock">Customer = SUPPLYDESK</span> Suppliers never receive the buyer name, buyer PO, contact, target price or internal notes.</div>'
           :'<div class="rq-next"><div class="rq-next-h">No eligible capacity found</div><div class="muted">No verified, fresh capacity matches this requirement. Check Supplier network › Capacity, or ask suppliers to update their capacity.</div></div>');
       window.__recommended=plan.recommended;window.__start=start;window.__draftBy=draftBy;
     }
@@ -314,7 +375,7 @@ async function openSourcingPlan(id){
     const regHtml=al.regions.length?al.regions.map(r=>'<div class="rq-q"><b>'+esc(r.region)+'</b> <span class="muted">'+fnum(r.total)+'</span>'+r.suppliers.map(s=>'<div>'+esc(s.supplier)+': '+fnum(s.quantity)+' <span class="muted">'+esc(s.poNumber)+' · '+esc(s.statusLabel)+'</span></div>').join("")+'</div>').join("")+'<div><b>Total = '+fnum(al.allocated)+'</b> of '+fnum(al.totalRequirement)+'</div>':"";
     const spare=(ords.orders||[]).filter(x=>["accepted","partially_accepted"].includes(x.review_status)&&x.status!=="cancelled"&&!x.sd_order_id);
     const merge=spare.length?'<div class="rq-grid"><label>Add another accepted buyer order<select id="sdAddSel"><option value="">Choose…</option>'+spare.map(x=>'<option value="'+esc(x.id)+'">'+esc(x.po_number+" · "+x.title+" · "+x.quantity)+'</option>').join("")+'</select></label></div><div class="actions"><button onclick="spAddOrder(\''+esc(id)+'\')">Add to this SupplyDesk order</button></div>':"";
-    document.getElementById("detail").innerHTML=head+sum+bo+editor
+    document.getElementById("detail").innerHTML=head+ceilBox+econ+proposed+sum+bo+ratesBox+editor
       +(pos?rqSec("Supplier POs",pos,true,sd.supplierPos.length)+rqSec("Allocation by region (SupplyDesk only)",regHtml,false,null):"")
       +(merge?rqSec("Combine with another buyer order",merge,false,null):"");
     if(un>0&&plan.candidates.length){spApply(window.__start||[]);}

@@ -471,23 +471,25 @@ const DESK_POLICY={
     ["*",/^\/api\/admin\/requirements$/],
     ["*",/^\/api\/admin\/requirements\/[^/]+\/(messages|message|buyer-quote|review)$/],
     ["GET",/^\/api\/admin\/orders$/],
-    ["*",/^\/api\/admin\/orders\/[^/]+\/(review|status|stage)$/]
+    ["*",/^\/api\/admin\/orders\/[^/]+\/(review|status|stage)$/],
+    ["GET",/^\/api\/admin\/orders\/[^/]+\/invoice$/]
   ],
   procurement:[
     ["GET",/^\/api\/admin\/(pipeline|my-desk|capacity|agreements|procurement\/queue)$/],
     ["*",/^\/api\/admin\/disclosure-requests(\/[^/]+(\/reveal)?)?$/],
     ["GET",/^\/api\/admin\/sd-orders$/],
-    ["*",/^\/api\/admin\/sd-orders\/[^/]+(\/(allocation|supplier-pos|sourcing-plan|sourcing-plan\/confirm))?$/],
+    ["*",/^\/api\/admin\/sd-orders\/[^/]+(\/(allocation|supplier-pos|sourcing-plan|sourcing-plan\/submit|rate-quotes|rate-quotes\/[^/]+))?$/],
     ["*",/^\/api\/admin\/orders\/[^/]+\/(supplier-pos?|trace)$/],
+    ["POST",/^\/api\/admin\/orders\/[^/]+\/stage$/],
     ["PATCH",/^\/api\/admin\/supplier-pos\/[^/]+\/cancel$/],
     ["*",/^\/api\/admin\/requirements\/[^/]+\/(capability-matches|matches|quotes|state)$/],
     ["GET",/^\/api\/admin\/(products|applications|supplier-updates|product-files|supplier-update-files|files)(\/.*)?$/],
     ["*",/^\/api\/admin\/products\/[^/]+(\/capacity-verification|\/images)?$/]
   ],
   finance:[
-    ["GET",/^\/api\/admin\/(pipeline|orders)$/],
+    ["GET",/^\/api\/admin\/(pipeline|orders|my-desk)$/],
     ["*",/^\/api\/admin\/orders\/[^/]+\/invoice$/],
-    ["*",/^\/api\/admin\/invoices\/[^/]+(\/payments|\/void)?$/],
+    ["*",/^\/api\/admin\/invoices\/[^/]+(\/payments|\/void|\/release)?$/],
     ["GET",/^\/api\/super-admin\/margin-report$/]
   ]
 };
@@ -613,6 +615,12 @@ async function requireAdmin(req,res,next){
         try{await audit(pool,req,"access.denied","admin_route",path.slice(0,80),null,{method:req.method,path});}catch{}
         return res.status(403).json({error:"Your role does not have access to this."});
       }
+    }
+    if(req.method==="POST"&&/^\/api\/admin\/orders\/[^/]+\/stage$/.test(path)){
+      // Procurement runs the order until production is done and then signs off QC; Buyer Desk takes it from there (delivery).
+      const to=String(req.body?.stage||""),qc=RFQ.stageIndex("qc_completed");
+      if((role==="procurement"&&to!=="qc_completed")||(role==="buyer_desk"&&RFQ.stageIndex(to)<=qc))
+        return res.status(403).json({error:role==="procurement"?"Procurement can mark QC completed; the next steps belong to the Buyer Desk.":"The Buyer Desk handles the steps after QC."});
     }
     if(await contactGuard(req,res))return;
     auditSensitive(req,res);
@@ -1925,6 +1933,10 @@ app.put("/api/admin/assignments",requireAssigner,async(req,res)=>{
     }else{
       const [[u]]=await pool.execute("SELECT admin_id,role FROM admin_users WHERE admin_id=? AND active=1",[adminId]);
       if(!u||u.role!==DESK_ROLE[desk])return res.status(400).json({error:"Choose an active "+ROLE_LABELS[DESK_ROLE[desk]]+" team member."});
+      if(type==="sd_order"&&desk==="procurement"){
+        const [[c]]=await pool.execute("SELECT buy_ceiling FROM sd_orders WHERE id=?",[id]);
+        if(!c||c.buy_ceiling==null)return res.status(409).json({error:"Set the buy-below price on this order before releasing it to Procurement.",code:"ceiling_required"});
+      }
       if(await assignmentConflict(pool,type,id,desk,u.admin_id))return res.status(409).json({error:"Segregation of duties: this person already works the other desk on this transaction."});
       await pool.execute("INSERT INTO employee_assignments (id,entity_type,entity_id,desk,admin_id,assigned_by) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE admin_id=VALUES(admin_id),assigned_by=VALUES(assigned_by),created_at=NOW()",[crypto.randomUUID(),type,id,desk,u.admin_id,req.admin.admin_id]);
     }
@@ -2018,26 +2030,115 @@ app.get("/api/admin/my-desk",requireAdmin,async(req,res)=>{
       const ids=[...await assignedIds(aid,"buyer","requirement")];
       if(!ids.length)return res.json({desk:"buyer",counts:{},items:[]});
       const [rows]=await pool.query("SELECT r.id,r.rfq_code,r.title,r.rfq_state,r.status,r.accept_decision,r.required_by,r.created_at,r.state_changed_at,b.name buyer_name,b.company buyer_company,(SELECT COUNT(*) FROM orders o WHERE o.rfq_id=r.id) orders FROM buyer_requirements r JOIN buyers b ON b.id=r.buyer_id WHERE r.id IN (?) ORDER BY r.created_at DESC",[ids]);
+      const [ords]=await pool.query("SELECT o.id,o.rfq_id,o.stage,(SELECT COUNT(*) FROM invoices i WHERE i.order_id=o.id AND i.status<>'void' AND i.released_at IS NOT NULL) released FROM orders o WHERE o.rfq_id IN (?) AND o.status<>'cancelled'",[ids]);
+      const qcI=RFQ.stageIndex("qc_completed"),delI=RFQ.stageIndex("delivered");
       const now=Date.now(),counts={},items=rows.map(r=>{
         const st=r.rfq_state||RFQ.LEGACY_STATUS_TO_STATE[r.status]||"submitted";counts[st]=(counts[st]||0)+1;
         const waitingHours=Math.floor((now-new Date(r.state_changed_at||r.created_at).getTime())/3600000);
-        return {...r,rfq_state:st,stateLabel:RFQ.STATES[st]?.label||st,waitingHours,needsAction:st==="submitted"};
+        const mine=ords.filter(o=>o.rfq_id===r.id),qcDone=mine.filter(o=>{const i=RFQ.stageIndex(o.stage||"supplydesk_accepted");return i>=qcI&&i<delI;}).length;
+        return {...r,rfq_state:st,stateLabel:RFQ.STATES[st]?.label||st,waitingHours,deliveryReady:qcDone,invoicesReleased:mine.reduce((t,o)=>t+Number(o.released),0),needsAction:st==="submitted"||qcDone>0};
       });
+      counts.delivery_ready=items.filter(i=>i.deliveryReady>0).length;
       return res.json({desk:"buyer",counts,states:Object.fromEntries(Object.entries(RFQ.STATES).map(([k,v])=>[k,v.label])),items});
     }
     if(role==="procurement"){
       const ids=[...await assignedIds(aid,"procurement","sd_order")];
       if(!ids.length)return res.json({desk:"procurement",counts:{},items:[]});
-      const [rows]=await pool.query("SELECT s.id,s.sd_number,s.title,s.plan_status,s.created_at,(SELECT COALESCE(SUM(i.quantity),0) FROM sd_order_items i WHERE i.sd_order_id=s.id) needed,(SELECT COALESCE(SUM(l.quantity),0) FROM supplier_po_lines l JOIN supplier_pos p ON p.id=l.supplier_po_id WHERE l.sd_order_id=s.id AND p.status NOT IN ('declined','cancelled')) allocated,(SELECT COUNT(*) FROM supplier_pos p WHERE p.sd_order_id=s.id AND p.status NOT IN ('declined','cancelled')) live_pos,(SELECT COUNT(*) FROM supplier_pos p WHERE p.sd_order_id=s.id AND p.status='declined') declined_pos FROM sd_orders s WHERE s.id IN (?) ORDER BY s.created_at DESC",[ids]);
-      const counts={to_plan:0,planned:0,declined:0},items=rows.map(r=>{
-        const needed=Number(r.needed)||0,allocated=Number(r.allocated)||0,toPlan=allocated<needed;
-        if(toPlan)counts.to_plan++;else counts.planned++;if(Number(r.declined_pos))counts.declined++;
-        return {...r,needed,allocated,needsAction:toPlan||Number(r.declined_pos)>0};
+      const [rows]=await pool.query("SELECT s.id,s.sd_number,s.title,s.plan_status,s.created_at,(SELECT COALESCE(SUM(i.quantity),0) FROM sd_order_items i WHERE i.sd_order_id=s.id) needed,(SELECT COALESCE(SUM(l.quantity),0) FROM supplier_po_lines l JOIN supplier_pos p ON p.id=l.supplier_po_id WHERE l.sd_order_id=s.id AND p.status NOT IN ('declined','cancelled')) allocated,(SELECT COUNT(*) FROM supplier_pos p WHERE p.sd_order_id=s.id AND p.status NOT IN ('declined','cancelled')) live_pos,(SELECT COUNT(*) FROM supplier_pos p WHERE p.sd_order_id=s.id AND p.status='declined') declined_pos,s.buy_ceiling,s.buy_ceiling_currency,(SELECT COUNT(*) FROM sd_order_items i JOIN orders o ON o.id=i.buyer_order_id WHERE i.sd_order_id=s.id AND o.stage='production_completed' AND o.status<>'cancelled') awaiting_qc FROM sd_orders s WHERE s.id IN (?) ORDER BY s.created_at DESC",[ids]);
+      const counts={to_plan:0,planned:0,declined:0,awaiting_release:0,awaiting_qc:0},items=rows.map(r=>{
+        const needed=Number(r.needed)||0,allocated=Number(r.allocated)||0,toPlan=allocated<needed&&r.plan_status!=="proposed";
+        if(r.plan_status==="proposed")counts.awaiting_release++;
+        else if(toPlan)counts.to_plan++;else counts.planned++;if(Number(r.declined_pos))counts.declined++;
+        if(Number(r.awaiting_qc))counts.awaiting_qc++;
+        return {...r,needed,allocated,buy_ceiling:r.buy_ceiling==null?null:Number(r.buy_ceiling),needsAction:toPlan||Number(r.declined_pos)>0||Number(r.awaiting_qc)>0};
       });
       return res.json({desk:"procurement",counts,items});
     }
-    res.status(400).json({error:"This dashboard is for the Buyer Desk and Procurement Desk."});
+    if(role==="finance"){
+      const qcKeys=RFQ.STAGE_KEYS.slice(RFQ.stageIndex("qc_completed"));
+      const [toBill]=await pool.query("SELECT o.id,o.po_number,o.title,o.stage,o.total_price,o.currency,b.name buyer_name,b.company buyer_company,b.email buyer_email,b.phone buyer_phone,o.buyer_id FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.status<>'cancelled' AND o.review_status IN ('accepted','partially_accepted') AND o.stage IN (?) AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id=o.id AND i.status<>'void') ORDER BY o.status_changed_at",[qcKeys]);
+      const [unreleased]=await pool.execute("SELECT i.id,i.invoice_no,i.total,i.currency,o.po_number,o.title FROM invoices i JOIN orders o ON o.id=i.order_id WHERE i.status<>'void' AND i.released_at IS NULL ORDER BY i.created_at");
+      const [open]=await pool.execute("SELECT COUNT(*) n FROM invoices WHERE status IN ('issued','partially_paid') AND released_at IS NOT NULL");
+      return res.json({desk:"finance",counts:{to_bill:toBill.length,to_release:unreleased.length,outstanding:Number(open[0].n)||0},toBill:toBill.map(o=>maskBuyerRow(req,{...o,stageLabel:RFQ.stageLabel(o.stage)})),unreleased});
+    }
+    res.status(400).json({error:"This dashboard is for the Buyer Desk, Procurement Desk and Finance."});
   }catch(error){console.error(error);res.status(500).json({error:"Could not load your desk."});}
+});
+
+// ---- Buy-below price, supplier rate comparison and release (Super Admin / Management decide; Procurement sources) ----
+app.put("/api/admin/sd-orders/:id/buy-ceiling",requireAssigner,async(req,res)=>{
+  const id=clean(req.params.id,80),raw=req.body?.unitPrice,currency=(clean(req.body?.currency,10)||"INR").toUpperCase();
+  const price=raw===""||raw==null?null:Number(raw);
+  if(price!=null&&(!Number.isFinite(price)||price<=0))return res.status(400).json({error:"Enter a valid buy-below price."});
+  try{
+    const [[sd]]=await pool.execute("SELECT id,buy_ceiling,plan_status FROM sd_orders WHERE id=?",[id]);
+    if(!sd)return res.status(404).json({error:"SupplyDesk order not found."});
+    if(sd.plan_status==="confirmed")return res.status(409).json({error:"POs are already released for this order."});
+    await pool.execute("UPDATE sd_orders SET buy_ceiling=?,buy_ceiling_currency=? WHERE id=?",[price,price==null?null:currency,id]);
+    await audit(pool,req,"sd_order.ceiling_set","sd_order",id,{unitPrice:sd.buy_ceiling==null?null:Number(sd.buy_ceiling)},{unitPrice:price,currency});
+    res.json({ok:true});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not save the buy-below price."});}
+});
+app.put("/api/admin/sd-orders/:id/rate-quotes",requireAdmin,async(req,res)=>{
+  const id=clean(req.params.id,80),code=clean(req.body?.capabilityCode,30).toUpperCase(),rate=Number(req.body?.unitRate);
+  const lead=req.body?.leadTimeDays===""||req.body?.leadTimeDays==null?null:Number(req.body.leadTimeDays),note=clean(req.body?.note,300)||null;
+  if(!Number.isFinite(rate)||rate<=0)return res.status(400).json({error:"Enter the rate the supplier quoted."});
+  if(lead!=null&&(!Number.isInteger(lead)||lead<0||lead>730))return res.status(400).json({error:"Lead time must be 0-730 days."});
+  try{
+    const d=await loadSourcingPlan(req,id);
+    if(!d)return res.status(404).json({error:"SupplyDesk order not found."});
+    if(d.sdOrder.planStatus==="confirmed")return res.status(409).json({error:"POs are already released for this order."});
+    if(!d.candidates.some(c=>c.capabilityCode===code))return res.status(400).json({error:"That supplier capability is not eligible for this order."});
+    const [[cap]]=await pool.execute("SELECT supplier_id FROM supplier_products WHERE capability_code=?",[code]);
+    await pool.execute("INSERT INTO sd_rate_quotes (id,sd_order_id,capability_code,supplier_id,unit_rate,lead_time_days,note,created_by) VALUES (?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE unit_rate=VALUES(unit_rate),lead_time_days=VALUES(lead_time_days),note=VALUES(note),created_by=VALUES(created_by)",[crypto.randomUUID(),id,code,cap.supplier_id,rate,lead,note,req.admin.admin_id]);
+    await pool.execute("UPDATE sd_orders SET plan_status=IF(plan_status='proposed','planning',plan_status) WHERE id=?",[id]);
+    await audit(pool,req,"sd_order.rate_quoted","sd_order",id,null,{capabilityCode:code,unitRate:rate,overCeiling:!!d.buyCeiling&&rate>d.buyCeiling.rate});
+    res.json({ok:true,overCeiling:!!d.buyCeiling&&rate>d.buyCeiling.rate});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not save the rate."});}
+});
+app.delete("/api/admin/sd-orders/:id/rate-quotes/:code",requireAdmin,async(req,res)=>{
+  try{
+    const id=clean(req.params.id,80),[[sd]]=await pool.execute("SELECT plan_status FROM sd_orders WHERE id=?",[id]);
+    if(!sd)return res.status(404).json({error:"SupplyDesk order not found."});
+    if(sd.plan_status==="confirmed")return res.status(409).json({error:"POs are already released for this order."});
+    await pool.execute("DELETE FROM sd_rate_quotes WHERE sd_order_id=? AND capability_code=?",[id,clean(req.params.code,30).toUpperCase()]);
+    await pool.execute("UPDATE sd_orders SET plan_status=IF(plan_status='proposed','planning',plan_status) WHERE id=?",[id]);
+    res.json({ok:true});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not remove the rate."});}
+});
+// Procurement submits the final choice (who, how much, at which quoted rate). Management / Super Admin then release the POs.
+app.post("/api/admin/sd-orders/:id/sourcing-plan/submit",requireAdmin,async(req,res)=>{
+  try{
+    const id=clean(req.params.id,80),d=await loadSourcingPlan(req,id);
+    if(!d)return res.status(404).json({error:"SupplyDesk order not found."});
+    if(d.sdOrder.planStatus==="confirmed")return res.status(409).json({error:"POs are already released for this order."});
+    if(!d.buyCeiling)return res.status(409).json({error:"The buy-below price has not been set yet.",code:"ceiling_required"});
+    const {lines,sum}=planLines(req.body,d);
+    if(!lines.length)return res.status(400).json({error:"Choose at least one supplier."});
+    const rate=new Map(d.rateQuotes.map(q=>[q.capabilityCode,q]));
+    const missing=lines.filter(l=>!rate.has(l.capabilityCode));
+    if(missing.length)return res.status(400).json({error:"Record the supplier's quoted rate first for: "+missing.map(l=>l.capabilityCode).join(", ")+"."});
+    const over=lines.filter(l=>rate.get(l.capabilityCode).unitRate>d.buyCeiling.rate);
+    if(over.length)return res.status(409).json({error:"Rate is above the buy-below price of "+d.buyCeiling.rate+" "+d.buyCeiling.currency+" for: "+over.map(l=>l.capabilityCode).join(", ")+". Negotiate lower, or ask Management to change the price.",code:"over_ceiling",lines:over.map(l=>l.capabilityCode)});
+    const note=clean(req.body?.singleSourceNote,300)||null;
+    if(d.rateQuotes.length<2&&(!note||note.length<10))return res.status(400).json({error:"Get rates from at least 2 suppliers, or explain why only one is possible.",code:"need_quotes"});
+    const final=lines.map(l=>({capabilityCode:l.capabilityCode,quantity:l.quantity,unitCost:rate.get(l.capabilityCode).unitRate}));
+    await pool.execute("UPDATE sd_orders SET plan_json=?,plan_status='proposed',plan_proposed_by=?,plan_proposed_at=NOW(),single_source_note=? WHERE id=?",[JSON.stringify(final),req.admin.admin_id,note,id]);
+    await audit(pool,req,"sd_order.plan_proposed","sd_order",id,null,{lines:final,quantity:sum,quotes:d.rateQuotes.length});
+    res.json({ok:true,status:"proposed",lines:final});
+  }catch(error){if(error.http)return res.status(error.http).json({error:error.message});console.error(error);res.status(500).json({error:"Could not submit the plan."});}
+});
+// Finance hands the sale invoice to the Buyer Desk (and, once released, it shows on the buyer's dashboard).
+app.post("/api/admin/invoices/:id/release",requireAdmin,async(req,res)=>{
+  try{
+    const id=clean(req.params.id,80),[[inv]]=await pool.execute("SELECT id,invoice_no,status,released_at FROM invoices WHERE id=?",[id]);
+    if(!inv)return res.status(404).json({error:"Invoice not found."});
+    if(inv.status==="void")return res.status(409).json({error:"A void invoice cannot be released."});
+    if(inv.released_at)return res.json({ok:true,already:true});
+    await pool.execute("UPDATE invoices SET released_at=NOW(),released_by=? WHERE id=?",[req.admin.admin_id,id]);
+    await audit(pool,req,"invoice.released","invoice",id,null,{invoiceNo:inv.invoice_no});
+    res.json({ok:true});
+  }catch(error){console.error(error);res.status(500).json({error:"Could not release the invoice."});}
 });
 
 // ---- Invoices & payments (Phase 5): internal tracking, GST % shown. Not a statutory tax invoice (no GSTIN/HSN). ----
@@ -2049,8 +2150,9 @@ app.post("/api/admin/orders/:id/invoice",requireAdmin,async(req,res)=>{
   const conn=await pool.getConnection();
   try{
     await conn.beginTransaction();
-    const [[o]]=await conn.execute("SELECT o.id,o.po_number,o.title,o.status,o.review_status,o.buyer_id,o.currency,o.total_price,b.email,b.name FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.id=? FOR UPDATE",[id]);
+    const [[o]]=await conn.execute("SELECT o.id,o.po_number,o.title,o.status,o.stage,o.review_status,o.buyer_id,o.currency,o.total_price,b.email,b.name FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.id=? FOR UPDATE",[id]);
     if(!o){await conn.rollback();return res.status(404).json({error:"Order not found."});}
+    if(req.admin.role==="finance"&&RFQ.stageIndex(o.stage||"supplydesk_accepted")<RFQ.stageIndex("qc_completed")){await conn.rollback();return res.status(409).json({error:"Billing opens after QC is completed on this order."});}
     if(!RFQ.reviewAccepted(o.review_status)){await conn.rollback();return res.status(409).json({error:"SupplyDesk has not accepted this buyer order yet; it cannot be invoiced."});}
     if(o.status==="cancelled"){await conn.rollback();return res.status(409).json({error:"A cancelled order cannot be invoiced."});}
     const [[dup]]=await conn.execute("SELECT id FROM invoices WHERE order_id=? AND status<>'void' LIMIT 1",[id]);
@@ -2060,11 +2162,11 @@ app.post("/api/admin/orders/:id/invoice",requireAdmin,async(req,res)=>{
     if(!calc){await conn.rollback();return res.status(400).json({error:"Enter a valid invoice amount."});}
     const iid=crypto.randomUUID();let no;
     for(let a=0;a<8;a++){no=RFQ.newInvoiceNo();try{
-      await conn.execute("INSERT INTO invoices (id,invoice_no,order_id,buyer_id,subtotal,gst_rate,gst_amount,total,currency,due_date,notes,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",[iid,no,id,o.buyer_id,calc.subtotal,gstRate,calc.gst,calc.total,o.currency,dueDate,notes,actorOf(req).id]);break;}
+      await conn.execute("INSERT INTO invoices (id,invoice_no,order_id,buyer_id,subtotal,gst_rate,gst_amount,total,currency,due_date,notes,created_by,released_at,released_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,"+(req.admin.role==="finance"?"NULL":"NOW()")+",?)",[iid,no,id,o.buyer_id,calc.subtotal,gstRate,calc.gst,calc.total,o.currency,dueDate,notes,actorOf(req).id,req.admin.role==="finance"?null:req.admin.admin_id]);break;}
       catch(e){if(e?.code!=="ER_DUP_ENTRY"||a===7)throw e;}}
     await audit(conn,req,"invoice.issued","invoice",iid,null,{invoiceNo:no,orderId:id,subtotal:calc.subtotal,gstRate,total:calc.total,currency:o.currency});
     await conn.commit();
-    try{await sendBrandedMail(o.email,"SupplyDesk | Invoice "+no,{preheader:"Invoice issued",title:"Invoice "+no,intro:"Hello "+(o.name||"Buyer")+", an invoice for order "+o.po_number+" ("+o.title+") has been issued. Total: "+calc.total+" "+o.currency+(dueDate?", due "+dueDate:"")+".",bodyHtml:"",textLines:["Invoice "+no+": "+calc.total+" "+o.currency],ctaText:"View invoice",ctaUrl:ORIGIN()+"/buyer-dashboard"});}catch(e){console.error("Invoice mail failed:",e);}
+    if(req.admin.role!=="finance")try{await sendBrandedMail(o.email,"SupplyDesk | Invoice "+no,{preheader:"Invoice issued",title:"Invoice "+no,intro:"Hello "+(o.name||"Buyer")+", an invoice for order "+o.po_number+" ("+o.title+") has been issued. Total: "+calc.total+" "+o.currency+(dueDate?", due "+dueDate:"")+".",bodyHtml:"",textLines:["Invoice "+no+": "+calc.total+" "+o.currency],ctaText:"View invoice",ctaUrl:ORIGIN()+"/buyer-dashboard"});}catch(e){console.error("Invoice mail failed:",e);}
     res.status(201).json({ok:true,invoiceId:iid,invoiceNo:no,...calc});
   }catch(error){await conn.rollback();console.error("Invoice failed:",error);res.status(500).json({error:"Could not issue the invoice."});}
   finally{conn.release();}
@@ -2072,7 +2174,7 @@ app.post("/api/admin/orders/:id/invoice",requireAdmin,async(req,res)=>{
 
 app.get("/api/admin/orders/:id/invoice",requireAdmin,async(req,res)=>{
   try{const oid=clean(req.params.id,80);
-    const [invoices]=await pool.execute("SELECT id,invoice_no,subtotal,gst_rate,gst_amount,total,currency,due_date,notes,status,paid_amount,created_at FROM invoices WHERE order_id=? ORDER BY created_at DESC",[oid]);
+    const [invoices]=await pool.execute("SELECT id,invoice_no,subtotal,gst_rate,gst_amount,total,currency,due_date,notes,status,paid_amount,created_at,released_at FROM invoices WHERE order_id=?"+(req.admin.role==="buyer_desk"?" AND released_at IS NOT NULL":"")+" ORDER BY created_at DESC",[oid]);
     const [payments]=invoices.length?await pool.query("SELECT id,invoice_id,amount,method,reference,received_on,note,recorded_by,created_at FROM payments WHERE invoice_id IN (?) ORDER BY received_on,created_at",[invoices.map(i=>i.id)]):[[]];
     res.json({invoices:invoices.map(i=>({...i,outstanding:RFQ.fromMinor(RFQ.toMinor(i.total)-RFQ.toMinor(i.paid_amount)),payments:payments.filter(p=>p.invoice_id===i.id)}))});}
   catch(error){console.error(error);res.status(500).json({error:"Could not load invoices."});}
@@ -2123,7 +2225,7 @@ app.patch("/api/admin/invoices/:id/void",requireAdmin,async(req,res)=>{
 });
 
 app.get("/api/buyer-invoices",requireBuyerDashboard,async(req,res)=>{
-  try{const [invoices]=await pool.execute("SELECT i.id,i.invoice_no,i.subtotal,i.gst_rate,i.gst_amount,i.total,i.currency,i.due_date,i.status,i.paid_amount,i.created_at,o.po_number,o.title FROM invoices i JOIN orders o ON o.id=i.order_id WHERE i.buyer_id=? AND i.status<>'void' ORDER BY i.created_at DESC LIMIT 100",[req.buyer.id]);
+  try{const [invoices]=await pool.execute("SELECT i.id,i.invoice_no,i.subtotal,i.gst_rate,i.gst_amount,i.total,i.currency,i.due_date,i.status,i.paid_amount,i.created_at,o.po_number,o.title FROM invoices i JOIN orders o ON o.id=i.order_id WHERE i.buyer_id=? AND i.status<>'void' AND i.released_at IS NOT NULL ORDER BY i.created_at DESC LIMIT 100",[req.buyer.id]);
     const [payments]=invoices.length?await pool.query("SELECT invoice_id,amount,method,reference,received_on FROM payments WHERE invoice_id IN (?) ORDER BY received_on",[invoices.map(i=>i.id)]):[[]];
     res.json({invoices:invoices.map(i=>({...i,outstanding:RFQ.fromMinor(RFQ.toMinor(i.total)-RFQ.toMinor(i.paid_amount)),payments:payments.filter(p=>p.invoice_id===i.id)}))});}
   catch(error){console.error(error);res.status(500).json({error:"Could not load invoices."});}
@@ -4700,6 +4802,15 @@ async function ensureFlowSchema(){
   await add("sd_orders","plan_json MEDIUMTEXT NULL");
   await add("sd_orders","plan_confirmed_at DATETIME NULL");
   await add("sd_orders","plan_confirmed_by VARCHAR(120) NULL");
+  await add("sd_orders","buy_ceiling DECIMAL(14,2) NULL");
+  await add("sd_orders","buy_ceiling_currency VARCHAR(10) NULL");
+  await add("sd_orders","plan_proposed_by VARCHAR(120) NULL");
+  await add("sd_orders","plan_proposed_at DATETIME NULL");
+  await add("sd_orders","single_source_note VARCHAR(300) NULL");
+  await pool.query("CREATE TABLE IF NOT EXISTS sd_rate_quotes (id CHAR(36) PRIMARY KEY, sd_order_id CHAR(36) NOT NULL, capability_code VARCHAR(30) NOT NULL, supplier_id CHAR(36) NOT NULL, unit_rate DECIMAL(14,2) NOT NULL, lead_time_days INT NULL, note VARCHAR(300) NULL, created_by VARCHAR(120) NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uq_rate_quote (sd_order_id,capability_code)) ENGINE=InnoDB");
+  {const fresh=await add("invoices","released_at DATETIME NULL");await add("invoices","released_by VARCHAR(120) NULL");
+   // Invoices that existed before the release step were already visible to buyers.
+   if(fresh)await pool.query("UPDATE invoices SET released_at=created_at WHERE released_at IS NULL");}
   // SD orders that already have live supplier POs were planned by hand: treat them as confirmed.
   if(fresh)await pool.query("UPDATE sd_orders s SET plan_status='confirmed',plan_confirmed_at=COALESCE(plan_confirmed_at,s.created_at) WHERE EXISTS (SELECT 1 FROM supplier_pos p WHERE p.sd_order_id=s.id AND p.status NOT IN ('declined','cancelled'))");
 }
@@ -4707,12 +4818,12 @@ const fmtN=(n)=>n==null?null:Math.round(Number(n)*100)/100;
 
 // Internal view of one SD order: need, what is already on supplier POs, eligible capacity and a recommended split.
 async function loadSourcingPlan(req,sdId){
-  const [[sd]]=await pool.execute("SELECT id,sd_number,title,plan_status,plan_json,plan_confirmed_at,created_at FROM sd_orders WHERE id=?",[sdId]);
+  const [[sd]]=await pool.execute("SELECT id,sd_number,title,plan_status,plan_json,plan_confirmed_at,created_at,buy_ceiling,buy_ceiling_currency,plan_proposed_by,plan_proposed_at,single_source_note FROM sd_orders WHERE id=?",[sdId]);
   if(!sd)return null;
-  const [items]=await pool.execute("SELECT o.id buyer_order_id,o.po_number,o.quantity,o.requested_quantity,o.stage,o.status,r.category,r.subcategory,r.title rtitle,r.specification,r.required_by,r.delivery_country FROM sd_order_items i JOIN orders o ON o.id=i.buyer_order_id LEFT JOIN buyer_requirements r ON r.id=o.rfq_id WHERE i.sd_order_id=?",[sdId]);
+  const [items]=await pool.execute("SELECT o.id buyer_order_id,o.po_number,o.quantity,o.requested_quantity,o.stage,o.status,o.total_price,o.currency order_currency,r.category,r.subcategory,r.title rtitle,r.specification,r.required_by,r.delivery_country FROM sd_order_items i JOIN orders o ON o.id=i.buyer_order_id LEFT JOIN buyer_requirements r ON r.id=o.rfq_id WHERE i.sd_order_id=?",[sdId]);
   let total=0,allocated=0;const orders=[];
   for(const it of items){const need=RFQ.parseQuantity(it.quantity)||0,a=await orderAllocation(pool,it.buyer_order_id);total+=need;allocated+=Math.min(a.allocated,need);
-    orders.push({buyerOrderId:it.buyer_order_id,poNumber:it.po_number,needed:need,allocated:fmtN(a.allocated),remaining:fmtN(Math.max(need-a.allocated,0)),stageLabel:RFQ.stageLabel(it.stage||"supplydesk_accepted"),partial:!!it.requested_quantity});}
+    orders.push({buyerOrderId:it.buyer_order_id,poNumber:it.po_number,needed:need,allocated:fmtN(a.allocated),remaining:fmtN(Math.max(need-a.allocated,0)),stage:it.stage||"supplydesk_accepted",stageLabel:RFQ.stageLabel(it.stage||"supplydesk_accepted"),partial:!!it.requested_quantity});}
   const unallocated=Math.max(fmtN(total-allocated),0);
   const rfqLike={category:items[0]?.category||"",subcategory:items[0]?.subcategory||"",title:items.map(i=>i.rtitle).join(" "),specification:items.map(i=>i.specification).join(" "),quantity:String(total||""),required_by:items[0]?.required_by||null};
   const [caps]=await pool.execute(
@@ -4733,7 +4844,18 @@ async function loadSourcingPlan(req,sdId){
   const recommended=[];let left=unallocated;const usedSup=new Set();
   for(const c of candidates){if(left<=0)break;if(c.hasLivePo)continue;const key=c.supplierId||c.supplier;if(usedSup.has(key))continue;const q=Math.min(c.freeCapacity,left);if(q<=0)continue;recommended.push({capabilityCode:c.capabilityCode,quantity:q});usedSup.add(key);left-=q;}
   let draft=[];try{draft=JSON.parse(sd.plan_json||"[]");}catch{}
-  return {sdOrder:{id:sd.id,sdNumber:sd.sd_number,title:sd.title,planStatus:sd.plan_status||"planning",planConfirmedAt:sd.plan_confirmed_at,createdAt:sd.created_at},
+  const ceiling=sd.buy_ceiling==null?null:{rate:Number(sd.buy_ceiling),currency:sd.buy_ceiling_currency||"INR"};
+  const [rq]=await pool.execute("SELECT q.capability_code,q.supplier_id,q.unit_rate,q.lead_time_days,q.note,q.created_by,q.updated_at,p.product_name,s.legal_name,s.trade_name FROM sd_rate_quotes q LEFT JOIN supplier_products p ON p.capability_code=q.capability_code LEFT JOIN supplier_profiles s ON s.id=q.supplier_id WHERE q.sd_order_id=? ORDER BY q.unit_rate",[sdId]);
+  const rateQuotes=rq.map(q=>({capabilityCode:q.capability_code,productName:q.product_name,supplier:sup?(q.trade_name||q.legal_name):supplierAlias(q.supplier_id),unitRate:Number(q.unit_rate),leadTimeDays:q.lead_time_days,note:q.note,overCeiling:!!ceiling&&Number(q.unit_rate)>ceiling.rate,quotedBy:q.created_by,updatedAt:q.updated_at}));
+  let economics=null;
+  if(canSee(req,"margin")){
+    const revenue=items.reduce((t,i)=>t+(Number(i.total_price)||0),0);
+    const [[c]]=await pool.execute("SELECT COALESCE(SUM(COALESCE(l.quantity*po.unit_cost,po.total_cost)),0) cost FROM supplier_po_lines l JOIN supplier_pos po ON po.id=l.supplier_po_id WHERE l.sd_order_id=? AND po.status NOT IN ('declined','cancelled')",[sdId]);
+    const cost=Number(c.cost)||0;
+    economics={currency:items[0]?.order_currency||"INR",revenue:fmtN(revenue),cost:fmtN(cost),margin:fmtN(revenue-cost),coversAll:unallocated<=0};
+  }
+  return {sdOrder:{id:sd.id,sdNumber:sd.sd_number,title:sd.title,planStatus:sd.plan_status||"planning",planConfirmedAt:sd.plan_confirmed_at,planProposedBy:sd.plan_proposed_by,planProposedAt:sd.plan_proposed_at,singleSourceNote:sd.single_source_note,createdAt:sd.created_at},
+    buyCeiling:ceiling,rateQuotes,economics,
     orders,totalRequirement:total,allocated:fmtN(allocated),unallocated,candidates,recommended,recommendedShortfall:Math.max(fmtN(left),0),draft:Array.isArray(draft)?draft:[],detailsRestricted:!sup};
 }
 app.get("/api/admin/sd-orders/:id/sourcing-plan",requireAdmin,async(req,res)=>{
@@ -4764,7 +4886,7 @@ app.put("/api/admin/sd-orders/:id/sourcing-plan",requireAdmin,async(req,res)=>{
     const id=clean(req.params.id,80),d=await loadSourcingPlan(req,id);
     if(!d)return res.status(404).json({error:"SupplyDesk order not found."});
     const {lines,sum}=planLines(req.body,d);
-    await pool.execute("UPDATE sd_orders SET plan_json=? WHERE id=?",[JSON.stringify(lines),id]);
+    await pool.execute("UPDATE sd_orders SET plan_json=?,plan_status=IF(plan_status='proposed','planning',plan_status) WHERE id=?",[JSON.stringify(lines),id]);
     await audit(pool,req,"sd_order.plan_saved","sd_order",id,null,{lines:lines.length,quantity:sum});
     res.json({ok:true,allocated:sum,unallocated:Math.max(fmtN(d.unallocated-sum),0)});
   }catch(error){if(error.http)return res.status(error.http).json({error:error.message});console.error("Plan save failed:",error);res.status(500).json({error:"Could not save the plan."});}
@@ -4780,6 +4902,15 @@ app.post("/api/admin/sd-orders/:id/sourcing-plan/confirm",requireAdmin,async(req
     plan=planLines(b,d);
     if(!plan.lines.length)return res.status(400).json({error:"Add at least one allocation line."});
     if(plan.lines.some(l=>l.unitCost==null))return res.status(400).json({error:"Enter the unit cost for every supplier PO."});
+    if(d.buyCeiling){
+      if(currency!==d.buyCeiling.currency)return res.status(400).json({error:"The PO currency must match the buy-below price currency ("+d.buyCeiling.currency+")."});
+      const over=plan.lines.filter(l=>l.unitCost>d.buyCeiling.rate);
+      if(over.length){
+        if(!(b.approveOverCeiling&&["super_admin","management"].includes(req.admin.role)))
+          return res.status(409).json({error:over.length+" line(s) are above the buy-below price of "+d.buyCeiling.rate+" "+d.buyCeiling.currency+". Lower the rate, or have Management approve the exception.",code:"over_ceiling",lines:over.map(l=>l.capabilityCode)});
+        await audit(pool,req,"sd_order.ceiling_override","sd_order",id,{ceiling:d.buyCeiling.rate},{lines:over.map(l=>({code:l.capabilityCode,unitCost:l.unitCost}))});
+      }
+    }
     if(plan.sum<d.unallocated-1e-9&&!b.allowShortfall)return res.status(409).json({error:"The plan covers "+plan.sum.toLocaleString("en-IN")+" of "+d.unallocated.toLocaleString("en-IN")+". Confirm that you accept the shortfall or allocate the rest.",code:"shortfall",shortfall:fmtN(d.unallocated-plan.sum)});
   }catch(error){if(error.http)return res.status(error.http).json({error:error.message});console.error(error);return res.status(500).json({error:"Could not check the plan."});}
   const conn=await pool.getConnection();const created=[];
@@ -4830,7 +4961,7 @@ app.get("/api/admin/pipeline",requireAdmin,async(req,res)=>{
       {key:"new_requests",label:"New Requests",screen:"requests",count:await n("SELECT COUNT(*) n FROM buyer_requirements WHERE status='pending_review'")},
       {key:"review",label:"Review",screen:"orders",count:await n("SELECT COUNT(*) n FROM orders WHERE review_status IN ('pending_review','pending_clarification') AND status<>'cancelled'")},
       {key:"accepted",label:"Accepted",screen:"requests",count:await n("SELECT COUNT(*) n FROM buyer_requirements WHERE status='fulfilling' AND rfq_state IN ('costing','quote_sent')")+await n("SELECT COUNT(*) n FROM orders o WHERE o.review_status IN ('accepted','partially_accepted') AND o.status<>'cancelled' AND NOT EXISTS (SELECT 1 FROM sd_order_items i WHERE i.buyer_order_id=o.id)")},
-      {key:"sourcing",label:"Sourcing",screen:"sourcing",count:await n("SELECT COUNT(*) n FROM sd_orders s WHERE s.plan_status='planning' AND EXISTS (SELECT 1 FROM sd_order_items i JOIN orders o ON o.id=i.buyer_order_id WHERE i.sd_order_id=s.id AND o.status<>'cancelled')")},
+      {key:"sourcing",label:"Sourcing",screen:"sourcing",count:await n("SELECT COUNT(*) n FROM sd_orders s WHERE s.plan_status IN ('planning','proposed') AND EXISTS (SELECT 1 FROM sd_order_items i JOIN orders o ON o.id=i.buyer_order_id WHERE i.sd_order_id=s.id AND o.status<>'cancelled')")},
       {key:"supplier_po",label:"Supplier PO",screen:"sourcing",count:await n("SELECT COUNT(*) n FROM supplier_pos WHERE status='issued'")},
       {key:"production",label:"Production",screen:"production",count:await n("SELECT COUNT(*) n FROM supplier_pos WHERE status IN ('accepted','partially_accepted','in_production')")},
       {key:"qc",label:"QC",screen:"qc",count:await n("SELECT COUNT(*) n FROM supplier_pos WHERE status='ready_for_qc'")},
@@ -4838,7 +4969,7 @@ app.get("/api/admin/pipeline",requireAdmin,async(req,res)=>{
       {key:"delivery",label:"Delivery",screen:"logistics",count:await n("SELECT COUNT(*) n FROM orders WHERE status<>'cancelled' AND stage='delivered'")}
     ];
     const ex=await adminExceptions(req);
-    res.json({stages,exceptions:ex.length});
+    res.json({stages,exceptions:ex.length,releaseWaiting:await n("SELECT COUNT(*) n FROM sd_orders WHERE plan_status='proposed'")});
   }catch(error){console.error("Pipeline failed:",error);res.status(500).json({error:"Could not load the pipeline."});}
 });
 
