@@ -429,15 +429,27 @@ async function openSourcingPlan(id){
     const payBox=(myPays.length||(canRaise&&raisable.length))?'<h3 style="margin:18px 0 4px;font-size:15px">Supplier payables</h3><div class="sp-note">Raised by Procurement after QC, approved by Management, paid by Finance.</div>'+payTable(myPays,"")
       +(canRaise&&raisable.length?'<div class="nt-wrap"><table class="nt-t"><tr><th>Raise for PO</th><th>Amount (blank = full PO value)</th><th></th></tr>'+raisable.map(x=>'<tr><td>'+esc(x.po_number)+' · '+esc(x.statusLabel||x.status)+'</td><td><input id="payAmt_'+esc(x.id)+'" type="number" min="0" step="0.01" style="width:140px"></td><td><button onclick="payRaise(\''+esc(x.id)+'\',\''+esc(id)+'\')">Raise payable</button></td></tr>').join("")+'</table></div>':''):"";
     const trail=mgr?'<div class="actions"><button onclick="spTimeline(\''+esc(id)+'\')">Who did what</button></div><div id="spTrail"></div>':"";
-    document.getElementById("detail").innerHTML=head+ceilBox+econ+proposed+sum+bo+ratesBox+editor
-      +(pos?rqSec("Supplier POs",pos,true,sd.supplierPos.length)+rqSec("Allocation by region (SupplyDesk only)",regHtml,false,null):"")
-      +payBox+trail
-      +(merge?rqSec("Combine with another buyer order",merge,false,null):"");
+    const tabs=[["ov","Overview",ceilBox+econ+proposed+sum+bo]];
+    if(un>0)tabs.push(["rt","Rates"+((plan.rateQuotes||[]).length?" ("+plan.rateQuotes.length+")":""),ratesBox],["al","Allocation",editor]);
+    if(pos)tabs.push(["po","Supplier POs ("+sd.supplierPos.length+")",rqSec("Supplier POs",pos,false,null)+rqSec("Allocation by region (SupplyDesk only)",regHtml,false,null)]);
+    if(payBox)tabs.push(["py","Payables"+(myPays.length?" ("+myPays.length+")":""),payBox]);
+    if(trail||merge)tabs.push(["hs","History &amp; more",trail+(merge?rqSec("Combine with another buyer order",merge,false,null):"")]);
+    const keep=window.__spTab&&window.__spTab.id===id&&tabs.some(t=>t[0]===window.__spTab.tab)?window.__spTab.tab:(un>0?(o.planStatus==="proposed"&&!isProc?"al":(isProc?"rt":"ov")):"ov");
+    window.__spTab={id,tab:keep};
+    document.getElementById("detail").innerHTML=head
+      +'<div class="sp-tabs" role="tablist">'+tabs.map(t=>'<button role="tab" class="sp-tab'+(t[0]===keep?' on':'')+'" data-tab="'+t[0]+'" onclick="spTab(\''+t[0]+'\')">'+t[1]+'</button>').join("")+'</div>'
+      +tabs.map(t=>'<div class="sp-pane" data-pane="'+t[0]+'"'+(t[0]===keep?'':' hidden')+'>'+t[2]+'</div>').join("");
     if(un>0&&plan.candidates.length){spApply(window.__start||[]);}
     document.getElementById("detail").scrollIntoView({behavior:"smooth",block:"start"});
   }catch(e){flowErr(e)}
 }
 
+window.spTab=function(t){
+  if(window.__spTab)window.__spTab.tab=t;
+  document.querySelectorAll("#detail .sp-tab").forEach(b=>b.classList.toggle("on",b.dataset.tab===t));
+  document.querySelectorAll("#detail .sp-pane").forEach(p=>{p.hidden=p.dataset.pane!==t});
+  const d=document.querySelector("#detail .sp-tabs");if(d)d.scrollIntoView({block:"nearest"});
+};
 // ---------- Production / QC / Logistics / Finance: the same orders, filtered by what needs doing ----------
 const PHASES={
   production:{title:"Production",help:"Orders with supplier POs. Production progress comes from the supplier and moves the buyer timeline by itself.",stages:["supplydesk_accepted","production_confirmed","in_production"],needAlloc:true},
