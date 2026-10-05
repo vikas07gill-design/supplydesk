@@ -38,8 +38,11 @@ async function flow(request, tag) {
   const o = (await (await request.get("/api/admin/orders", { headers: H(su) })).json()).orders.find(x => x.id === acc.orderId);
   return { b, requirementId: id, orderId: acc.orderId, sdOrderId: o.sd_order_id };
 }
-const assign = (request, entityType, entityId, desk, adminId) =>
-  request.put("/api/admin/assignments", { headers: H(su), data: { entityType, entityId, desk, adminId } });
+const assign = async (request, entityType, entityId, desk, adminId) => {
+  // Work is released to Procurement only after a buy-below price is set.
+  if (entityType === "sd_order" && desk === "procurement" && adminId) await request.put(`/api/admin/sd-orders/${entityId}/buy-ceiling`, { headers: H(su), data: { unitPrice: 40 } });
+  return request.put("/api/admin/assignments", { headers: H(su), data: { entityType, entityId, desk, adminId } });
+};
 
 test.beforeAll(async ({ request }) => {
   su = (await signIn(request, SID, SPW)).token;
@@ -127,6 +130,7 @@ test("segregation of duties: one person cannot work both desks on the same trans
   // U.buyer_desk holds the buyer desk on w2's requirement. Move them to the procurement role, then try the sourcing desk.
   const p = await request.patch(`/api/super-admin/team/${U.buyer_desk.id}`, { headers: H(su), data: { role: "procurement" } });
   expect(p.status()).toBe(200);
+  await request.put(`/api/admin/sd-orders/${w2.sdOrderId}/buy-ceiling`, { headers: H(su), data: { unitPrice: 40 } });
   const r = await request.put("/api/admin/assignments", { headers: H(su), data: { entityType: "sd_order", entityId: w2.sdOrderId, desk: "procurement", adminId: U.buyer_desk.adminId } });
   expect(r.status()).toBe(409);
   expect((await r.json()).error).toMatch(/segregation/i);
@@ -179,7 +183,8 @@ test("phase 3: My Desk shows only assigned work for each desk", async ({ request
   expect(pd.desk).toBe("procurement");
   expect(pd.items.map(i => i.id).sort()).toEqual([w1.sdOrderId, w2.sdOrderId].sort());
   expect(pd.items[0]).toHaveProperty("needed");
-  expect((await request.get("/api/admin/my-desk", { headers: H(U.finance.token) })).status()).toBe(403);
+  expect((await (await request.get("/api/admin/my-desk", { headers: H(U.finance.token) })).json()).desk).toBe("finance");   // Finance has its own queue
+  expect((await request.get("/api/admin/my-desk", { headers: H(U.management.token) })).status()).toBe(400);   // Management uses the Overview
 });
 
 test("phase 3: identity is revealed only after Management approves, and only for a limited time", async ({ request }) => {

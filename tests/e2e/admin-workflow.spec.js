@@ -294,6 +294,7 @@ test.describe("admin UI follows the new flow", () => {
     await page.locator(".rq-row", { hasText: `AW uiplan ${stamp}` }).click();
     const d = page.locator("#detail");
     await expect(d.locator(".sp-sum")).toContainText("4,500");
+    await d.getByRole("tab", { name: "Allocation" }).click();
     await expect(d.locator(`.sp-q[data-code="${S.code}"]`)).toBeVisible();
     await expect(d.locator(`.sp-q[data-code="${T.code}"]`)).toBeVisible();
     await expect(d.locator(".sp-lock")).toContainText("SUPPLYDESK");
