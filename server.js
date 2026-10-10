@@ -595,6 +595,23 @@ function hasContactDetails(text){
   }
   return false;
 }
+// Roles without the buyer_contact permission must never read a phone number / email / link a buyer typed into free text
+// (remarks, description, notes ...). The values are masked in every response on the buyer-facing routes.
+const REDACT_PATHS=/^\/api\/admin\/(requirements|orders|sd-orders|my-desk|pipeline|payables|invoices|disclosure-requests)(\/|$)/;
+const CONTACT_MASK="[contact hidden]",UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function redactText(t){
+  return t
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g,CONTACT_MASK)
+    .replace(/\b(?:https?:\/\/|www\.)\S+/gi,CONTACT_MASK)
+    .replace(/(?<!\d)[6-9]\d{9}(?!\d)/g,CONTACT_MASK)
+    .replace(/\+?\d[\d ()-]{8,}\d/g,m=>{if(/^\d{4}-\d{2}-\d{2}/.test(m))return m;const d=m.replace(/\D/g,"").length;return d>=10&&d<=15&&(m.startsWith("+")||/[ ()-]/.test(m))?CONTACT_MASK:m;});
+}
+function redactContacts(v){
+  if(typeof v==="string")return v.length<10||UUID_RE.test(v)?v:redactText(v);
+  if(Array.isArray(v))return v.map(redactContacts);
+  if(v&&typeof v==="object"&&!(v instanceof Date)){const o={};for(const k of Object.keys(v))o[k]=redactContacts(v[k]);return o;}
+  return v;
+}
 async function contactGuard(req,res){
   if(["super_admin","management"].includes(req.admin?.role)||req.method==="GET"||!CONTACT_PATHS.test(req.path))return false;
   const b=req.body||{};
@@ -630,12 +647,13 @@ async function requireAdmin(req,res,next){
     const drop=new Set();
     for(const perm of Object.keys(STRIP_KEYS))if(!canSee(req,perm)&&(perm!=="margin"||DESK_ROLES.includes(role)))for(const k of STRIP_KEYS[perm])drop.add(k);
     const filter=DESK_ROLES.includes(role)&&role!=="finance";
-    if(drop.size||filter){
+    const redact=!canSee(req,"buyer_contact")&&REDACT_PATHS.test(path);
+    if(drop.size||filter||redact){
       const send=res.json.bind(res);
       res.json=(body)=>{
         if(res.statusCode>=400)return send(body);
         Promise.resolve(filter?deskFilterBody(session,path,body):body)
-          .then(b=>send(drop.size?stripKeys(b,drop):b))
+          .then(b=>{b=drop.size?stripKeys(b,drop):b;return send(redact?redactContacts(b):b);})
           .catch(e=>{console.error("Response filter failed:",e);res.status(500);send({error:"Could not load this."});});
         return res;
       };
@@ -1740,8 +1758,8 @@ app.post("/api/buyer-requirements", buyerRequirementLimiter, async(req,res)=>{
       }catch(e){ if(e?.code!=="ER_DUP_ENTRY"||attempt===7) throw e; }
     }
     await audit(pool,{buyer},"rfq.created","rfq",id,null,{rfqCode,title,quantity,category,subcategory});
-    try{if(buyer.email&&process.env.SMTP_HOST&&process.env.SMTP_USER&&process.env.SMTP_PASSWORD&&process.env.SMTP_FROM){const cm=buildProfessionalEmail({preheader:"We received your sourcing requirement",title:"Requirement received",intro:"Hello "+(buyerName||"Buyer")+", your sourcing requirement has been submitted. The SupplyDesk team will review it and share it with matching suppliers. We will email you at each step.",bodyHtml:'<div style="margin:20px 0;padding:16px;background:#f4f9fc;border:1px solid #dbe8ed;border-radius:12px"><div style="font-size:12px;color:#58717c;text-transform:uppercase;font-weight:700;letter-spacing:1px">Your requirement</div><div style="font-size:16px;font-weight:700;margin-top:6px">'+escapeEmailHtml(title)+'</div></div><p style="line-height:1.6">Status: <strong>Under SupplyDesk review</strong>. Your email and phone number stay private. You can track progress and quotations in your Buyer Dashboard.</p>',textLines:["Hello "+(buyerName||"Buyer")+",","","Your sourcing requirement has been submitted:",title,"","Quotations will appear in your Buyer Dashboard."],ctaText:"Open Buyer Dashboard",ctaUrl:String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"")+"/buyer-dashboard.html"});await mailer.sendMail({from:process.env.SMTP_FROM,replyTo:process.env.SMTP_FROM,to:buyer.email,subject:"SupplyDesk | Requirement received",text:cm.text,html:cm.html});}}catch(mailError){console.error("Requirement confirmation email failed:",mailError);}
-res.status(201).json({ok:true,requirementId:id,rfqCode,status:"pending_review",message:"Requirement submitted. SupplyDesk will review it and share it with matching suppliers. You can track it in your Buyer Dashboard."});}catch(error){const ref=crypto.randomUUID().slice(0,8);console.error("Requirement submit failed ["+ref+"]:",{code:error?.code,errno:error?.errno,sqlMessage:error?.sqlMessage||error?.message});res.status(500).json({error:"Could not submit the requirement. Please try again. (Ref "+ref+")"});}
+    try{if(buyer.email&&process.env.SMTP_HOST&&process.env.SMTP_USER&&process.env.SMTP_PASSWORD&&process.env.SMTP_FROM){const cm=buildProfessionalEmail({preheader:"We received your sourcing requirement",title:"Requirement received",intro:"Hello "+(buyerName||"Buyer")+", your sourcing requirement has been submitted. The SupplyDesk team will review it and manage the sourcing for you. We will email you at each step.",bodyHtml:'<div style="margin:20px 0;padding:16px;background:#f4f9fc;border:1px solid #dbe8ed;border-radius:12px"><div style="font-size:12px;color:#58717c;text-transform:uppercase;font-weight:700;letter-spacing:1px">Your requirement</div><div style="font-size:16px;font-weight:700;margin-top:6px">'+escapeEmailHtml(title)+'</div></div><p style="line-height:1.6">Status: <strong>Under SupplyDesk review</strong>. Your email and phone number stay private. You can track progress and quotations in your Buyer Dashboard.</p>',textLines:["Hello "+(buyerName||"Buyer")+",","","Your sourcing requirement has been submitted:",title,"","Quotations will appear in your Buyer Dashboard."],ctaText:"Open Buyer Dashboard",ctaUrl:String(process.env.PUBLIC_ORIGIN||"https://supplydesk.in").replace(/\/$/,"")+"/buyer-dashboard.html"});await mailer.sendMail({from:process.env.SMTP_FROM,replyTo:process.env.SMTP_FROM,to:buyer.email,subject:"SupplyDesk | Requirement received",text:cm.text,html:cm.html});}}catch(mailError){console.error("Requirement confirmation email failed:",mailError);}
+res.status(201).json({ok:true,requirementId:id,rfqCode,status:"pending_review",message:"Requirement submitted. SupplyDesk will review it and manage the sourcing for you. You can track it in your Buyer Dashboard."});}catch(error){const ref=crypto.randomUUID().slice(0,8);console.error("Requirement submit failed ["+ref+"]:",{code:error?.code,errno:error?.errno,sqlMessage:error?.sqlMessage||error?.message});res.status(500).json({error:"Could not submit the requirement. Please try again. (Ref "+ref+")"});}
 });
 app.get("/api/buyer-requirements",requireBuyerDashboard,async(req,res)=>{try{const [requirements]=await pool.execute("SELECT r.id,r.rfq_code,r.rfq_state,r.required_by,r.requirement_type,r.title,r.category,r.subcategory,r.quantity,r.unit,r.delivery_country,r.status,r.fulfilment_mode,r.buyer_note,r.created_at,r.reviewed_at,(SELECT COUNT(*) FROM requirement_supplier_matches m WHERE m.requirement_id=r.id) sent_count,(SELECT COUNT(*) FROM supplier_quotes q WHERE q.requirement_id=r.id AND q.status='submitted') quote_count FROM buyer_requirements r WHERE r.buyer_id=? ORDER BY r.created_at DESC LIMIT 100",[req.buyer.id]);const ids=requirements.map(r=>r.id);let msgs=[],oq=[];
     if(ids.length){
