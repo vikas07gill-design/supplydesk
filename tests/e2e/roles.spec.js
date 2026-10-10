@@ -229,3 +229,30 @@ test("UI: buyer desk gets a trimmed menu; management can assign from a requireme
   await expect(page.locator("#detail h2")).toHaveText("My desk");
   await page.close();
 });
+
+test("phone numbers and emails a buyer types into remarks are masked for roles without buyer contact access", async ({ request }) => {
+  const b = await buyer(request, "remark");
+  const q = await request.post("/api/buyer-requirements", { data: { dashboardToken: b.token, buyerName: "Remark Buyer", buyerCompany: "Remark Co", buyerCountry: "India", title: `RL remark ${stamp}`, description: "Urgent Required 9540055472, mail remark.buyer@example.com or +91 98765 43210, www.example.org/x", category: "Plastics & Polymers", subcategory: "Containers", quantity: "1000", unit: "pcs", targetPrice: 99, currency: "INR", deliveryCity: "Pune", requiredBy: "2030-01-01" } });
+  expect(q.status()).toBe(201);
+  const id = (await q.json()).requirementId;
+  const MASK = "[contact hidden]";
+  const listOf = async (token) => (await (await request.get("/api/admin/requirements", { headers: H(token) })).json()).requirements;
+  const raw = (txt) => /9540055472|remark\.buyer@example\.com|98765 43210|example\.org/.test(txt);
+  for (const [who, token] of [["super", su], ["management", U.management.token]]) {
+    expect(raw(JSON.stringify(await listOf(token))), who + " sees the original text").toBe(true);
+  }
+  for (const [who, token] of [["admin", admin]]) {
+    const mine = (await listOf(token)).find(r => r.id === id);
+    expect(mine, who + " still sees the requirement").toBeTruthy();
+    const t = JSON.stringify(mine);
+    expect(raw(t), who + " must not see contact details").toBe(false);
+    expect(t).toContain(MASK);
+    expect(t).toContain("Urgent Required");
+  }
+  expect((await request.post(`/api/admin/requirements/${id}/review`, { headers: H(su), data: { action: "accept_full" } })).status()).toBe(200);
+  // Buyer Desk talks to the buyer, so it keeps the original once the requirement is assigned.
+  const bd = await makeUser(request, "buyer_desk", "remark");
+  const as = await assign(request, "requirement", id, "buyer", bd.adminId);
+  expect(as.status(), await as.text()).toBe(200);
+  expect(raw(JSON.stringify(await listOf(bd.token)))).toBe(true);
+});
