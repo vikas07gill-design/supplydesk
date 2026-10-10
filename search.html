@@ -135,7 +135,7 @@ function render(){
 
   const otherHtml=otherRows.map(x=>'<article class="result"><div class="result-main"><div class="type">'+esc(x.type)+(x.verified?' · ✓ Verified':'')+'</div><h3>'+esc(x.name)+'</h3><div class="meta">📍 '+esc(x.city)+', '+esc(x.country)+' · '+esc(x.market)+'</div><div class="desc">'+esc(x.desc)+'</div><div class="tags">'+x.tags.map(t=>'<span class="tag">'+esc(t)+'</span>').join('')+'</div></div><div class="result-actions"><a class="btn primary view" href="'+target(x)+'">View '+(x.type==='service'?'Service':'Supplier')+' →</a></div></article>').join('');
 
-  const cta=q?'<div class="req-cta"><div><strong>Not exactly what you need?</strong><br><span>Post your requirement once. SupplyDesk reviews it and shares it with matching suppliers.</span></div>'+postReqBtn(q,info)+'</div>':'';
+  const cta=q?'<div class="req-cta"><div><strong>Not exactly what you need?</strong><br><span>Post your requirement once. SupplyDesk reviews it and manages the sourcing for you.</span></div>'+postReqBtn(q,info)+'</div>':'';
   document.getElementById('results').innerHTML=cta+(productHtml?'<div class="product-grid">'+productHtml+'</div>':'')+(otherHtml?(productHtml?'<div style="margin:30px 0 12px;font-size:13px;font-weight:900;color:#607985">SUPPLIERS & SERVICES</div>':'')+otherHtml:'');
 }
 
