@@ -4361,7 +4361,7 @@ app.patch("/api/admin/products/:id", requireAdmin, async (req,res)=>{
     if(status==="rejected") await pool.execute("UPDATE supplier_product_files SET status='rejected',admin_notes=?,reviewed_at=NOW(),reviewed_by=? WHERE product_id=? AND status='pending'",[notes||null,req.admin.admin_id,clean(req.params.id,80)]);
     if(!result.affectedRows) return res.status(404).json({error:"Product not found."});
     res.json({ok:true,status});
-  }catch(error){console.error(error);res.status(500).json({error:"Could not review product."});}
+  }catch(error){console.error("Product review failed:",error);res.status(500).json({error:"Could not review product."+(error?.sqlMessage||error?.code?" ("+String(error.sqlMessage||error.code).slice(0,160)+")":"")});}
 });
 
 app.get("/api/admin/supplier-update-files/:id", requireSuperAdmin, async (req,res)=>{
