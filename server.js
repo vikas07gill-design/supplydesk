@@ -3670,11 +3670,12 @@ app.patch("/api/supplier-dashboard/products/:id/capacity", requireSupplierDashbo
     const monthly=c.monthly_capacity??old.monthly_capacity, available=c.available_capacity??old.available_capacity;
     if(monthly!=null&&available!=null&&Number(available)>Number(monthly)) return res.status(400).json({error:"Available capacity cannot be more than monthly capacity."});
     // Day-to-day "available" changes keep the verification; a changed installed (monthly) capacity must be re-verified by SupplyDesk.
-    const installedChanged=old.monthly_capacity!=null&&monthly!=null&&Number(old.monthly_capacity)!==Number(monthly);
+    // Every supplier change (installed, available or lead time) waits for SupplyDesk to verify it before it is used for sourcing.
+    const installedChanged=Number(old.monthly_capacity)!==Number(monthly)||Number(old.available_capacity)!==Number(available)||(c.lead_time_days!=null&&Number(old.lead_time_days)!==Number(c.lead_time_days));
     await pool.execute("UPDATE supplier_products SET monthly_capacity=?,available_capacity=?,capacity_unit=?,lead_time_days=?,origin_region=?,capacity_updated_at=NOW(),capacity_verified=IF(?,0,capacity_verified) WHERE id=? AND supplier_id=?",
       [monthly,available,c.capacity_unit??old.capacity_unit,c.lead_time_days??old.lead_time_days,c.origin_region??old.origin_region,installedChanged?1:0,id,req.supplier.id]);
     await audit(pool,req,"capacity.updated","product",id,{monthly:old.monthly_capacity,available:old.available_capacity,leadTimeDays:old.lead_time_days},{monthly,available,leadTimeDays:c.lead_time_days??old.lead_time_days});
-    res.json({ok:true,message:"Capacity updated."});
+    res.json({ok:true,message:installedChanged?"Capacity updated. SupplyDesk will verify it before it is used for orders.":"Capacity updated."});
   }catch(error){console.error("Capacity update failed:",error);res.status(500).json({error:"Could not update capacity."});}
 });
 
