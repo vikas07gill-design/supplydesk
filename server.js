@@ -482,6 +482,8 @@ const DESK_POLICY={
     ["*",/^\/api\/admin\/orders\/[^/]+\/(supplier-pos?|trace)$/],
     ["POST",/^\/api\/admin\/orders\/[^/]+\/stage$/],
     ["POST",/^\/api\/admin\/supplier-pos\/[^/]+\/payable$/],
+    ["*",/^\/api\/admin\/supplier-pos\/[^/]+\/(desk|messages|invoice-file|documents\/[^/]+)$/],
+    ["POST",/^\/api\/admin\/supplier-invoices\/[^/]+\/(accept|reject)$/],
     ["GET",/^\/api\/admin\/payables$/],
     ["PATCH",/^\/api\/admin\/supplier-pos\/[^/]+\/cancel$/],
     ["*",/^\/api\/admin\/requirements\/[^/]+\/(capability-matches|matches|quotes|state)$/],
@@ -493,6 +495,7 @@ const DESK_POLICY={
   finance:[
     ["GET",/^\/api\/admin\/(pipeline|orders|my-desk|payables)$/],
     ["POST",/^\/api\/admin\/payables\/[^/]+\/pay$/],
+    ["GET",/^\/api\/admin\/supplier-pos\/[^/]+\/(desk|invoice-file|documents\/[^/]+)$/],
     ["*",/^\/api\/admin\/orders\/[^/]+\/invoice$/],
     ["*",/^\/api\/admin\/invoices\/[^/]+(\/payments|\/void|\/release)?$/],
     ["GET",/^\/api\/super-admin\/margin-report$/]
@@ -586,7 +589,7 @@ function auditSensitive(req,res){
   });
 }
 const CONTACT_FIELDS=["message","subject","note","terms","reviewNote","review_note","notes","comment","deliveryNote"];
-const CONTACT_PATHS=/^\/api\/admin\/(requirements\/[^/]+\/(message|buyer-quote|review)|orders\/[^/]+\/(review|supplier-po)|sd-orders\/[^/]+\/(supplier-pos|sourcing-plan\/confirm|sourcing-plan))$/;
+const CONTACT_PATHS=/^\/api\/admin\/(requirements\/[^/]+\/(message|buyer-quote|review)|orders\/[^/]+\/(review|supplier-po)|sd-orders\/[^/]+\/(supplier-pos|sourcing-plan\/confirm|sourcing-plan)|supplier-pos\/[^/]+\/messages)$/;
 function hasContactDetails(text){
   const t=String(text||"");
   if(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(t)||/\b(?:https?:\/\/|www\.)\S+/i.test(t))return true;
@@ -1721,22 +1724,6 @@ app.post("/api/admin/connect-requests/:id/decision", requireAdmin, async (req,re
   }catch(error){console.error("Quote request decision failed:",error);res.status(500).json({error:"Could not save the decision."});}
 });
 
-// Supplier: update the status of one of its own requests
-app.patch("/api/supplier-dashboard/connections/:id", requireSupplierDashboard,requireEligibleSupplier, async (req,res)=>{
-  const status=clean(req.body?.status,40);
-  if(!["new","contacted","in_discussion","closed"].includes(status)) return res.status(400).json({error:"Invalid connection request status."});
-  try{
-    const [result]=await pool.execute(
-      "UPDATE connect_requests SET status=?,updated_at=NOW() WHERE id=? AND supplier_id=?",
-      [status,clean(req.params.id,80),req.supplier.id]
-    );
-    if(!result.affectedRows)return res.status(404).json({error:"Connection request not found."});
-    res.json({ok:true,status});
-  }catch(error){
-    console.error("Supplier connection status update failed:",error);
-    res.status(500).json({error:"Could not update connection request."});
-  }
-});
 
 
 app.post("/api/buyer-requirements", buyerRequirementLimiter, async(req,res)=>{
@@ -1769,19 +1756,6 @@ app.get("/api/buyer-requirements",requireBuyerDashboard,async(req,res)=>{try{con
       [oq]=await pool.query("SELECT rfq_id,quote_no,unit_price,currency,quantity,total_price,lead_time_days,valid_until,terms,note FROM rfq_quotes WHERE status='sent' AND rfq_id IN (?) ORDER BY created_at DESC",[ids]);}
     res.json({requirements:requirements.map(r=>{const st=r.rfq_state||RFQ.LEGACY_STATUS_TO_STATE[r.status]||"submitted";return {...r,rfq_state:st,stateLabel:(RFQ.STATES[st]||RFQ.STATES.submitted).buyerLabel,stateStep:RFQ.buyerStep?RFQ.buyerStep(st):0,messages:msgs.filter(m=>m.rfq_id===r.id).slice(0,6),openQuote:st==="quote_sent"?(oq.find(q=>q.rfq_id===r.id)||null):null};})});}catch(error){console.error(error);res.status(500).json({error:"Could not load requirements."});}});
 app.get("/api/buyer-requirements/:id/quotes",requireBuyerDashboard,async(req,res)=>{try{const [[requirement]]=await pool.execute("SELECT id,title,status FROM buyer_requirements WHERE id=? AND buyer_id=?",[clean(req.params.id,80),req.buyer.id]);if(!requirement)return res.status(404).json({error:"Requirement not found."});const [sdQuotes]=await pool.execute("SELECT id,quote_no,unit_price,currency,quantity,total_price,lead_time_days,valid_until,terms,note,status,created_at,responded_at FROM rfq_quotes WHERE rfq_id=? AND status IN ('sent','accepted','rejected') ORDER BY created_at DESC",[requirement.id]);if(HIDE_SUPPLIERS)return res.json({requirement,quotes:[],sdQuotes});const [quotes]=await pool.execute("SELECT q.id,q.unit_price,q.currency,q.quantity_available,q.moq,q.lead_time,q.payment_terms,q.incoterm,q.quote_valid_until,q.sample_available,q.notes,q.status,q.created_at,s.id supplier_id,s.trade_name,s.legal_name,s.country,s.city FROM supplier_quotes q JOIN supplier_profiles s ON s.id=q.supplier_id WHERE q.requirement_id=? AND q.status='submitted' ORDER BY q.created_at DESC",[requirement.id]);res.json({requirement,quotes:HIDE_SUPPLIERS?quotes.map((q,i)=>{const {supplier_id,trade_name,legal_name,country,city,...rest}=q;return {...rest,supplier_label:"SupplyDesk sourcing partner #"+(quotes.length-i)};}):quotes,sdQuotes});}catch(error){res.status(500).json({error:"Could not load quotations."});}});
-app.get("/api/supplier-dashboard/requirements",requireSupplierDashboard,requireEligibleSupplier,async(req,res)=>{try{const [rows]=await pool.execute("SELECT r.id,r.requirement_type,r.title,r.category,r.subcategory,r.description,r.quantity,r.unit,r.currency,r.delivery_country,r.required_by,r.market_scope,r.created_at,m.status match_status,q.id quote_id,q.unit_price quote_unit_price,q.currency quote_currency,q.updated_at quote_updated_at FROM buyer_requirements r JOIN requirement_supplier_matches m ON m.requirement_id=r.id AND m.supplier_id=? LEFT JOIN supplier_quotes q ON q.requirement_id=r.id AND q.supplier_id=? AND q.status='submitted' WHERE r.status='open' ORDER BY r.created_at DESC LIMIT 100",[req.supplier.id,req.supplier.id]);res.json({requirements:rows});}catch(error){res.status(500).json({error:"Could not load buyer requirements."});}});
-app.post("/api/supplier-dashboard/requirements/:id/view",requireSupplierDashboard,requireEligibleSupplier,async(req,res)=>{try{const id=clean(req.params.id,80),[[r]]=await pool.execute("SELECT id,status FROM buyer_requirements WHERE id=?",[id]);if(!r||r.status!=="open")return res.status(404).json({error:"Requirement is no longer open."});const [vr]=await pool.execute("UPDATE requirement_supplier_matches SET status=IF(status='quoted',status,'viewed'),viewed_at=COALESCE(viewed_at,NOW()) WHERE requirement_id=? AND supplier_id=?",[id,req.supplier.id]);if(!vr.affectedRows)return res.status(404).json({error:"Requirement is no longer open."});res.json({ok:true});}catch(error){res.status(500).json({error:"Could not record requirement view."});}});
-app.post("/api/supplier-dashboard/requirements/:id/quote",requireSupplierDashboard,requireEligibleSupplier,async(req,res)=>{
-  const id=clean(req.params.id,80),unitPrice=Number(req.body?.unitPrice),currency=clean(req.body?.currency,10).toUpperCase()||"USD",quantityAvailable=clean(req.body?.quantityAvailable,120)||null,moq=clean(req.body?.moq,120)||null,leadTime=clean(req.body?.leadTime,120)||null,paymentTerms=clean(req.body?.paymentTerms,255)||null,incoterm=clean(req.body?.incoterm,40)||null,quoteValidUntil=clean(req.body?.quoteValidUntil,20)||null,notes=clean(req.body?.notes,3000)||null,sampleAvailable=req.body?.sampleAvailable?1:0;
-  if(!Number.isFinite(unitPrice)||unitPrice<0)return res.status(400).json({error:"Enter a valid unit price."});
-  try{const [[r]]=await pool.execute("SELECT r.* FROM buyer_requirements r JOIN requirement_supplier_matches m ON m.requirement_id=r.id AND m.supplier_id=? WHERE r.id=? AND r.status='open'",[req.supplier.id,id]);if(!r)return res.status(404).json({error:"Requirement is no longer open."});
-    await pool.execute("INSERT INTO supplier_quotes (id,requirement_id,supplier_id,unit_price,currency,quantity_available,moq,lead_time,payment_terms,incoterm,quote_valid_until,sample_available,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE unit_price=VALUES(unit_price),currency=VALUES(currency),quantity_available=VALUES(quantity_available),moq=VALUES(moq),lead_time=VALUES(lead_time),payment_terms=VALUES(payment_terms),incoterm=VALUES(incoterm),quote_valid_until=VALUES(quote_valid_until),sample_available=VALUES(sample_available),notes=VALUES(notes),status='submitted',updated_at=NOW()",[crypto.randomUUID(),id,req.supplier.id,unitPrice,currency,quantityAvailable,moq,leadTime,paymentTerms,incoterm,quoteValidUntil||null,sampleAvailable,notes]);
-    await pool.execute("INSERT INTO requirement_supplier_matches (id,requirement_id,supplier_id,status,viewed_at) VALUES (?,?,?,'quoted',NOW()) ON DUPLICATE KEY UPDATE status='quoted',viewed_at=COALESCE(viewed_at,NOW())",[crypto.randomUUID(),id,req.supplier.id]);
-    // Supplier quotes go to SupplyDesk only; the buyer is never notified of or shown a supplier quote.
-    try{const c=await pool.getConnection();try{await c.beginTransaction();const [[st]]=await c.execute("SELECT rfq_state FROM buyer_requirements WHERE id=?",[id]);if(st?.rfq_state==="sourcing")await moveRfq(c,{supplier:req.supplier},id,"quotes_received","first supplier quote");await audit(c,{supplier:req.supplier},"supplier.quote_submitted","rfq",id,null,{supplierId:req.supplier.id,unitPrice,currency});await c.commit();}catch(e){await c.rollback();throw e;}finally{c.release();}}catch(auditError){console.error("RFQ state/audit after supplier quote failed:",auditError);}
-    res.status(201).json({ok:true,message:"Quotation sent to SupplyDesk."});
-  }catch(error){console.error("Supplier quote failed:",error);res.status(500).json({error:"Could not submit the quotation."});}
-});
 app.patch("/api/buyer-requirements/:id",requireBuyerDashboard,async(req,res)=>{const status=clean(req.body?.status,20);if(!["closed","cancelled"].includes(status))return res.status(400).json({error:"Invalid requirement status."});const rid=clean(req.params.id,80);const conn=await pool.getConnection();try{await conn.beginTransaction();const [[own]]=await conn.execute("SELECT id FROM buyer_requirements WHERE id=? AND buyer_id=?",[rid,req.buyer.id]);if(!own){await conn.rollback();return res.status(404).json({error:"Requirement not found."});}await moveRfq(conn,req,rid,status==="cancelled"?"cancelled":"closed","buyer request");await conn.execute("UPDATE buyer_requirements SET status=?,updated_at=NOW() WHERE id=?",[status,rid]);await conn.commit();res.json({ok:true,status});}catch(error){await conn.rollback();if(error instanceof RfqError)return res.status(error.status).json({error:error.message});console.error("Buyer requirement update failed:",error);res.status(500).json({error:"Could not update requirement."});}finally{conn.release();}});
 app.get("/api/admin/requirements",requireAdmin,async(req,res)=>{try{const [requirements]=await pool.execute("SELECT r.*,b.email buyer_email,b.name buyer_name,b.company buyer_company,b.phone buyer_phone,(SELECT COUNT(*) FROM supplier_quotes q WHERE q.requirement_id=r.id AND q.status='submitted') quote_count FROM buyer_requirements r JOIN buyers b ON b.id=r.buyer_id ORDER BY r.created_at DESC LIMIT 300");res.json({requirements:requirements.map(r=>maskBuyerRow(req,r)),detailsRestricted:!canSee(req,"buyer_contact")});}catch(error){res.status(500).json({error:"Could not load buyer requirements."});}});
 
@@ -2178,14 +2152,16 @@ app.post("/api/admin/supplier-pos/:id/payable",requireAdmin,async(req,res)=>{
     const [stages]=await pool.execute("SELECT o.stage FROM supplier_po_lines l JOIN orders o ON o.id=l.buyer_order_id WHERE l.supplier_po_id=?",[id]);
     const qcI=RFQ.stageIndex("qc_completed");
     if(!stages.length||stages.some(o=>RFQ.stageIndex(o.stage||"supplydesk_accepted")<qcI))return res.status(409).json({error:"A payable can be raised only after QC is completed on the orders this PO covers."});
-    const value=poValue(po);
+    const [[inv]]=await pool.execute("SELECT id,total,due_date FROM supplier_invoices WHERE supplier_po_id=? AND status='accepted' ORDER BY created_at DESC LIMIT 1",[id]);
+    if(!inv)return res.status(409).json({error:"The supplier's invoice must be received and accepted before a payable is raised.",code:"invoice_required"});
+    const value=Number(inv.total);
     const amount=req.body?.amount===""||req.body?.amount==null?value:Number(req.body.amount);
     if(!Number.isFinite(amount)||amount<=0)return res.status(400).json({error:"Enter a valid amount."});
-    if(value!=null&&amount>value+0.005)return res.status(409).json({error:"The payable cannot be more than the PO value ("+value+" "+po.currency+")."});
+    if(amount>value+0.005)return res.status(409).json({error:"The payable cannot be more than the accepted invoice ("+value+" "+po.currency+")."});
     const [[dup]]=await pool.execute("SELECT id FROM supplier_payables WHERE supplier_po_id=?",[id]);
     if(dup)return res.status(409).json({error:"A payable already exists for this PO."});
     const pid=crypto.randomUUID();
-    await pool.execute("INSERT INTO supplier_payables (id,supplier_po_id,sd_order_id,supplier_id,amount,currency,note,raised_by) VALUES (?,?,?,?,?,?,?,?)",[pid,id,po.sd_order_id,po.supplier_id,amount,po.currency,note,req.admin.admin_id]);
+    await pool.execute("INSERT INTO supplier_payables (id,supplier_po_id,sd_order_id,supplier_id,amount,currency,note,raised_by,invoice_id,due_date) VALUES (?,?,?,?,?,?,?,?,?,?)",[pid,id,po.sd_order_id,po.supplier_id,amount,po.currency,note,req.admin.admin_id,inv.id,ymd(inv.due_date)]);
     await audit(pool,req,"payable.raised","supplier_po",id,null,{payableId:pid,amount,currency:po.currency});
     res.status(201).json({ok:true,id:pid,amount});
   }catch(error){console.error(error);res.status(500).json({error:"Could not raise the payable."});}
@@ -2195,9 +2171,9 @@ app.get("/api/admin/payables",requireAdmin,async(req,res)=>{
     const status=clean(req.query.status,20),where=[],params=[];
     if(["pending_approval","approved","rejected","paid"].includes(status)){where.push("p.status=?");params.push(status);}
     if(req.admin.role==="procurement"){where.push("p.raised_by=?");params.push(req.admin.admin_id);}
-    const [rows]=await pool.execute("SELECT p.id,p.supplier_po_id,p.amount,p.currency,p.status,p.note,p.raised_by,p.raised_at,p.decided_by,p.decided_at,p.decision_note,p.paid_by,p.paid_at,p.payment_ref,p.supplier_id,po.po_number,s.sd_number,sp.legal_name,sp.trade_name FROM supplier_payables p JOIN supplier_pos po ON po.id=p.supplier_po_id LEFT JOIN sd_orders s ON s.id=p.sd_order_id LEFT JOIN supplier_profiles sp ON sp.id=p.supplier_id"+(where.length?" WHERE "+where.join(" AND "):"")+" ORDER BY FIELD(p.status,'pending_approval','approved','paid','rejected'),p.raised_at DESC LIMIT 200",params);
+    const [rows]=await pool.execute("SELECT p.id,p.supplier_po_id,p.amount,p.currency,p.status,p.note,p.raised_by,p.raised_at,p.decided_by,p.decided_at,p.decision_note,p.paid_by,p.paid_at,p.payment_ref,p.due_date,p.early_ok,p.supplier_id,po.po_number,s.sd_number,sp.legal_name,sp.trade_name FROM supplier_payables p JOIN supplier_pos po ON po.id=p.supplier_po_id LEFT JOIN sd_orders s ON s.id=p.sd_order_id LEFT JOIN supplier_profiles sp ON sp.id=p.supplier_id"+(where.length?" WHERE "+where.join(" AND "):"")+" ORDER BY FIELD(p.status,'pending_approval','approved','paid','rejected'),p.raised_at DESC LIMIT 200",params);
     const sup=canSee(req,"supplier_identity");
-    res.json({payables:rows.map(r=>({id:r.id,poNumber:r.po_number,sdNumber:r.sd_number,supplier:sup?(r.trade_name||r.legal_name):supplierAlias(r.supplier_id),amount:Number(r.amount),currency:r.currency,status:r.status,note:r.note,raisedBy:r.raised_by,raisedAt:r.raised_at,decidedBy:r.decided_by,decidedAt:r.decided_at,decisionNote:r.decision_note,paidBy:r.paid_by,paidAt:r.paid_at,paymentRef:r.payment_ref}))});
+    res.json({payables:rows.map(r=>({id:r.id,poNumber:r.po_number,sdNumber:r.sd_number,supplier:sup?(r.trade_name||r.legal_name):supplierAlias(r.supplier_id),amount:Number(r.amount),currency:r.currency,status:r.status,note:r.note,raisedBy:r.raised_by,raisedAt:r.raised_at,decidedBy:r.decided_by,decidedAt:r.decided_at,dueDate:r.due_date?ymd(r.due_date):null,earlyOk:!!r.early_ok,decisionNote:r.decision_note,paidBy:r.paid_by,paidAt:r.paid_at,paymentRef:r.payment_ref}))});
   }catch(error){console.error(error);res.status(500).json({error:"Could not load payables."});}
 });
 // Super Admin is the owner and may test alone; everyone else needs three different people.
@@ -2220,10 +2196,11 @@ app.post("/api/admin/payables/:id/pay",requireAdmin,async(req,res)=>{
   if(!["finance","super_admin"].includes(req.admin.role))return res.status(403).json({error:"Only Finance can record a supplier payment."});
   if(!ref)return res.status(400).json({error:"Enter the bank / UTR reference."});
   try{
-    const [[p]]=await pool.execute("SELECT id,status,raised_by,decided_by,supplier_po_id,amount FROM supplier_payables WHERE id=?",[id]);
+    const [[p]]=await pool.execute("SELECT id,status,raised_by,decided_by,supplier_po_id,amount,due_date,early_ok FROM supplier_payables WHERE id=?",[id]);
     if(!p)return res.status(404).json({error:"Payable not found."});
     if(p.status!=="approved")return res.status(409).json({error:p.status==="paid"?"Already paid.":"Management must approve this payable first."});
     if(sameHand(req,p.raised_by)||sameHand(req,p.decided_by))return res.status(409).json({error:"Segregation of duties: the person who raised or approved a payable cannot pay it."});
+    if(p.due_date&&ymd(p.due_date)>new Date().toISOString().slice(0,10)&&!p.early_ok)return res.status(409).json({error:"Supplier credit terms: this is payable on "+ymd(p.due_date)+". Management must approve paying earlier.",code:"not_due"});
     await pool.execute("UPDATE supplier_payables SET status='paid',paid_by=?,paid_at=NOW(),payment_ref=? WHERE id=?",[req.admin.admin_id,ref,id]);
     await audit(pool,req,"payable.paid","supplier_po",p.supplier_po_id,null,{payableId:id,amount:Number(p.amount),reference:ref});
     res.json({ok:true});
@@ -2486,6 +2463,197 @@ app.patch("/api/supplier-dashboard/purchase-orders/:id/schedule",requireSupplier
     await audit(pool,{supplier:req.supplier},"supplier_po.schedule","supplier_po",id,null,{expectedCompletion:expected,batchNo});
     res.json({ok:true});
   }catch(error){console.error(error);res.status(500).json({error:"Could not save the schedule."});}
+});
+
+// ---- Supplier side: SupplyDesk manages sourcing. Suppliers see only their products, POs, documents, invoices and payments. ----
+const sourcingManaged=(req,res)=>res.status(403).json({error:"SupplyDesk manages sourcing. Your orders appear as purchase orders; you don't need to respond to requirements.",code:"sourcing_managed"});
+app.get("/api/supplier-dashboard/requirements",requireSupplierDashboard,requireEligibleSupplier,sourcingManaged);
+app.post("/api/supplier-dashboard/requirements/:id/view",requireSupplierDashboard,requireEligibleSupplier,sourcingManaged);
+app.post("/api/supplier-dashboard/requirements/:id/quote",requireSupplierDashboard,requireEligibleSupplier,sourcingManaged);
+app.patch("/api/supplier-dashboard/connections/:id",requireSupplierDashboard,requireEligibleSupplier,sourcingManaged);
+
+const SUPPLIER_CREDIT_DAYS=30;
+const PO_DOC_KINDS=["qc_report","packing_list","dispatch_details","other"];
+const poDocStorage=multer.diskStorage({
+  destination:(req,file,cb)=>{const dir=path.join(UPLOAD_DIR,"supplier-po",String(req.params.id||"x").replace(/[^a-zA-Z0-9-]/g,""));fs.mkdirSync(dir,{recursive:true});cb(null,dir);},
+  filename:(req,file,cb)=>cb(null,crypto.randomUUID()+path.extname(file.originalname).toLowerCase())
+});
+const poDocUpload=multer({storage:poDocStorage,limits:{files:3,fileSize:10*1024*1024},fileFilter:(req,file,cb)=>allowedDocTypes.has(file.mimetype)?cb(null,true):cb(new Error("Only PDF, JPG, PNG and WEBP files are allowed."))});
+const poDocMw=(field,max)=>(req,res,next)=>poDocUpload.array(field,max)(req,res,err=>err?res.status(400).json({error:err.message||"Upload failed."}):next());
+const dropFiles=(req)=>{for(const f of (req.files||[]))fs.rmSync(f.path,{force:true});};
+const sendStored=(res,rel,name,mime)=>{
+  const abs=path.resolve(UPLOAD_DIR,rel),root=path.resolve(UPLOAD_DIR);
+  if(!abs.startsWith(root+path.sep)||!fs.existsSync(abs))return res.status(404).json({error:"File not found."});
+  res.setHeader("Content-Type",mime||"application/octet-stream");res.setHeader("Content-Disposition",`inline; filename="${String(name||"file").replace(/["\\\r\n]/g,"")}"`);res.sendFile(abs);
+};
+async function supplierPo(req,res){
+  const [[po]]=await pool.execute("SELECT id,po_number,status,quantity,unit_cost,total_cost,currency,sd_order_id FROM supplier_pos WHERE id=? AND supplier_id=?",[clean(req.params.id,80),req.supplier.id]);
+  if(!po){res.status(404).json({error:"Purchase order not found."});return null;}
+  return po;
+}
+const ymd=(d)=>new Date(d).toISOString().slice(0,10);
+const addDays=(s,n)=>{const d=new Date(s+"T00:00:00Z");d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
+const docRow=(r)=>({id:r.id,kind:r.kind,name:r.original_name,size:r.file_size,at:r.created_at,by:r.uploaded_by||undefined});
+const invRow=(r)=>r&&({id:r.id,poId:r.supplier_po_id,invoiceNo:r.invoice_no,invoiceDate:ymd(r.invoice_date),taxable:Number(r.taxable),gst:Number(r.gst),total:Number(r.total),currency:r.currency,status:r.status,note:r.decision_note,dueDate:ymd(r.due_date),submittedAt:r.created_at,decidedAt:r.decided_at,fileName:r.original_name});
+
+// Per-PO documents (QC report, packing list, dispatch details)
+app.get("/api/supplier-dashboard/purchase-orders/:id/documents",requireSupplierDashboard,requireEligibleSupplier,async(req,res)=>{
+  try{const po=await supplierPo(req,res);if(!po)return;
+    const [rows]=await pool.execute("SELECT id,kind,original_name,file_size,created_at FROM supplier_po_documents WHERE supplier_po_id=? ORDER BY created_at DESC",[po.id]);
+    res.json({documents:rows.map(docRow)});
+  }catch(e){console.error(e);res.status(500).json({error:"Could not load documents."});}
+});
+app.post("/api/supplier-dashboard/purchase-orders/:id/documents",requireSupplierDashboard,requireEligibleSupplier,poDocMw("documents",3),async(req,res)=>{
+  try{
+    const po=await supplierPo(req,res);if(!po){dropFiles(req);return;}
+    const kind=PO_DOC_KINDS.includes(clean(req.body?.kind,30))?clean(req.body.kind,30):"other";
+    if(["declined","cancelled"].includes(po.status)){dropFiles(req);return res.status(409).json({error:"This purchase order is "+po.status+"."});}
+    if(!req.files?.length)return res.status(400).json({error:"Choose at least one file."});
+    const rows=req.files.map(f=>[crypto.randomUUID(),po.id,req.supplier.id,kind,clean(f.originalname,255),path.relative(UPLOAD_DIR,f.path).split(path.sep).join("/"),f.mimetype,f.size,"supplier"]);
+    await pool.query("INSERT INTO supplier_po_documents (id,supplier_po_id,supplier_id,kind,original_name,relative_path,mime_type,file_size,uploaded_by) VALUES ?",[rows]);
+    await audit(pool,{supplier:req.supplier},"supplier_po.document","supplier_po",po.id,null,{kind,count:rows.length});
+    res.status(201).json({ok:true,message:"Uploaded. SupplyDesk can see it on this order."});
+  }catch(e){dropFiles(req);console.error(e);res.status(500).json({error:"Could not upload."});}
+});
+app.get("/api/supplier-dashboard/purchase-orders/:id/documents/:docId",requireSupplierDashboard,requireEligibleSupplier,async(req,res)=>{
+  try{const [[d]]=await pool.execute("SELECT d.relative_path,d.original_name,d.mime_type FROM supplier_po_documents d WHERE d.id=? AND d.supplier_po_id=? AND d.supplier_id=?",[clean(req.params.docId,80),clean(req.params.id,80),req.supplier.id]);
+    if(!d)return res.status(404).json({error:"File not found."});sendStored(res,d.relative_path,d.original_name,d.mime_type);
+  }catch(e){res.status(500).json({error:"Could not load the file."});}
+});
+
+// Supplier invoice against the PO, billed to SupplyDesk
+app.get("/api/supplier-dashboard/purchase-orders/:id/invoice",requireSupplierDashboard,requireEligibleSupplier,async(req,res)=>{
+  try{const po=await supplierPo(req,res);if(!po)return;
+    const [rows]=await pool.execute("SELECT * FROM supplier_invoices WHERE supplier_po_id=? ORDER BY created_at DESC",[po.id]);
+    res.json({invoices:rows.map(invRow),creditDays:SUPPLIER_CREDIT_DAYS});
+  }catch(e){console.error(e);res.status(500).json({error:"Could not load the invoice."});}
+});
+app.post("/api/supplier-dashboard/purchase-orders/:id/invoice",requireSupplierDashboard,requireEligibleSupplier,poDocMw("invoice",1),async(req,res)=>{
+  try{
+    const po=await supplierPo(req,res);if(!po){dropFiles(req);return;}
+    const fail=(s,m)=>{dropFiles(req);return res.status(s).json({error:m});};
+    if(["issued","declined","cancelled"].includes(po.status))return fail(409,"Accept the purchase order before sending an invoice.");
+    const b=req.body||{},no=clean(b.invoiceNo,60),date=isoDate(b.invoiceDate),taxable=Number(b.taxable),gst=b.gst===""||b.gst==null?0:Number(b.gst);
+    if(!no)return fail(400,"Enter the invoice number.");
+    if(!date)return fail(400,"Enter the invoice date.");
+    if(date>ymd(new Date(Date.now()+86400000)))return fail(400,"The invoice date cannot be in the future.");
+    if(!Number.isFinite(taxable)||taxable<=0)return fail(400,"Enter the invoice amount before GST.");
+    if(!Number.isFinite(gst)||gst<0||gst>taxable)return fail(400,"Enter a valid GST amount.");
+    if(!(b.billedToSupplyDesk===true||b.billedToSupplyDesk==="true"||b.billedToSupplyDesk==="1"))return fail(400,"Confirm that the invoice is made out to SupplyDesk, not to any buyer.");
+    if(!req.files?.length)return fail(400,"Attach the invoice (PDF or image).");
+    const value=poValue(po);
+    if(value!=null&&taxable>value+0.005)return fail(409,"The invoice amount is more than the PO value ("+value+" "+po.currency+").");
+    const [[open]]=await pool.execute("SELECT id FROM supplier_invoices WHERE supplier_po_id=? AND status IN ('submitted','accepted')",[po.id]);
+    if(open)return fail(409,"An invoice for this PO is already with SupplyDesk.");
+    const f=req.files[0],id=crypto.randomUUID(),total=Math.round((taxable+gst)*100)/100;
+    await pool.execute("INSERT INTO supplier_invoices (id,supplier_po_id,supplier_id,invoice_no,invoice_date,taxable,gst,total,currency,due_date,original_name,relative_path,mime_type,file_size) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      [id,po.id,req.supplier.id,no,date,taxable,gst,total,po.currency,addDays(date,SUPPLIER_CREDIT_DAYS),clean(f.originalname,255),path.relative(UPLOAD_DIR,f.path).split(path.sep).join("/"),f.mimetype,f.size]);
+    await audit(pool,{supplier:req.supplier},"supplier_invoice.submitted","supplier_po",po.id,null,{invoiceId:id,invoiceNo:no,total});
+    res.status(201).json({ok:true,id,dueDate:addDays(date,SUPPLIER_CREDIT_DAYS),message:"Invoice received. Payment is due "+SUPPLIER_CREDIT_DAYS+" days after the invoice date."});
+  }catch(e){dropFiles(req);if(e?.code==="ER_DUP_ENTRY")return res.status(409).json({error:"You already used this invoice number."});console.error(e);res.status(500).json({error:"Could not save the invoice."});}
+});
+app.get("/api/supplier-dashboard/purchase-orders/:id/invoice-file",requireSupplierDashboard,requireEligibleSupplier,async(req,res)=>{
+  try{const [[d]]=await pool.execute("SELECT relative_path,original_name,mime_type FROM supplier_invoices WHERE supplier_po_id=? AND supplier_id=? ORDER BY created_at DESC LIMIT 1",[clean(req.params.id,80),req.supplier.id]);
+    if(!d)return res.status(404).json({error:"No invoice."});sendStored(res,d.relative_path,d.original_name,d.mime_type);
+  }catch(e){res.status(500).json({error:"Could not load the file."});}
+});
+
+// What the supplier sees about money: invoice received -> accepted -> paid. No internal approvals, no buyer information.
+app.get("/api/supplier-dashboard/payments",requireSupplierDashboard,requireEligibleSupplier,async(req,res)=>{
+  try{
+    const [rows]=await pool.execute(`SELECT po.id po_id,po.po_number,po.title,po.currency,po.status po_status,i.id inv_id,i.invoice_no,i.invoice_date,i.total,i.due_date,i.status inv_status,i.decision_note,
+      p.status pay_status,p.paid_at,p.payment_ref FROM supplier_pos po
+      LEFT JOIN supplier_invoices i ON i.id=(SELECT id FROM supplier_invoices WHERE supplier_po_id=po.id ORDER BY (status='rejected'),created_at DESC LIMIT 1)
+      LEFT JOIN supplier_payables p ON p.supplier_po_id=po.id
+      WHERE po.supplier_id=? AND po.status NOT IN ('issued','declined','cancelled') ORDER BY po.created_at DESC LIMIT 200`,[req.supplier.id]);
+    res.json({creditDays:SUPPLIER_CREDIT_DAYS,payments:rows.map(r=>{
+      let state="invoice_pending",label="Send your invoice";
+      if(r.inv_id){
+        if(r.inv_status==="rejected"){state="invoice_rejected";label="Invoice rejected - send a corrected one";}
+        else if(r.pay_status==="paid"){state="paid";label="Paid";}
+        else if(r.inv_status==="accepted"){state="approved";label="Invoice approved - payment due "+ymd(r.due_date);}
+        else{state="received";label="Invoice received - under review";}
+      }
+      return {poId:r.po_id,poNumber:r.po_number,title:r.title,currency:r.currency,state,label,invoiceNo:r.inv_id?r.invoice_no:null,invoiceDate:r.inv_id?ymd(r.invoice_date):null,amount:r.inv_id?Number(r.total):null,dueDate:r.inv_id?ymd(r.due_date):null,note:r.inv_status==="rejected"?r.decision_note:null,paidOn:r.pay_status==="paid"?ymd(r.paid_at):null,reference:r.pay_status==="paid"?r.payment_ref:null};
+    })});
+  }catch(e){console.error(e);res.status(500).json({error:"Could not load payments."});}
+});
+
+// PO messages: supplier <-> SupplyDesk team. Phone numbers, emails and links are blocked.
+const poMsgRow=(r)=>({id:r.id,from:r.sender,name:r.sender==="team"?"SupplyDesk":"You",body:r.body,at:r.created_at});
+app.get("/api/supplier-dashboard/purchase-orders/:id/messages",requireSupplierDashboard,requireEligibleSupplier,async(req,res)=>{
+  try{const po=await supplierPo(req,res);if(!po)return;
+    const [rows]=await pool.execute("SELECT id,sender,body,created_at FROM supplier_po_messages WHERE supplier_po_id=? ORDER BY created_at ASC, id ASC LIMIT 200",[po.id]);
+    res.json({messages:rows.map(poMsgRow)});
+  }catch(e){res.status(500).json({error:"Could not load messages."});}
+});
+app.post("/api/supplier-dashboard/purchase-orders/:id/messages",requireSupplierDashboard,requireEligibleSupplier,async(req,res)=>{
+  try{const po=await supplierPo(req,res);if(!po)return;
+    const body=clean(req.body?.message,1500);
+    if(!body)return res.status(400).json({error:"Write a message."});
+    if(hasContactDetails(body)){try{await audit(pool,{supplier:req.supplier},"disclosure.blocked","supplier_po",po.id,null,{field:"message"});}catch{}
+      return res.status(422).json({error:"Phone numbers, email addresses and links can't be shared here. SupplyDesk relays all communication.",code:"contact_blocked"});}
+    await pool.execute("INSERT INTO supplier_po_messages (id,supplier_po_id,sender,body) VALUES (?,?,?,?)",[crypto.randomUUID(),po.id,"supplier",body]);
+    res.status(201).json({ok:true});
+  }catch(e){console.error(e);res.status(500).json({error:"Could not send the message."});}
+});
+
+// ---- SupplyDesk team side of the same PO desk ----
+app.get("/api/admin/supplier-pos/:id/desk",requireAdmin,async(req,res)=>{
+  try{const id=clean(req.params.id,80);
+    const [[po]]=await pool.execute("SELECT id,po_number,status FROM supplier_pos WHERE id=?",[id]);
+    if(!po)return res.status(404).json({error:"Supplier PO not found."});
+    const [docs]=await pool.execute("SELECT id,kind,original_name,file_size,created_at,uploaded_by FROM supplier_po_documents WHERE supplier_po_id=? ORDER BY created_at DESC",[id]);
+    const [inv]=await pool.execute("SELECT * FROM supplier_invoices WHERE supplier_po_id=? ORDER BY created_at DESC",[id]);
+    const [msgs]=await pool.execute("SELECT id,sender,body,created_at FROM supplier_po_messages WHERE supplier_po_id=? ORDER BY created_at ASC, id ASC LIMIT 200",[id]);
+    const [[pay]]=await pool.execute("SELECT id,status,amount,due_date,early_ok,paid_at,payment_ref FROM supplier_payables WHERE supplier_po_id=?",[id]);
+    res.json({po:{id:po.id,poNumber:po.po_number,status:po.status},documents:docs.map(docRow),invoices:inv.map(invRow),messages:msgs.map(m=>({...poMsgRow(m),name:m.sender==="team"?"SupplyDesk":"Supplier"})),payable:pay?{id:pay.id,status:pay.status,amount:Number(pay.amount),dueDate:pay.due_date?ymd(pay.due_date):null,earlyOk:!!pay.early_ok,paidAt:pay.paid_at,reference:pay.payment_ref}:null,creditDays:SUPPLIER_CREDIT_DAYS});
+  }catch(e){console.error(e);res.status(500).json({error:"Could not load the PO desk."});}
+});
+app.get("/api/admin/supplier-pos/:id/documents/:docId",requireAdmin,async(req,res)=>{
+  try{const [[d]]=await pool.execute("SELECT relative_path,original_name,mime_type FROM supplier_po_documents WHERE id=? AND supplier_po_id=?",[clean(req.params.docId,80),clean(req.params.id,80)]);
+    if(!d)return res.status(404).json({error:"File not found."});sendStored(res,d.relative_path,d.original_name,d.mime_type);
+  }catch(e){res.status(500).json({error:"Could not load the file."});}
+});
+app.get("/api/admin/supplier-pos/:id/invoice-file",requireAdmin,async(req,res)=>{
+  try{const [[d]]=await pool.execute("SELECT relative_path,original_name,mime_type FROM supplier_invoices WHERE supplier_po_id=? ORDER BY created_at DESC LIMIT 1",[clean(req.params.id,80)]);
+    if(!d)return res.status(404).json({error:"No invoice."});sendStored(res,d.relative_path,d.original_name,d.mime_type);
+  }catch(e){res.status(500).json({error:"Could not load the file."});}
+});
+app.post("/api/admin/supplier-pos/:id/messages",requireAdmin,async(req,res)=>{
+  const id=clean(req.params.id,80),body=clean(req.body?.message,1500);
+  if(!["procurement","management","super_admin"].includes(req.admin.role))return res.status(403).json({error:"Only Procurement or Management can message a supplier."});
+  if(!body)return res.status(400).json({error:"Write a message."});
+  try{const [[po]]=await pool.execute("SELECT id FROM supplier_pos WHERE id=?",[id]);
+    if(!po)return res.status(404).json({error:"Supplier PO not found."});
+    await pool.execute("INSERT INTO supplier_po_messages (id,supplier_po_id,sender,admin_id,body) VALUES (?,?,?,?,?)",[crypto.randomUUID(),id,"team",req.admin.admin_id,body]);
+    res.status(201).json({ok:true});
+  }catch(e){console.error(e);res.status(500).json({error:"Could not send the message."});}
+});
+for(const action of ["accept","reject"])app.post("/api/admin/supplier-invoices/:id/"+action,requireAdmin,async(req,res)=>{
+  const id=clean(req.params.id,80),note=clean(req.body?.note,300)||null;
+  if(!["procurement","management","super_admin"].includes(req.admin.role))return res.status(403).json({error:"Only Procurement or Management can review a supplier invoice."});
+  if(action==="reject"&&!note)return res.status(400).json({error:"Tell the supplier what to correct."});
+  try{
+    const [[i]]=await pool.execute("SELECT i.id,i.status,i.taxable,i.supplier_po_id,po.quantity,po.unit_cost,po.total_cost FROM supplier_invoices i JOIN supplier_pos po ON po.id=i.supplier_po_id WHERE i.id=?",[id]);
+    if(!i)return res.status(404).json({error:"Invoice not found."});
+    if(i.status!=="submitted")return res.status(409).json({error:"This invoice was already reviewed."});
+    if(action==="accept"){const v=poValue(i);if(v!=null&&Number(i.taxable)>v+0.005)return res.status(409).json({error:"The invoice is more than the PO value."});}
+    await pool.execute("UPDATE supplier_invoices SET status=?,decided_by=?,decided_at=NOW(),decision_note=? WHERE id=?",[action==="accept"?"accepted":"rejected",req.admin.admin_id,note,id]);
+    await audit(pool,req,"supplier_invoice."+(action==="accept"?"accepted":"rejected"),"supplier_po",i.supplier_po_id,null,{invoiceId:id,note});
+    res.json({ok:true});
+  }catch(e){console.error(e);res.status(500).json({error:"Could not save the decision."});}
+});
+app.post("/api/admin/payables/:id/allow-early",requireAssigner,async(req,res)=>{
+  const id=clean(req.params.id,80),why=clean(req.body?.reason,300);
+  if(!why)return res.status(400).json({error:"Say why this supplier is being paid before the due date."});
+  try{const [[p]]=await pool.execute("SELECT id,status,supplier_po_id FROM supplier_payables WHERE id=?",[id]);
+    if(!p)return res.status(404).json({error:"Payable not found."});
+    if(p.status==="paid"||p.status==="rejected")return res.status(409).json({error:"This payable is "+p.status+"."});
+    await pool.execute("UPDATE supplier_payables SET early_ok=1,early_reason=? WHERE id=?",[why,id]);
+    await audit(pool,req,"payable.early_payment_allowed","supplier_po",p.supplier_po_id,null,{payableId:id,reason:why});
+    res.json({ok:true});
+  }catch(e){console.error(e);res.status(500).json({error:"Could not save."});}
 });
 
 // ---- Commercial flow (Phase 2): SupplyDesk quote -> buyer decision -> order ----
@@ -5043,6 +5211,9 @@ async function syncSupplierEligibility(db,supplierId){
 
 // ---- Admin procurement workflow: Request review -> SupplyDesk order -> Sourcing plan -> Supplier POs ----
 async function ensureFlowSchema(){
+  await pool.query("CREATE TABLE IF NOT EXISTS supplier_po_documents (id CHAR(36) PRIMARY KEY, supplier_po_id CHAR(36) NOT NULL, supplier_id CHAR(36) NOT NULL, kind VARCHAR(30) NOT NULL, original_name VARCHAR(255) NOT NULL, relative_path VARCHAR(500) NOT NULL, mime_type VARCHAR(100) NOT NULL, file_size INT NOT NULL, uploaded_by VARCHAR(20) NOT NULL DEFAULT 'supplier', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_spd_po (supplier_po_id))");
+  await pool.query("CREATE TABLE IF NOT EXISTS supplier_invoices (id CHAR(36) PRIMARY KEY, supplier_po_id CHAR(36) NOT NULL, supplier_id CHAR(36) NOT NULL, invoice_no VARCHAR(60) NOT NULL, invoice_date DATE NOT NULL, taxable DECIMAL(16,2) NOT NULL, gst DECIMAL(16,2) NOT NULL DEFAULT 0, total DECIMAL(16,2) NOT NULL, currency VARCHAR(10) NOT NULL, due_date DATE NOT NULL, status ENUM('submitted','accepted','rejected') NOT NULL DEFAULT 'submitted', decision_note VARCHAR(300) NULL, decided_by VARCHAR(120) NULL, decided_at DATETIME NULL, original_name VARCHAR(255) NOT NULL, relative_path VARCHAR(500) NOT NULL, mime_type VARCHAR(100) NOT NULL, file_size INT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uq_si_supplier_no (supplier_id, invoice_no), INDEX idx_si_po (supplier_po_id))");
+  await pool.query("CREATE TABLE IF NOT EXISTS supplier_po_messages (id CHAR(36) PRIMARY KEY, supplier_po_id CHAR(36) NOT NULL, sender ENUM('supplier','team') NOT NULL, admin_id VARCHAR(120) NULL, body VARCHAR(1500) NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_spm_po (supplier_po_id))");
   await pool.query("CREATE TABLE IF NOT EXISTS supplier_payables (id CHAR(36) PRIMARY KEY, supplier_po_id CHAR(36) NOT NULL, sd_order_id CHAR(36) NULL, supplier_id CHAR(36) NOT NULL, amount DECIMAL(16,2) NOT NULL, currency VARCHAR(10) NOT NULL, status ENUM('pending_approval','approved','rejected','paid') NOT NULL DEFAULT 'pending_approval', note VARCHAR(300) NULL, raised_by VARCHAR(120) NOT NULL, raised_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, decided_by VARCHAR(120) NULL, decided_at DATETIME NULL, decision_note VARCHAR(300) NULL, paid_by VARCHAR(120) NULL, paid_at DATETIME NULL, payment_ref VARCHAR(120) NULL, UNIQUE KEY uq_payable_po (supplier_po_id), INDEX idx_payable_status (status,raised_at)) ENGINE=InnoDB");
   await pool.query("CREATE TABLE IF NOT EXISTS disclosure_requests (id CHAR(36) PRIMARY KEY, requested_by VARCHAR(120) NOT NULL, requester_role VARCHAR(30) NOT NULL, entity_type ENUM('requirement','sd_order') NOT NULL, entity_id CHAR(36) NOT NULL, kind ENUM('buyer_contact','supplier_identity') NOT NULL, reason VARCHAR(500) NOT NULL, status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending', decided_by VARCHAR(120) NULL, decision_note VARCHAR(500) NULL, decided_at DATETIME NULL, expires_at DATETIME NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_disc_status (status,created_at), INDEX idx_disc_user (requested_by,status)) ENGINE=InnoDB");
   await pool.query("CREATE TABLE IF NOT EXISTS employee_assignments (id CHAR(36) PRIMARY KEY, entity_type ENUM('requirement','sd_order') NOT NULL, entity_id CHAR(36) NOT NULL, desk ENUM('buyer','procurement') NOT NULL, admin_id VARCHAR(120) NOT NULL, assigned_by VARCHAR(120) NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uq_assign (entity_type,entity_id,desk), INDEX idx_assign_admin (admin_id,desk,entity_type)) ENGINE=InnoDB");
@@ -5060,6 +5231,10 @@ async function ensureFlowSchema(){
   await add("sd_orders","single_source_note VARCHAR(300) NULL");
   await add("supplier_products","listed_by_admin VARCHAR(120) NULL");
   await add("orders","advance_pct TINYINT NOT NULL DEFAULT 50");
+  await add("supplier_payables","invoice_id CHAR(36) NULL");
+  await add("supplier_payables","due_date DATE NULL");
+  await add("supplier_payables","early_ok TINYINT(1) NOT NULL DEFAULT 0");
+  await add("supplier_payables","early_reason VARCHAR(300) NULL");
   await add("invoices","kind VARCHAR(10) NOT NULL DEFAULT 'full'");
   await pool.query("CREATE TABLE IF NOT EXISTS sd_rate_quotes (id CHAR(36) PRIMARY KEY, sd_order_id CHAR(36) NOT NULL, capability_code VARCHAR(30) NOT NULL, supplier_id CHAR(36) NOT NULL, unit_rate DECIMAL(14,2) NOT NULL, lead_time_days INT NULL, note VARCHAR(300) NULL, created_by VARCHAR(120) NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uq_rate_quote (sd_order_id,capability_code)) ENGINE=InnoDB");
   {const fresh=await add("invoices","released_at DATETIME NULL");await add("invoices","released_by VARCHAR(120) NULL");

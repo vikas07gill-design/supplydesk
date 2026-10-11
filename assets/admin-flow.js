@@ -57,6 +57,42 @@ async function payDecide(id,action,after){
   try{await api("/api/admin/payables/"+encodeURIComponent(id)+"/"+action,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({note})});flowMsg(action==="approve"?"Approved. Finance can now pay it.":"Rejected.");if(after==="approvals")loadApprovals()}
   catch(e){flowErr(e)}
 }
+const canSupplierDesk=()=>["procurement","management","super_admin"].includes(role());
+async function spDesk(poId,sdId){
+  const box=document.getElementById("poDesk_"+poId);if(!box)return;
+  if(box.dataset.open==="1"&&!box.dataset.reload){box.dataset.open="0";box.innerHTML="";return}
+  box.dataset.open="1";delete box.dataset.reload;box.innerHTML='<div class="muted">Loading...</div>';
+  try{
+    const d=await api("/api/admin/supplier-pos/"+encodeURIComponent(poId)+"/desk");
+    const fileLink=(u,t)=>'<a href="#" onclick="spOpenFile(\''+u+'\');return false">'+esc(t)+'</a>';
+    box.innerHTML='<div class="pl-card" style="margin-top:8px"><h3>Supplier documents</h3>'
+      +(d.documents.length?d.documents.map(x=>'<div>'+esc(({qc_report:"QC report",packing_list:"Packing list",dispatch_details:"Dispatch details"})[x.kind]||x.kind)+' · '+fileLink("/api/admin/supplier-pos/"+poId+"/documents/"+x.id,x.name)+'</div>').join(""):'<div class="muted">Nothing uploaded yet.</div>')
+      +'<h3 style="margin-top:12px">Supplier invoice (billed to SupplyDesk, '+d.creditDays+' days credit)</h3>'
+      +(d.invoices.length?d.invoices.map(i=>'<div>'+esc(i.invoiceNo)+' · '+fnum(i.total)+' '+esc(i.currency)+' · dated '+esc(i.invoiceDate)+' · due '+esc(i.dueDate)+' <span class="pill">'+esc(i.status)+'</span> '+fileLink("/api/admin/supplier-pos/"+poId+"/invoice-file","View file")
+        +(i.status==="submitted"?' <button class="approve" onclick="spInvDecide(\''+esc(i.id)+'\',\'accept\',\''+esc(poId)+'\',\''+esc(sdId)+'\')">Accept</button> <button onclick="spInvDecide(\''+esc(i.id)+'\',\'reject\',\''+esc(poId)+'\',\''+esc(sdId)+'\')">Reject</button>':'')+(i.note?'<div class="sp-why">'+esc(i.note)+'</div>':'')+'</div>').join(""):'<div class="muted">No invoice yet. A payable can be raised only after an accepted invoice.</div>')
+      +(d.payable?'<div class="sp-why">Payable: '+esc(d.payable.status)+' · '+fnum(d.payable.amount)+(d.payable.dueDate?' · due '+esc(d.payable.dueDate):'')+(d.payable.reference?' · ref '+esc(d.payable.reference):'')+'</div>':'')
+      +'<h3 style="margin-top:12px">Messages</h3><div style="max-height:180px;overflow:auto">'+(d.messages.length?d.messages.map(m=>'<div><b>'+esc(m.name)+'</b> <small>'+esc(String(m.at).slice(0,16).replace("T"," "))+'</small><div>'+esc(m.body)+'</div></div>').join(""):'<div class="muted">No messages.</div>')+'</div>'
+      +'<div class="actions"><input id="poMsg_'+esc(poId)+'" placeholder="Message to the supplier (no phone, email or links)" style="flex:1"><button onclick="spSendMsg(\''+esc(poId)+'\',\''+esc(sdId)+'\')">Send</button></div></div>';
+  }catch(e){box.innerHTML="";flowErr(e)}
+}
+async function spOpenFile(u){
+  try{const r=await fetch(u,{headers:{"x-admin-token":token()}});if(!r.ok)throw new Error("File not found");const b=await r.blob();window.open(URL.createObjectURL(b),"_blank")}catch(e){flowErr(e)}
+}
+async function spInvDecide(id,action,poId,sdId){
+  let note="";if(action==="reject"){note=prompt("What should the supplier correct?")||"";if(!note)return}
+  try{await api("/api/admin/supplier-invoices/"+encodeURIComponent(id)+"/"+action,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({note})});flowMsg(action==="accept"?"Invoice accepted. A payable can now be raised.":"Invoice sent back to the supplier.");const b=document.getElementById("poDesk_"+poId);if(b){b.dataset.reload="1";spDesk(poId,sdId)}}
+  catch(e){flowErr(e)}
+}
+async function spSendMsg(poId,sdId){
+  const i=document.getElementById("poMsg_"+poId),v=(i||{}).value||"";if(!v.trim())return;
+  try{await api("/api/admin/supplier-pos/"+encodeURIComponent(poId)+"/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:v})});const b=document.getElementById("poDesk_"+poId);b.dataset.reload="1";spDesk(poId,sdId)}
+  catch(e){flowErr(e)}
+}
+async function payAllowEarly(id,after){
+  const reason=prompt("Why pay this supplier before the due date?");if(!reason)return;
+  try{await api("/api/admin/payables/"+encodeURIComponent(id)+"/allow-early",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reason})});flowMsg("Early payment allowed. Finance can pay now.");if(after==="approvals")loadApprovals()}
+  catch(e){flowErr(e)}
+}
 async function payPay(id){
   const ref=prompt("Bank / UTR reference of the payment:");if(!ref)return;
   try{await api("/api/admin/payables/"+encodeURIComponent(id)+"/pay",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reference:ref})});flowMsg("Payment recorded.");loadMyDesk()}
@@ -66,6 +102,7 @@ function payTable(rows,mode){
   if(!rows.length)return '<div class="muted">None.</div>';
   return '<div class="nt-wrap"><table class="nt-t"><tr><th>PO</th><th>Supplier</th><th class="n">Amount</th><th>Status</th><th></th></tr>'+rows.map(r=>'<tr><td>'+esc(r.poNumber)+(r.sdNumber?'<div class="sp-why">'+esc(r.sdNumber)+'</div>':'')+'</td><td>'+esc(r.supplier)+'</td><td class="n">'+fnum(r.amount)+' '+esc(r.currency)+'</td><td>'+esc(PAY_LABEL[r.status]||r.status)+(r.paymentRef?'<div class="sp-why">Ref '+esc(r.paymentRef)+'</div>':'')+(r.decisionNote?'<div class="sp-why">'+esc(r.decisionNote)+'</div>':'')+'</td><td>'
     +(r.status==="pending_approval"&&["super_admin","management"].includes(role())?'<button onclick="payDecide(\''+esc(r.id)+'\',\'approve\',\''+(mode||"")+'\')">Approve</button> <button onclick="payDecide(\''+esc(r.id)+'\',\'reject\',\''+(mode||"")+'\')">Reject</button>':'')
+    +(r.dueDate&&!r.earlyOk&&r.status!=="paid"&&["super_admin","management"].includes(role())?'<div class="sp-why">Due '+esc(r.dueDate)+'</div><button onclick="payAllowEarly(\''+esc(r.id)+'\',\''+(mode||"")+'\')">Allow early payment</button> ':(r.dueDate&&r.status!=="paid"?'<div class="sp-why">Due '+esc(r.dueDate)+(r.earlyOk?' (early payment allowed)':'')+'</div>':''))
     +(r.status==="approved"&&["finance","super_admin"].includes(role())?'<button class="approve" onclick="payPay(\''+esc(r.id)+'\')">Record payment</button>':'')+'</td></tr>').join("")+'</table></div>';
 }
 async function loadScorecards(){
@@ -424,7 +461,7 @@ async function openSourcingPlan(id){
           :'<div class="rq-next"><div class="rq-next-h">No eligible capacity found</div><div class="muted">No verified, fresh capacity matches this requirement. Check Supplier network › Capacity, or ask suppliers to update their capacity.</div></div>');
       window.__recommended=plan.recommended;window.__start=start;window.__draftBy=draftBy;
     }
-    const pos=(sd.supplierPos||[]).map(p=>'<div class="rq-q"><b>'+esc(p.po_number)+'</b> · '+esc(p.trade_name||p.legal_name||"")+' · '+esc(p.quantity)+' @ '+esc(p.unit_cost)+' '+esc(p.currency)+' · '+esc(p.statusLabel||p.status)+(p.accepted_quantity?' ('+esc(p.accepted_quantity)+' accepted)':'')+'<div class="muted">Customer on PO: SUPPLYDESK · covers '+p.lines.map(l=>esc(l.buyerPo)+' × '+fnum(l.quantity)).join(" · ")+'</div>'+(["issued","accepted","partially_accepted","in_production","ready_for_qc","ready_for_dispatch"].includes(p.status)?'<div class="actions"><button onclick="spCancelPo(\''+esc(p.id)+'\',\''+esc(id)+'\')">Cancel this PO</button></div>':'')+'</div>').join("");
+    const pos=(sd.supplierPos||[]).map(p=>'<div class="rq-q"><b>'+esc(p.po_number)+'</b> · '+esc(p.trade_name||p.legal_name||"")+' · '+esc(p.quantity)+' @ '+esc(p.unit_cost)+' '+esc(p.currency)+' · '+esc(p.statusLabel||p.status)+(p.accepted_quantity?' ('+esc(p.accepted_quantity)+' accepted)':'')+'<div class="muted">Customer on PO: SUPPLYDESK · covers '+p.lines.map(l=>esc(l.buyerPo)+' × '+fnum(l.quantity)).join(" · ")+'</div>'+(canSupplierDesk()?'<div class="actions"><button onclick="spDesk(\''+esc(p.id)+'\',\''+esc(id)+'\')">Documents, invoice &amp; messages</button></div><div id="poDesk_'+esc(p.id)+'"></div>':'')+(["issued","accepted","partially_accepted","in_production","ready_for_qc","ready_for_dispatch"].includes(p.status)?'<div class="actions"><button onclick="spCancelPo(\''+esc(p.id)+'\',\''+esc(id)+'\')">Cancel this PO</button></div>':'')+'</div>').join("");
     const regHtml=al.regions.length?al.regions.map(r=>'<div class="rq-q"><b>'+esc(r.region)+'</b> <span class="muted">'+fnum(r.total)+'</span>'+r.suppliers.map(s=>'<div>'+esc(s.supplier)+': '+fnum(s.quantity)+' <span class="muted">'+esc(s.poNumber)+' · '+esc(s.statusLabel)+'</span></div>').join("")+'</div>').join("")+'<div><b>Total = '+fnum(al.allocated)+'</b> of '+fnum(al.totalRequirement)+'</div>':"";
     const spare=(ords.orders||[]).filter(x=>["accepted","partially_accepted"].includes(x.review_status)&&x.status!=="cancelled"&&!x.sd_order_id);
     const merge=spare.length?'<div class="rq-grid"><label>Add another accepted buyer order<select id="sdAddSel"><option value="">Choose…</option>'+spare.map(x=>'<option value="'+esc(x.id)+'">'+esc(x.po_number+" · "+x.title+" · "+x.quantity)+'</option>').join("")+'</select></label></div><div class="actions"><button onclick="spAddOrder(\''+esc(id)+'\')">Add to this SupplyDesk order</button></div>':"";

@@ -1,3 +1,4 @@
+const { sendAndAcceptInvoice } = require("./pay");
 const { test, expect } = require("@playwright/test");
 const fs = require("fs"), path = require("path");
 // Journey: one order from the buyer's request to the supplier's payment. Drives every role, takes a screenshot of
@@ -168,10 +169,12 @@ test("the whole journey, one order, every role", async ({ request, browser }) =>
   // 11. Money to suppliers
   const poIds = []; for (const k of ["A", "B"]) poIds.push((await (await request.get("/api/supplier-dashboard/purchase-orders", { headers: SUP[k].sh })).json()).purchaseOrders[0].id);
   const pays = [];
+  for (const [i, id] of poIds.entries()) await sendAndAcceptInvoice(request, SUP[["A", "B"][i]].sh, H(P), id, [15200, 21600][i]);
   for (const id of poIds) { const r = await request.post(`/api/admin/supplier-pos/${id}/payable`, { headers: H(P), data: {} }); expect(r.status()).toBe(201); pays.push((await r.json()).id); }
   await step(browser, "Procurement raises supplier payables", "Procurement", "One payable per PO, capped at the PO value (Rs 15,200 and Rs 21,600).", { user: M, label: "Management - Approvals", go: nav("#toolsGroup", "Approvals") });
   for (const id of pays) expect((await request.post(`/api/admin/payables/${id}/approve`, { headers: H(M) })).status()).toBe(200);
   await step(browser, "Management approves the payables", "Management", "Approved. Finance can now pay.", { user: F, label: "Finance - My desk", go: async () => {} });
+  for (const id of pays) expect((await request.post(`/api/admin/payables/${id}/allow-early`, { headers: H(M), data: { reason: "journey" } })).status()).toBe(200);
   for (const id of pays) expect((await request.post(`/api/admin/payables/${id}/pay`, { headers: H(F), data: { reference: "UTR" + stamp + pays.indexOf(id) } })).status()).toBe(200);
 
   // 12. The owner's view

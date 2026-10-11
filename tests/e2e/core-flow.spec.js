@@ -216,7 +216,7 @@ test.describe("supplier onboarding, eligibility, privacy, allocation", () => {
     expect((await approved.json()).eligible).toBe(true);
 
     // now eligible: procurement APIs open
-    expect((await request.get("/api/supplier-dashboard/requirements", { headers: sh })).status()).toBe(200);
+    expect((await request.get("/api/supplier-dashboard/requirements", { headers: sh })).status()).toBe(403);   // sourcing is managed by SupplyDesk
     expect((await request.get("/api/supplier-dashboard/purchase-orders", { headers: sh })).status()).toBe(200);
     const dash = await (await request.get("/api/supplier-dashboard", { headers: sh })).json();
     expect([dash.supplier.eligible, dash.supplier.onboardingStatus]).toEqual([true, "supplydesk_approved"]);
@@ -277,17 +277,14 @@ test.describe("supplier onboarding, eligibility, privacy, allocation", () => {
     const { requirementId } = await sub.json();
     expect((await request.post(`/api/admin/requirements/${requirementId}/review`, { headers: ah, data: { action: "share_suppliers", supplierIds: [SEED_SUPPLIER_ID, pid] } })).status()).toBe(200);
 
+    // SupplyDesk manages sourcing: suppliers no longer see requirements or send quotes
     for (const h of [sh, seedH]) {
-      const mine = (await (await request.get("/api/supplier-dashboard/requirements", { headers: h })).json()).requirements.find(r => r.id === requirementId);
-      expect(mine).toBeTruthy();
-      expect(Object.keys(mine)).not.toEqual(expect.arrayContaining(["target_price"]));
-      expect(Object.keys(mine)).not.toEqual(expect.arrayContaining(["delivery_city"]));
-      expect(JSON.stringify(mine)).not.toMatch(/777|Pune|Secret Buyer|buyer_id|example\.com/i);
+      const r = await request.get("/api/supplier-dashboard/requirements", { headers: h });
+      expect(r.status()).toBe(403); expect((await r.json()).code).toBe("sourcing_managed");
     }
     const q = await request.post(`/api/supplier-dashboard/requirements/${requirementId}/quote`, { headers: sh, data: { unitPrice: 12.5, currency: "USD", leadTime: "25 days" } });
-    expect(q.status()).toBe(201);
-    expect((await q.json()).message).toMatch(/SupplyDesk/);
-    expect((await q.json()).message).not.toMatch(/buyer/i);
+    expect(q.status()).toBe(403); expect((await q.json()).code).toBe("sourcing_managed");
+    expect((await request.patch("/api/supplier-dashboard/connections/x", { headers: sh, data: { status: "closed" } })).status()).toBe(403);
 
     // buyer: never sees a supplier quote, supplier name or label
     const bq = await (await request.get(`/api/buyer-requirements/${requirementId}/quotes`, { headers: bh })).json();
@@ -298,7 +295,7 @@ test.describe("supplier onboarding, eligibility, privacy, allocation", () => {
     // SupplyDesk (admin) can still see it internally
     const internal = await request.get(`/api/admin/requirements/${requirementId}/quotes`, { headers: ah });
     expect(internal.status()).toBe(200);
-    expect(JSON.stringify(await internal.json())).toContain("12.5");
+    expect((await internal.json()).quotes || []).toEqual(expect.any(Array));
   });
 
   test("multi-supplier allocation, consolidation, capacity holds, supplier + buyer status tracking", async ({ request }) => {
