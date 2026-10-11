@@ -488,7 +488,7 @@ const DESK_POLICY={
     ["GET",/^\/api\/admin\/(products|applications|supplier-updates|product-files|supplier-update-files|files)(\/.*)?$/],
     ["GET",/^\/api\/admin\/supplier-options$/],
     ["POST",/^\/api\/admin\/suppliers\/[^/]+\/products$/],
-    ["*",/^\/api\/admin\/products\/[^/]+(\/capacity-verification|\/images)?$/]
+    ["*",/^\/api\/admin\/products\/[^/]+(\/capacity-verification|\/details|\/images(\/[^/]+)?)?$/]
   ],
   finance:[
     ["GET",/^\/api\/admin\/(pipeline|orders|my-desk|payables)$/],
@@ -3573,6 +3573,7 @@ app.post("/api/supplier-dashboard/profile-update", requireSupplierDashboard, asy
   }
 });
 
+const listingLocked=(req,res)=>res.status(403).json({error:"Products are listed by SupplyDesk. Please send your product details to the SupplyDesk team.",code:"listing_locked"});
 app.get("/api/supplier-dashboard/products", requireSupplierDashboard, async (req,res) => {
   const [products]=await pool.execute(
     "SELECT id,product_name,category,subcategory,description,moq,unit,market_scope,status,admin_notes,created_at,updated_at,monthly_capacity,available_capacity,capacity_unit,lead_time_days,origin_region,capacity_updated_at,capability_code FROM supplier_products WHERE supplier_id=? AND status <> 'archived' ORDER BY updated_at DESC",
@@ -3584,7 +3585,7 @@ app.get("/api/supplier-dashboard/products", requireSupplierDashboard, async (req
   res.json({products});
 });
 
-app.post("/api/supplier-dashboard/products", requireSupplierDashboard, async (req,res) => {
+app.post("/api/supplier-dashboard/products", requireSupplierDashboard, listingLocked, async (req,res) => {
   const productName=clean(req.body?.product_name,255);
   const category=clean(req.body?.category,180);
   const subcategory=clean(req.body?.subcategory,180);
@@ -3616,7 +3617,7 @@ app.post("/api/supplier-dashboard/products", requireSupplierDashboard, async (re
   }
 });
 
-app.patch("/api/supplier-dashboard/products/:id", requireSupplierDashboard, async (req,res) => {
+app.patch("/api/supplier-dashboard/products/:id", requireSupplierDashboard, listingLocked, async (req,res) => {
   const id=clean(req.params.id,80);
   const [[product]]=await pool.execute("SELECT * FROM supplier_products WHERE id=? AND supplier_id=? AND status <> 'archived'",[id,req.supplier.id]);
   if(!product) return res.status(404).json({error:"Product not found."});
@@ -3655,13 +3656,13 @@ app.patch("/api/supplier-dashboard/products/:id/capacity", requireSupplierDashbo
   }catch(error){console.error("Capacity update failed:",error);res.status(500).json({error:"Could not update capacity."});}
 });
 
-app.delete("/api/supplier-dashboard/products/:id", requireSupplierDashboard, async (req,res) => {
+app.delete("/api/supplier-dashboard/products/:id", requireSupplierDashboard, listingLocked, async (req,res) => {
   const [result]=await pool.execute("UPDATE supplier_products SET status='archived' WHERE id=? AND supplier_id=?",[clean(req.params.id,80),req.supplier.id]);
   if(!result.affectedRows) return res.status(404).json({error:"Product not found."});
   res.json({ok:true});
 });
 
-app.post("/api/supplier-dashboard/products/:id/images", requireSupplierDashboard, (req,res,next)=>productImageUpload.array("productImages",6)(req,res,next), optimizeUploads({allowPdf:false}), async (req,res)=>{
+app.post("/api/supplier-dashboard/products/:id/images", requireSupplierDashboard, listingLocked, (req,res,next)=>productImageUpload.array("productImages",6)(req,res,next), optimizeUploads({allowPdf:false}), async (req,res)=>{
   const productId=clean(req.params.id,80);
   try{
     const [[product]]=await pool.execute("SELECT id FROM supplier_products WHERE id=? AND supplier_id=? AND status <> 'archived'",[productId,req.supplier.id]);
@@ -3684,7 +3685,7 @@ app.get("/api/supplier-dashboard/products/:productId/images/:imageId", requireSu
   }catch(error){res.status(500).json({error:"Could not load image."});}
 });
 
-app.delete("/api/supplier-dashboard/products/:productId/images/:imageId", requireSupplierDashboard, async (req,res)=>{
+app.delete("/api/supplier-dashboard/products/:productId/images/:imageId", requireSupplierDashboard, listingLocked, async (req,res)=>{
   try{
     const [[f]]=await pool.execute("SELECT f.id FROM supplier_product_files f JOIN supplier_products p ON p.id=f.product_id WHERE f.id=? AND f.product_id=? AND p.supplier_id=? AND f.status <> 'archived'",[clean(req.params.imageId,80),clean(req.params.productId,80),req.supplier.id]);
     if(!f)return res.status(404).json({error:"Image not found."});
@@ -4069,10 +4070,10 @@ app.patch("/api/admin/suppliers/:id/onboarding", requireAdmin, async (req,res)=>
   finally{conn.release();}
 });
 
-// Suppliers a team member can list products for (approved, live suppliers only).
+// Suppliers a team member can list products for. Suppliers cannot list products themselves; SupplyDesk does it.
 app.get("/api/admin/supplier-options", requireAdmin, async (req,res)=>{
   try{
-    const [rows]=await pool.execute("SELECT s.id,COALESCE(NULLIF(s.trade_name,''),s.legal_name) name,s.city,s.country FROM supplier_profiles s WHERE s.published=1 ORDER BY name LIMIT 500");
+    const [rows]=await pool.execute("SELECT s.id,COALESCE(NULLIF(s.trade_name,''),s.legal_name) name,s.city,s.country,s.published FROM supplier_profiles s ORDER BY name LIMIT 1000");
     res.json({suppliers:rows});
   }catch(error){console.error("Supplier options failed:",error);res.status(500).json({error:"Could not load suppliers."});}
 });
@@ -4080,7 +4081,7 @@ app.get("/api/admin/supplier-options", requireAdmin, async (req,res)=>{
 // Super Admin / Management / Admin / Procurement list a product on behalf of a supplier. It goes into the normal
 // review queue (status pending); the person who listed it cannot approve it unless they are Management or Super Admin.
 app.post("/api/admin/suppliers/:supplierId/products", requireAdmin, async (req,res)=>{
-  if(!["super_admin","management","admin","procurement"].includes(req.admin.role)) return res.status(403).json({error:"Your role does not have access to this."});
+  if(!LISTERS.includes(req.admin.role)) return res.status(403).json({error:"Your role does not have access to this."});
   const productName=clean(req.body?.product_name,255), category=clean(req.body?.category,180), subcategory=clean(req.body?.subcategory,180);
   const description=clean(req.body?.description,3000)||null, moq=clean(req.body?.moq,120)||null, unit=clean(req.body?.unit,80)||null;
   const marketScope=["Domestic","International","Both"].includes(req.body?.market_scope)?req.body.market_scope:"Both";
@@ -4091,8 +4092,8 @@ app.post("/api/admin/suppliers/:supplierId/products", requireAdmin, async (req,r
   const c=cap.values, hasCap=c.monthly_capacity!=null||c.available_capacity!=null||c.lead_time_days!=null;
   try{
     const supplierId=clean(req.params.supplierId,80);
-    const [[sup]]=await pool.execute("SELECT id FROM supplier_profiles WHERE id=? AND published=1",[supplierId]);
-    if(!sup) return res.status(404).json({error:"Supplier not found or not live yet."});
+    const [[sup]]=await pool.execute("SELECT id FROM supplier_profiles WHERE id=?",[supplierId]);
+    if(!sup) return res.status(404).json({error:"Supplier not found."});
     const id=crypto.randomUUID(); let code=null;
     for(let attempt=0;attempt<8;attempt++){
       code=newCapabilityCode(category);
@@ -4106,6 +4107,51 @@ app.post("/api/admin/suppliers/:supplierId/products", requireAdmin, async (req,r
     await audit(pool,req,"product.listed_by_team","product",id,null,{supplierId,productName,category,subcategory});
     res.status(201).json({ok:true,id,capabilityCode:code,message:"Product listed. It is waiting for approval."});
   }catch(error){console.error("Team product listing failed:",error);res.status(500).json({error:"Could not list the product."});}
+});
+
+const LISTERS=["super_admin","management","admin","procurement"];
+const requireLister=(req,res,next)=>LISTERS.includes(req.admin?.role)?next():res.status(403).json({error:"Your role does not have access to this."});
+// Edit a listing. It goes back to review, and the editor cannot approve their own edit (unless Management / Super Admin).
+app.patch("/api/admin/products/:id/details", requireAdmin, requireLister, async (req,res)=>{
+  const id=clean(req.params.id,80);
+  try{
+    const [[product]]=await pool.execute("SELECT * FROM supplier_products WHERE id=? AND status <> 'archived'",[id]);
+    if(!product) return res.status(404).json({error:"Product not found."});
+    const fields={};
+    for(const key of ["product_name","category","subcategory","description","moq","unit"]) if(Object.prototype.hasOwnProperty.call(req.body||{},key)) fields[key]=clean(req.body[key],key==="description"?3000:500)||null;
+    if(Object.prototype.hasOwnProperty.call(req.body||{},"market_scope")) fields.market_scope=["Domestic","International","Both"].includes(req.body.market_scope)?req.body.market_scope:"Both";
+    const category=fields.category||product.category, subcategory=fields.subcategory||product.subcategory;
+    if(!catalog[category]||!catalog[category].includes(subcategory)) return res.status(400).json({error:"Invalid category or sub-category."});
+    if(fields.product_name===null) return res.status(400).json({error:"Product name is required."});
+    const keys=Object.keys(fields); if(!keys.length) return res.status(400).json({error:"No changes submitted."});
+    await pool.execute("UPDATE supplier_products SET "+keys.map(k=>k+"=?").join(",")+", status='pending', product_verified=0, admin_notes=NULL, reviewed_at=NULL, reviewed_by=NULL, listed_by_admin=? WHERE id=?",[...keys.map(k=>fields[k]),req.admin.admin_id,id]);
+    await audit(pool,req,"product.edited_by_team","product",id,null,{changed:keys});
+    res.json({ok:true,message:"Product updated. It is waiting for approval again."});
+  }catch(error){console.error("Team product edit failed:",error);res.status(500).json({error:"Could not update the product."});}
+});
+app.delete("/api/admin/products/:id", requireAdmin, requireLister, async (req,res)=>{
+  const [result]=await pool.execute("UPDATE supplier_products SET status='archived' WHERE id=? AND status <> 'archived'",[clean(req.params.id,80)]);
+  if(!result.affectedRows) return res.status(404).json({error:"Product not found."});
+  await audit(pool,req,"product.archived_by_team","product",clean(req.params.id,80),null,null);
+  res.json({ok:true});
+});
+app.post("/api/admin/products/:id/images", requireAdmin, requireLister, (req,res,next)=>productImageUpload.array("productImages",6)(req,res,next), optimizeUploads({allowPdf:false}), async (req,res)=>{
+  const productId=clean(req.params.id,80);
+  try{
+    const [[product]]=await pool.execute("SELECT id FROM supplier_products WHERE id=? AND status <> 'archived'",[productId]);
+    if(!product){for(const f of (req.files||[]))fs.rmSync(f.path,{force:true});return res.status(404).json({error:"Product not found."});}
+    if(!req.files?.length)return res.status(400).json({error:"Please select at least one product image."});
+    const rows=req.files.map(f=>[crypto.randomUUID(),productId,clean(f.originalname,255),path.basename(f.path),path.relative(UPLOAD_DIR,f.path).split(path.sep).join("/"),f.mimetype,f.size,"pending"]);
+    await pool.query("INSERT INTO supplier_product_files (id,product_id,original_name,stored_name,relative_path,mime_type,file_size,status) VALUES ?",[rows]);
+    await pool.execute("UPDATE supplier_products SET status='pending',product_verified=0,admin_notes=NULL,reviewed_at=NULL,reviewed_by=NULL,listed_by_admin=? WHERE id=?",[req.admin.admin_id,productId]);
+    await audit(pool,req,"product.images_added_by_team","product",productId,null,{count:req.files.length});
+    res.status(201).json({ok:true,message:"Images added. The product is waiting for approval."});
+  }catch(error){for(const f of (req.files||[]))fs.rmSync(f.path,{force:true});console.error(error);res.status(500).json({error:"Could not upload product images."});}
+});
+app.delete("/api/admin/products/:id/images/:imageId", requireAdmin, requireLister, async (req,res)=>{
+  const [r]=await pool.execute("UPDATE supplier_product_files SET status='archived' WHERE id=? AND product_id=? AND status <> 'archived'",[clean(req.params.imageId,80),clean(req.params.id,80)]);
+  if(!r.affectedRows) return res.status(404).json({error:"Image not found."});
+  res.json({ok:true});
 });
 
 app.patch("/api/admin/products/:id", requireAdmin, async (req,res)=>{

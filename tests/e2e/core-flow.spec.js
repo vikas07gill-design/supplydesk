@@ -4,6 +4,8 @@ const { test, expect } = require("@playwright/test");
 const KEY = process.env.E2E_TEST_KEY, AID = process.env.E2E_ADMIN_ID, APW = process.env.E2E_ADMIN_PASSWORD;
 const SID = process.env.E2E_SUPER_ID, SPW = process.env.E2E_SUPER_PASSWORD;
 const SEED_SUPPLIER_ID = "00000000-0000-4000-8000-000000000002";
+// Suppliers cannot list products; SupplyDesk (admin) lists them on their behalf.
+const listFor = (request, ah, supplierId, data) => request.post(`/api/admin/suppliers/${supplierId}/products`, { headers: ah, data });
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 const PDF = Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n");
 
@@ -154,8 +156,13 @@ test.describe("supplier onboarding, eligibility, privacy, allocation", () => {
     expect(early.status()).toBe(400);
     expect((await early.json()).missing).toEqual(expect.arrayContaining(["Products & capabilities", "Business documents"]));
     // 3-5 product with capacity + lead time
-    const add = await request.post("/api/supplier-dashboard/products", { headers: sh, data: { product_name: WIDGET, category: "Plastics & Polymers", subcategory: "Containers", moq: "10", unit: "pcs", monthly_capacity: 50000, available_capacity: 40000, capacity_unit: "pcs", lead_time_days: 30, origin_region: "Haryana" } });
-    expect(add.status()).toBeLessThan(300);
+    const own = await request.post("/api/supplier-dashboard/products", { headers: sh, data: { product_name: WIDGET, category: "Plastics & Polymers", subcategory: "Containers", moq: "10", unit: "pcs", monthly_capacity: 50000, available_capacity: 40000, capacity_unit: "pcs", lead_time_days: 30, origin_region: "Haryana" } });
+    expect(own.status()).toBe(403);
+    expect((await own.json()).code).toBe("listing_locked");
+    const suH = await login(request, SID, SPW), adH = await login(request, AID, APW);
+    const myId = (await (await request.get("/api/super-admin/suppliers?q=" + encodeURIComponent(EMAIL), { headers: suH })).json()).suppliers.find(x => x.business_email === EMAIL.toLowerCase()).id;
+    const add = await listFor(request, suH, myId, { product_name: WIDGET, category: "Plastics & Polymers", subcategory: "Containers", moq: "10", unit: "pcs", monthly_capacity: 50000, available_capacity: 40000, capacity_unit: "pcs", lead_time_days: 30, origin_region: "Haryana" });
+    expect(add.status()).toBe(201);
     const prods = (await (await request.get("/api/supplier-dashboard/products", { headers: sh })).json()).products;
     newProductId = prods.find(p => p.product_name === WIDGET).id;
     newCode = prods.find(p => p.product_name === WIDGET).capability_code;
@@ -227,7 +234,7 @@ test.describe("supplier onboarding, eligibility, privacy, allocation", () => {
     const ah = await login(request, AID, APW);
     seedH = await supplierLogin(request, "supplier-e2e@example.com");
     // the seeded supplier offers the same capability
-    expect((await request.post("/api/supplier-dashboard/products", { headers: seedH, data: { product_name: WIDGET, category: "Plastics & Polymers", subcategory: "Containers", moq: "10", unit: "pcs", monthly_capacity: 100000, available_capacity: 90000, capacity_unit: "pcs", lead_time_days: 20, origin_region: "Delhi" } })).status()).toBeLessThan(300);
+    expect((await listFor(request, await login(request, SID, SPW), SEED_SUPPLIER_ID, { product_name: WIDGET, category: "Plastics & Polymers", subcategory: "Containers", moq: "10", unit: "pcs", monthly_capacity: 100000, available_capacity: 90000, capacity_unit: "pcs", lead_time_days: 20, origin_region: "Delhi" })).status()).toBe(201);
     const sp = (await (await request.get("/api/supplier-dashboard/products", { headers: seedH })).json()).products.find(p => p.product_name === WIDGET);
     seedProductId = sp.id; seedCode = sp.capability_code;
 
@@ -304,7 +311,7 @@ test.describe("supplier onboarding, eligibility, privacy, allocation", () => {
     const poUrl = `/api/admin/sd-orders/${sd.sdOrderId}/supplier-pos`;
 
     // a product whose capacity is NOT verified can never be used for live procurement
-    expect((await request.post("/api/supplier-dashboard/products", { headers: seedH, data: { product_name: "Unverified " + stamp, category: "Plastics & Polymers", subcategory: "Containers", monthly_capacity: 1000, available_capacity: 900, capacity_unit: "pcs", lead_time_days: 5 } })).status()).toBeLessThan(300);
+    expect((await listFor(request, await login(request, SID, SPW), SEED_SUPPLIER_ID, { product_name: "Unverified " + stamp, category: "Plastics & Polymers", subcategory: "Containers", monthly_capacity: 1000, available_capacity: 900, capacity_unit: "pcs", lead_time_days: 5 })).status()).toBe(201);
     const un = (await (await request.get("/api/supplier-dashboard/products", { headers: seedH })).json()).products.find(p => p.product_name === "Unverified " + stamp);
     await request.patch(`/api/admin/products/${un.id}`, { headers: ah, data: { status: "approved" } });
     expect((await request.post(poUrl, { headers: ah, data: { capabilityCode: un.capability_code, unitCost: 5 } })).status()).toBe(404);

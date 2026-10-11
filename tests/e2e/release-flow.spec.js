@@ -31,10 +31,10 @@ async function makeSupplier(request, ah, tag, free, region, lead) {
   const v = await (await request.post("/api/supplier-signup/verify-otp", { data: { email, otp: ask.testOtp } })).json();
   const sh = { "x-supplier-dashboard-token": v.token };
   const name = `Plan Container ${tag} ${stamp}`;
-  expect((await request.post("/api/supplier-dashboard/products", { headers: sh, data: { product_name: name, category: "Plastics & Polymers", subcategory: "Containers", moq: "10", unit: "pcs", monthly_capacity: free * 2, available_capacity: free, capacity_unit: "pcs", lead_time_days: lead, origin_region: region } })).status()).toBeLessThan(300);
-  const prod = (await (await request.get("/api/supplier-dashboard/products", { headers: sh })).json()).products.find(p => p.product_name === name);
   const su = H(await login(request, SID, SPW));
   const pid = (await (await request.get("/api/super-admin/suppliers?q=" + encodeURIComponent(email), { headers: su })).json()).suppliers.find(x => x.business_email === email).id;
+  expect((await request.post(`/api/admin/suppliers/${pid}/products`, { headers: su, data: { product_name: name, category: "Plastics & Polymers", subcategory: "Containers", moq: "10", unit: "pcs", monthly_capacity: free * 2, available_capacity: free, capacity_unit: "pcs", lead_time_days: lead, origin_region: region } })).status()).toBe(201);
+  const prod = (await (await request.get("/api/supplier-dashboard/products", { headers: sh })).json()).products.find(p => p.product_name === name);
   const move = (status, extra = {}) => request.patch(`/api/admin/suppliers/${pid}/onboarding`, { headers: ah, data: { status, ...extra } });
   expect((await move("business_verification_pending")).status()).toBe(200);
   expect((await move("business_verified")).status()).toBe(200);
@@ -273,6 +273,12 @@ test("listing a product for a supplier: Procurement / Admin / Management can; th
   // validation
   expect((await post(P, SUP.A.pid, { ...body("x"), category: "Nope" })).status()).toBe(400);
   expect((await post(P, "00000000-0000-0000-0000-000000000000", body("x"))).status()).toBe(404);
+  // suppliers can no longer list, edit, remove or add photos to products themselves
+  const locked = await request.post("/api/supplier-dashboard/products", { headers: SUP.A.sh, data: body("Supplier listing") });
+  expect(locked.status()).toBe(403);
+  expect((await locked.json()).code).toBe("listing_locked");
+  expect((await request.patch(`/api/supplier-dashboard/products/${SUP.A.productId}`, { headers: SUP.A.sh, data: { description: "x" } })).status()).toBe(403);
+  expect((await request.delete(`/api/supplier-dashboard/products/${SUP.A.productId}`, { headers: SUP.A.sh })).status()).toBe(403);
   // Procurement lists it: pending, with a capability code
   const name = `Team Listed ${stamp}`;
   const r = await post(P, SUP.A.pid, body(name));
@@ -289,6 +295,19 @@ test("listing a product for a supplier: Procurement / Admin / Management can; th
   expect((await request.patch(`/api/admin/products/${id}`, { headers: H(M), data: { status: "approved", capacityVerified: true } })).status()).toBe(200);
   const mine = (await (await request.get("/api/supplier-dashboard/products", { headers: SUP.A.sh })).json()).products.find(p => p.id === id);
   expect(mine.status).toBe("approved");
+  // editing goes back to review and the editor cannot approve their own edit; photos can be added; the listing can be removed
+  const PNG1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+  const ed = await request.patch(`/api/admin/products/${id}/details`, { headers: H(P), data: { description: "Edited by the team" } });
+  expect(ed.status()).toBe(200);
+  expect((await request.patch(`/api/admin/products/${id}`, { headers: H(P), data: { status: "approved" } })).status()).toBe(409);
+  expect((await request.post(`/api/admin/products/${id}/images`, { headers: H(P), multipart: { productImages: { name: "p.png", mimeType: "image/png", buffer: PNG1 } } })).status()).toBe(201);
+  const imgs = (await (await request.get(`/api/admin/products/${id}/images`, { headers: H(P) })).json()).images;
+  expect(imgs.length).toBe(1);
+  expect((await request.delete(`/api/admin/products/${id}/images/${imgs[0].id}`, { headers: H(P) })).status()).toBe(200);
+  expect((await request.patch(`/api/admin/products/${id}`, { headers: H(M), data: { status: "approved" } })).status()).toBe(200);
+  expect((await request.delete(`/api/admin/products/${id}`, { headers: H(F) })).status()).toBe(403);
+  expect((await request.delete(`/api/admin/products/${id}`, { headers: H(P) })).status()).toBe(200);
+  expect((await (await request.get("/api/supplier-dashboard/products", { headers: SUP.A.sh })).json()).products.some(p => p.id === id)).toBe(false);
   // the legacy Admin can list too, and Super Admin can approve it
   const a = await post(ah["x-admin-token"], SUP.B.pid, body(`Admin Listed ${stamp}`));
   expect(a.status()).toBe(201);

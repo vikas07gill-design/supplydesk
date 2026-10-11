@@ -503,45 +503,60 @@ function renderNetwork(kind){
     +'</table></div>';
 }
 
-// ---------- List a product for a supplier (Super Admin / Management / Admin / Procurement) ----------
+// ---------- List / edit a product for a supplier (Super Admin / Management / Admin / Procurement) ----------
+// Suppliers do not list products themselves; SupplyDesk does it from here.
 const canListProduct=()=>["super_admin","management","admin","procurement"].includes(role());
 const CAP_UNIT_OPTS=["pcs","kg","tons","meters","sets","units","liters","boxes","pairs","sq.m"];
 window.addEventListener("load",function(){
-  const base=window.renderProducts;
-  if(typeof base!=="function")return;
-  window.renderProducts=function(items){
-    base(items);
-    if(!canListProduct())return;
-    const list=document.getElementById("list");
-    if(list)list.insertAdjacentHTML("afterbegin",'<div class="actions" style="margin:0 0 10px"><button class="approve" onclick="openListProduct()">+ List a product for a supplier</button></div>');
-  };
+  const baseList=window.renderProducts;
+  if(typeof baseList==="function"){
+    window.renderProducts=function(items){
+      baseList(items);
+      if(!canListProduct())return;
+      const list=document.getElementById("list");
+      if(list)list.insertAdjacentHTML("afterbegin",'<div class="actions" style="margin:0 0 10px"><button class="approve" onclick="openListProduct()">+ List a product for a supplier</button></div>');
+    };
+  }
+  const baseReview=window.openProductReview;
+  if(typeof baseReview==="function"){
+    window.openProductReview=async function(id){
+      await baseReview(id);
+      if(!canListProduct())return;
+      const d=document.getElementById("detail");
+      if(d&&d.querySelector("h2"))d.insertAdjacentHTML("beforeend",'<div class="actions" style="margin-top:12px"><button onclick="openListProduct(\''+esc(id)+'\')">Edit details &amp; photos</button><button class="danger" onclick="archiveListedProduct(\''+esc(id)+'\')">Remove listing</button></div>');
+    };
+  }
 });
 function loadTaxonomy(){
   if(window.SD_TAX)return Promise.resolve();
   return new Promise((ok,no)=>{const s=document.createElement("script");s.src="/assets/taxonomy.js";s.onload=ok;s.onerror=()=>no(new Error("Could not load categories."));document.head.appendChild(s)});
 }
-async function openListProduct(){
+async function openListProduct(editId){
   if(needSignIn())return;
   try{
-    const [sup]=await Promise.all([api("/api/admin/supplier-options"),loadTaxonomy()]);
+    const [sup,all]=await Promise.all([api("/api/admin/supplier-options"),editId?api("/api/admin/products?status=all"):Promise.resolve(null),loadTaxonomy()]).then(r=>[r[0],r[1]]);
+    const cur=editId?((all.products||[]).find(x=>x.id===editId)):null;
+    if(editId&&!cur)throw new Error("Product not found.");
     const cats=Object.keys(window.SD_TAX.subs||{});
-    const sOpts=(sup.suppliers||[]).map(s=>'<option value="'+esc(s.id)+'">'+esc(s.name+(s.city?" · "+s.city:""))+'</option>').join("");
-    document.getElementById("detail").innerHTML='<h2>List a product for a supplier</h2>'
-      +'<div class="sp-note">Use this when a supplier sends you their product details directly. The listing goes to the normal approval queue; the person who lists it cannot approve it unless they are Management or Super Admin.</div>'
-      +(sOpts?'<div class="rq-grid" style="margin-top:10px"><label>Supplier<select id="lpSup">'+sOpts+'</select></label>'
-      +'<label>Product name<input id="lpName" maxlength="255"></label>'
-      +'<label>Category<select id="lpCat" onchange="lpFillSubs()">'+cats.map(c=>'<option>'+esc(c)+'</option>').join("")+'</select></label>'
+    const v=(k)=>cur&&cur[k]!=null?esc(cur[k]):"";
+    const sOpts=(sup.suppliers||[]).map(s=>'<option value="'+esc(s.id)+'"'+(cur&&cur.supplier_id===s.id?' selected':'')+'>'+esc(s.name+(s.city?" · "+s.city:"")+(s.published?"":" (not live yet)"))+'</option>').join("");
+    document.getElementById("detail").innerHTML='<h2>'+(cur?"Edit product":"List a product for a supplier")+'</h2>'
+      +'<div class="sp-note">Suppliers do not list products themselves; SupplyDesk does. The listing goes to the approval queue, and the person who listed or edited it cannot approve it unless they are Management or Super Admin.</div>'
+      +(sOpts?'<div class="rq-grid" style="margin-top:10px"><label>Supplier<select id="lpSup"'+(cur?' disabled':'')+'>'+sOpts+'</select></label>'
+      +'<label>Product name<input id="lpName" maxlength="255" value="'+v("product_name")+'"></label>'
+      +'<label>Category<select id="lpCat" onchange="lpFillSubs()">'+cats.map(c=>'<option'+(cur&&cur.category===c?' selected':'')+'>'+esc(c)+'</option>').join("")+'</select></label>'
       +'<label>Sub-category<select id="lpSub"></select></label>'
-      +'<label>MOQ<input id="lpMoq" maxlength="120"></label><label>Unit<input id="lpUnit" maxlength="80" placeholder="pcs, kg ..."></label>'
-      +'<label>Market<select id="lpScope"><option>Both</option><option>Domestic</option><option>International</option></select></label><span></span></div>'
-      +'<label class="rq-wide">Description<textarea id="lpDesc" style="min-height:70px" maxlength="3000"></textarea></label>'
-      +'<h3 style="margin:16px 0 4px;font-size:15px">Capacity (optional)</h3><div class="rq-grid">'
-      +'<label>Monthly capacity<input id="lpMonthly" type="number" min="0"></label><label>Available now<input id="lpAvail" type="number" min="0"></label>'
-      +'<label>Capacity unit<select id="lpCapUnit"><option value="">-</option>'+CAP_UNIT_OPTS.map(u=>'<option>'+u+'</option>').join("")+'</select></label>'
-      +'<label>Lead time (days)<input id="lpLead" type="number" min="0"></label><label>Origin region<input id="lpRegion" maxlength="150"></label></div>'
-      +'<div class="actions"><button class="primary" onclick="saveListProduct()">List product</button><button onclick="loadProducts()">Cancel</button></div>'
-      :'<div class="rq-next"><div class="rq-next-h">No live suppliers yet</div><div class="muted">A supplier has to be approved and published before products can be listed for it.</div></div>');
-    if(sOpts)lpFillSubs();
+      +'<label>MOQ<input id="lpMoq" maxlength="120" value="'+v("moq")+'"></label><label>Unit<input id="lpUnit" maxlength="80" placeholder="pcs, kg ..." value="'+v("unit")+'"></label>'
+      +'<label>Market<select id="lpScope">'+["Both","Domestic","International"].map(x=>'<option'+(cur&&cur.market_scope===x?' selected':'')+'>'+x+'</option>').join("")+'</select></label><span></span></div>'
+      +'<label class="rq-wide">Description<textarea id="lpDesc" style="min-height:70px" maxlength="3000">'+v("description")+'</textarea></label>'
+      +(cur?'':'<h3 style="margin:16px 0 4px;font-size:15px">Capacity (optional)</h3><div class="rq-grid">'
+        +'<label>Monthly capacity<input id="lpMonthly" type="number" min="0"></label><label>Available now<input id="lpAvail" type="number" min="0"></label>'
+        +'<label>Capacity unit<select id="lpCapUnit"><option value="">-</option>'+CAP_UNIT_OPTS.map(u=>'<option>'+u+'</option>').join("")+'</select></label>'
+        +'<label>Lead time (days)<input id="lpLead" type="number" min="0"></label><label>Origin region<input id="lpRegion" maxlength="150"></label></div>')
+      +'<label class="rq-wide">Photos <small>(up to 6, JPG / PNG / WEBP, 5 MB each)</small><input id="lpFiles" type="file" accept="image/jpeg,image/png,image/webp" multiple></label>'
+      +'<div class="actions"><button class="primary" onclick="saveListProduct('+(cur?"'"+esc(editId)+"'":"")+')">'+(cur?"Save changes":"List product")+'</button><button onclick="loadProducts()">Cancel</button></div>'
+      :'<div class="rq-next"><div class="rq-next-h">No suppliers yet</div><div class="muted">A supplier has to sign up before products can be listed for it.</div></div>');
+    if(sOpts){lpFillSubs();if(cur)document.getElementById("lpSub").value=cur.subcategory;}
     document.getElementById("detail").scrollIntoView({behavior:"smooth",block:"start"});
   }catch(e){flowErr(e)}
 }
@@ -549,14 +564,27 @@ function lpFillSubs(){
   const c=document.getElementById("lpCat").value,subs=(window.SD_TAX.subs||{})[c]||[];
   document.getElementById("lpSub").innerHTML=subs.map(x=>'<option>'+esc(x)+'</option>').join("");
 }
-async function saveListProduct(){
-  const v=id=>(document.getElementById(id)||{}).value||"";
-  const sid=v("lpSup");
-  if(!v("lpName").trim())return flowMsg("Enter the product name.");
+async function saveListProduct(editId){
+  const g=id=>(document.getElementById(id)||{}).value||"";
+  if(!g("lpName").trim())return flowMsg("Enter the product name.");
+  const json={"Content-Type":"application/json"};
   try{
-    const r=await api("/api/admin/suppliers/"+encodeURIComponent(sid)+"/products",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({product_name:v("lpName"),category:v("lpCat"),subcategory:v("lpSub"),description:v("lpDesc"),moq:v("lpMoq"),unit:v("lpUnit"),market_scope:v("lpScope"),monthly_capacity:v("lpMonthly"),available_capacity:v("lpAvail"),capacity_unit:v("lpCapUnit"),lead_time_days:v("lpLead"),origin_region:v("lpRegion")})});
+    let id=editId,msg;
+    if(editId){
+      const r=await api("/api/admin/products/"+encodeURIComponent(editId)+"/details",{method:"PATCH",headers:json,body:JSON.stringify({product_name:g("lpName"),category:g("lpCat"),subcategory:g("lpSub"),description:g("lpDesc"),moq:g("lpMoq"),unit:g("lpUnit"),market_scope:g("lpScope")})});
+      msg=r.message;
+    }else{
+      const r=await api("/api/admin/suppliers/"+encodeURIComponent(g("lpSup"))+"/products",{method:"POST",headers:json,body:JSON.stringify({product_name:g("lpName"),category:g("lpCat"),subcategory:g("lpSub"),description:g("lpDesc"),moq:g("lpMoq"),unit:g("lpUnit"),market_scope:g("lpScope"),monthly_capacity:g("lpMonthly"),available_capacity:g("lpAvail"),capacity_unit:g("lpCapUnit"),lead_time_days:g("lpLead"),origin_region:g("lpRegion")})});
+      id=r.id;msg=r.message+" Code "+r.capabilityCode+".";
+    }
+    const files=(document.getElementById("lpFiles")||{}).files||[];
+    if(files.length){const fd=new FormData();for(const f of files)fd.append("productImages",f);await api("/api/admin/products/"+encodeURIComponent(id)+"/images",{method:"POST",body:fd});msg+=" Photos added."}
     document.getElementById("detail").innerHTML="";
     await loadProducts();
-    flowMsg(r.message+" Code "+r.capabilityCode+".");
+    flowMsg(msg);
   }catch(e){flowErr(e)}
+}
+async function archiveListedProduct(id){
+  if(!confirm("Remove this listing? It disappears from the public catalogue."))return;
+  try{await api("/api/admin/products/"+encodeURIComponent(id),{method:"DELETE"});document.getElementById("detail").innerHTML="";await loadProducts();flowMsg("Listing removed.")}catch(e){flowErr(e)}
 }
