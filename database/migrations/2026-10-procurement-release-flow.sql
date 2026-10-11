@@ -37,3 +37,8 @@ CREATE TABLE IF NOT EXISTS supplier_payables (
   UNIQUE KEY uq_payable_po (supplier_po_id),
   INDEX idx_payable_status (status, raised_at)
 ) ENGINE=InnoDB;
+
+-- Products listed by a team member on behalf of a supplier (the lister cannot approve their own listing).
+ALTER TABLE supplier_products ADD COLUMN IF NOT EXISTS listed_by_admin VARCHAR(120) NULL;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS advance_pct TINYINT NOT NULL DEFAULT 50;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS kind VARCHAR(10) NOT NULL DEFAULT 'full';

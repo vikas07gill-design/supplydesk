@@ -148,8 +148,10 @@ async function loadMyDesk(){
     if(d.desk==="finance"){const pp=await api("/api/admin/payables?status=approved").catch(()=>({payables:[]}));d.payables=pp.payables}
     if(d.desk==="finance"){
       document.getElementById("detail").innerHTML='<h2>My desk</h2><div class="muted">Orders that finished QC are ready for billing. Release each invoice to the Buyer Desk when it is final.</div>'
-        +'<div class="sp-sum"><div><small>To bill</small><b>'+d.counts.to_bill+'</b></div><div><small>Issued, not released</small><b>'+d.counts.to_release+'</b></div><div><small>Outstanding</small><b>'+d.counts.outstanding+'</b></div></div>'
-        +'<div class="pl-card"><h3>Ready to invoice (QC completed)</h3>'+(d.toBill.length?d.toBill.map(o=>'<div class="pl-ex" onclick="openFinanceOrder(\''+esc(o.id)+'\')"><span><b>● </b>'+esc(o.title||"")+' <small>· '+esc(o.po_number)+' · '+esc(o.buyer_company||o.buyer_name||"")+'</small></span><small>'+fnum(o.total_price)+' '+esc(o.currency||"")+'</small></div>').join(""):'<div class="muted">Nothing waiting for billing.</div>')+'</div>'
+        +'<div class="sp-sum"><div><small>Advance to invoice</small><b>'+d.counts.to_advance+'</b></div><div><small>Balance to invoice</small><b>'+d.counts.to_bill+'</b></div><div><small>Issued, not released</small><b>'+d.counts.to_release+'</b></div><div><small>To collect</small><b>'+d.counts.outstanding+'</b></div></div>'
+        +'<div class="pl-card"><h3>Advance to invoice (accepted orders)</h3>'+(d.toAdvance.length?d.toAdvance.map(o=>'<div class="pl-ex" onclick="openFinanceOrder(\''+esc(o.id)+'\')"><span><b>● </b>'+esc(o.title||"")+' <small>· '+esc(o.po_number)+' · '+esc(o.buyer_company||o.buyer_name||"")+'</small></span><small>'+esc(o.advance_pct)+'% of '+fnum(o.total_price)+' '+esc(o.currency||"")+'</small></div>').join(""):'<div class="muted">No advance is waiting to be invoiced.</div>')+'</div>'
+        +'<div class="pl-card" style="margin-top:12px"><h3>Payments to collect from buyers</h3>'+(d.toCollect.length?d.toCollect.map(i=>'<div class="pl-ex" onclick="openFinanceOrder(\''+esc(i.order_id)+'\')"><span>'+esc(i.invoice_no)+' <small>· '+(i.kind==="advance"?"Advance":i.kind==="final"?"Balance":"Invoice")+' · '+esc(i.po_number)+' · '+esc(i.stageLabel||"")+'</small></span><small>'+fnum(i.outstanding)+' '+esc(i.currency||"")+' due</small></div>').join(""):'<div class="muted">Nothing outstanding.</div>')+'</div>'
+        +'<div class="pl-card" style="margin-top:12px"><h3>Balance to invoice (QC completed)</h3>'+(d.toBill.length?d.toBill.map(o=>'<div class="pl-ex" onclick="openFinanceOrder(\''+esc(o.id)+'\')"><span><b>● </b>'+esc(o.title||"")+' <small>· '+esc(o.po_number)+' · '+esc(o.buyer_company||o.buyer_name||"")+'</small></span><small>'+fnum(o.total_price)+' '+esc(o.currency||"")+'</small></div>').join(""):'<div class="muted">Nothing waiting for billing.</div>')+'</div>'
         +'<div class="pl-card" style="margin-top:12px"><h3>Supplier payments to make (approved)</h3>'+payTable(d.payables||[],"")+'</div><div class="pl-card" style="margin-top:12px"><h3>Invoices issued but not yet released</h3>'+(d.unreleased.length?d.unreleased.map(i=>'<div class="pl-ex"><span>'+esc(i.invoice_no)+' <small>· '+esc(i.po_number)+' · '+esc(i.title||"")+'</small></span><span><small>'+fnum(i.total)+' '+esc(i.currency||"")+'</small> <button onclick="releaseInvoice(\''+esc(i.id)+'\')">Release to team</button></span></div>').join(""):'<div class="muted">All issued invoices are released.</div>')+'</div>';
       return;
     }
@@ -326,10 +328,13 @@ async function spConfirm(id,allowShortfall){
   if(!allowShortfall&&!confirm("Confirm this allocation and issue "+lines.length+" supplier PO(s)? Suppliers will be emailed. The customer on each PO is SUPPLYDESK; no buyer details are sent."))return;
   const g=x=>(document.getElementById(x)||{value:""}).value.trim();
   try{
-    await api("/api/admin/sd-orders/"+encodeURIComponent(id)+"/sourcing-plan/confirm",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lines,currency:g("spCur")||"INR",deliveryBy:g("spDate"),terms:g("spTerms"),allowShortfall:!!allowShortfall,approveOverCeiling:!!window.__overOk})});
+    await api("/api/admin/sd-orders/"+encodeURIComponent(id)+"/sourcing-plan/confirm",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lines,currency:g("spCur")||"INR",deliveryBy:g("spDate"),terms:g("spTerms"),allowShortfall:!!allowShortfall,approveOverCeiling:!!window.__overOk,approveWithoutAdvance:!!window.__advOk})});
     await loadSourcing();await openSourcingPlan(id);flowMsg("Allocation confirmed. Supplier PO(s) issued to suppliers with SupplyDesk as the customer.");
   }catch(e){
     if(/above the buy-below price/.test(e.message||"")&&["super_admin","management"].includes(role())&&!window.__overOk){if(confirm(e.message+"\n\nApprove this exception and issue the POs anyway?")){window.__overOk=true;try{return await spConfirm(id,allowShortfall)}finally{window.__overOk=false}}return}
+    if(/advance/i.test(e.message||"")&&/advance_pending/.test(e.code||"")||/advance.*not.*(paid|received)/i.test(e.message||"")){
+      if(["super_admin","management"].includes(role())&&!window.__advOk){if(confirm(e.message+"\n\nIssue the POs without the advance (Management override)?")){window.__advOk=true;try{return await spConfirm(id,allowShortfall)}finally{window.__advOk=false}}return}
+    }
     if(/covers .* of/.test(e.message||"")&&!allowShortfall){if(confirm(e.message+"\n\nIssue the POs for the quantity allocated so far?"))return spConfirm(id,true);return}
     flowErr(e);
   }
@@ -501,4 +506,90 @@ function renderNetwork(kind){
   document.getElementById("detail").innerHTML='<h2>Capacity</h2><div class="muted">Installed, available, allocated (PO issued), committed (supplier accepted) and free capacity. Only verified capacity updated in the last 45 days is used for sourcing and public totals.</div><div class="nt-wrap" style="margin-top:12px"><table class="nt-t"><tr><th>Capability</th><th>Supplier</th><th>Region</th><th class="n">Installed</th><th class="n">Available</th><th class="n">Allocated</th><th class="n">Committed</th><th class="n">Free</th><th>Updated</th><th>Verification</th></tr>'
     +items.map(i=>'<tr><td><b>'+esc(i.capabilityCode||"-")+'</b><div class="muted">'+esc(i.product)+'</div></td><td>'+esc(i.supplier)+(i.eligible?'':' <span class="muted">(not eligible)</span>')+'</td><td>'+esc(i.region)+'</td><td class="n">'+fnum(i.installed)+'</td><td class="n">'+fnum(i.available)+'</td><td class="n">'+fnum(i.allocated)+'</td><td class="n">'+fnum(i.committed)+'</td><td class="n"><b>'+fnum(i.free)+'</b></td><td>'+(i.updatedAt?esc(String(i.updatedAt).slice(0,10)):'-')+(i.stale?' <span class="nt-warn">stale</span>':'')+'</td><td>'+(!i.productVerified?'<span class="muted">Approve product first</span>':i.capacityVerified?'<span class="nt-ok">✓ Verified</span> <button onclick="verifyCapacity(\''+esc(i.id)+'\',false)">Revoke</button>':'<button class="approve" onclick="verifyCapacity(\''+esc(i.id)+'\',true)">Verify capacity</button>')+'</td></tr>').join("")
     +'</table></div>';
+}
+
+// ---------- List / edit a product for a supplier (Super Admin / Management / Admin / Procurement) ----------
+// Suppliers do not list products themselves; SupplyDesk does it from here.
+const canListProduct=()=>["super_admin","management","admin","procurement"].includes(role());
+const CAP_UNIT_OPTS=["pcs","kg","tons","meters","sets","units","liters","boxes","pairs","sq.m"];
+window.addEventListener("load",function(){
+  const baseList=window.renderProducts;
+  if(typeof baseList==="function"){
+    window.renderProducts=function(items){
+      baseList(items);
+      if(!canListProduct())return;
+      const list=document.getElementById("list");
+      if(list)list.insertAdjacentHTML("afterbegin",'<div class="actions" style="margin:0 0 10px"><button class="approve" onclick="openListProduct()">+ List a product for a supplier</button></div>');
+    };
+  }
+  const baseReview=window.openProductReview;
+  if(typeof baseReview==="function"){
+    window.openProductReview=async function(id){
+      await baseReview(id);
+      if(!canListProduct())return;
+      const d=document.getElementById("detail");
+      if(d&&d.querySelector("h2"))d.insertAdjacentHTML("beforeend",'<div class="actions" style="margin-top:12px"><button onclick="openListProduct(\''+esc(id)+'\')">Edit details &amp; photos</button><button class="danger" onclick="archiveListedProduct(\''+esc(id)+'\')">Remove listing</button></div>');
+    };
+  }
+});
+function loadTaxonomy(){
+  if(window.SD_TAX)return Promise.resolve();
+  return new Promise((ok,no)=>{const s=document.createElement("script");s.src="/assets/taxonomy.js";s.onload=ok;s.onerror=()=>no(new Error("Could not load categories."));document.head.appendChild(s)});
+}
+async function openListProduct(editId){
+  if(needSignIn())return;
+  try{
+    const [sup,all]=await Promise.all([api("/api/admin/supplier-options"),editId?api("/api/admin/products?status=all"):Promise.resolve(null),loadTaxonomy()]).then(r=>[r[0],r[1]]);
+    const cur=editId?((all.products||[]).find(x=>x.id===editId)):null;
+    if(editId&&!cur)throw new Error("Product not found.");
+    const cats=Object.keys(window.SD_TAX.subs||{});
+    const v=(k)=>cur&&cur[k]!=null?esc(cur[k]):"";
+    const sOpts=(sup.suppliers||[]).map(s=>'<option value="'+esc(s.id)+'"'+(cur&&cur.supplier_id===s.id?' selected':'')+'>'+esc(s.name+(s.city?" · "+s.city:"")+(s.published?"":" (not live yet)"))+'</option>').join("");
+    document.getElementById("detail").innerHTML='<h2>'+(cur?"Edit product":"List a product for a supplier")+'</h2>'
+      +'<div class="sp-note">Suppliers do not list products themselves; SupplyDesk does. The listing goes to the approval queue, and the person who listed or edited it cannot approve it unless they are Management or Super Admin.</div>'
+      +(sOpts?'<div class="rq-grid" style="margin-top:10px"><label>Supplier<select id="lpSup"'+(cur?' disabled':'')+'>'+sOpts+'</select></label>'
+      +'<label>Product name<input id="lpName" maxlength="255" value="'+v("product_name")+'"></label>'
+      +'<label>Category<select id="lpCat" onchange="lpFillSubs()">'+cats.map(c=>'<option'+(cur&&cur.category===c?' selected':'')+'>'+esc(c)+'</option>').join("")+'</select></label>'
+      +'<label>Sub-category<select id="lpSub"></select></label>'
+      +'<label>MOQ<input id="lpMoq" maxlength="120" value="'+v("moq")+'"></label><label>Unit<input id="lpUnit" maxlength="80" placeholder="pcs, kg ..." value="'+v("unit")+'"></label>'
+      +'<label>Market<select id="lpScope">'+["Both","Domestic","International"].map(x=>'<option'+(cur&&cur.market_scope===x?' selected':'')+'>'+x+'</option>').join("")+'</select></label><span></span></div>'
+      +'<label class="rq-wide">Description<textarea id="lpDesc" style="min-height:70px" maxlength="3000">'+v("description")+'</textarea></label>'
+      +(cur?'':'<h3 style="margin:16px 0 4px;font-size:15px">Capacity (optional)</h3><div class="rq-grid">'
+        +'<label>Monthly capacity<input id="lpMonthly" type="number" min="0"></label><label>Available now<input id="lpAvail" type="number" min="0"></label>'
+        +'<label>Capacity unit<select id="lpCapUnit"><option value="">-</option>'+CAP_UNIT_OPTS.map(u=>'<option>'+u+'</option>').join("")+'</select></label>'
+        +'<label>Lead time (days)<input id="lpLead" type="number" min="0"></label><label>Origin region<input id="lpRegion" maxlength="150"></label></div>')
+      +'<label class="rq-wide">Photos <small>(up to 6, JPG / PNG / WEBP, 5 MB each)</small><input id="lpFiles" type="file" accept="image/jpeg,image/png,image/webp" multiple></label>'
+      +'<div class="actions"><button class="primary" onclick="saveListProduct('+(cur?"'"+esc(editId)+"'":"")+')">'+(cur?"Save changes":"List product")+'</button><button onclick="loadProducts()">Cancel</button></div>'
+      :'<div class="rq-next"><div class="rq-next-h">No suppliers yet</div><div class="muted">A supplier has to sign up before products can be listed for it.</div></div>');
+    if(sOpts){lpFillSubs();if(cur)document.getElementById("lpSub").value=cur.subcategory;}
+    document.getElementById("detail").scrollIntoView({behavior:"smooth",block:"start"});
+  }catch(e){flowErr(e)}
+}
+function lpFillSubs(){
+  const c=document.getElementById("lpCat").value,subs=(window.SD_TAX.subs||{})[c]||[];
+  document.getElementById("lpSub").innerHTML=subs.map(x=>'<option>'+esc(x)+'</option>').join("");
+}
+async function saveListProduct(editId){
+  const g=id=>(document.getElementById(id)||{}).value||"";
+  if(!g("lpName").trim())return flowMsg("Enter the product name.");
+  const json={"Content-Type":"application/json"};
+  try{
+    let id=editId,msg;
+    if(editId){
+      const r=await api("/api/admin/products/"+encodeURIComponent(editId)+"/details",{method:"PATCH",headers:json,body:JSON.stringify({product_name:g("lpName"),category:g("lpCat"),subcategory:g("lpSub"),description:g("lpDesc"),moq:g("lpMoq"),unit:g("lpUnit"),market_scope:g("lpScope")})});
+      msg=r.message;
+    }else{
+      const r=await api("/api/admin/suppliers/"+encodeURIComponent(g("lpSup"))+"/products",{method:"POST",headers:json,body:JSON.stringify({product_name:g("lpName"),category:g("lpCat"),subcategory:g("lpSub"),description:g("lpDesc"),moq:g("lpMoq"),unit:g("lpUnit"),market_scope:g("lpScope"),monthly_capacity:g("lpMonthly"),available_capacity:g("lpAvail"),capacity_unit:g("lpCapUnit"),lead_time_days:g("lpLead"),origin_region:g("lpRegion")})});
+      id=r.id;msg=r.message+" Code "+r.capabilityCode+".";
+    }
+    const files=(document.getElementById("lpFiles")||{}).files||[];
+    if(files.length){const fd=new FormData();for(const f of files)fd.append("productImages",f);await api("/api/admin/products/"+encodeURIComponent(id)+"/images",{method:"POST",body:fd});msg+=" Photos added."}
+    document.getElementById("detail").innerHTML="";
+    await loadProducts();
+    flowMsg(msg);
+  }catch(e){flowErr(e)}
+}
+async function archiveListedProduct(id){
+  if(!confirm("Remove this listing? It disappears from the public catalogue."))return;
+  try{await api("/api/admin/products/"+encodeURIComponent(id),{method:"DELETE"});document.getElementById("detail").innerHTML="";await loadProducts();flowMsg("Listing removed.")}catch(e){flowErr(e)}
 }

@@ -6,6 +6,7 @@ const SID = process.env.E2E_SUPER_ID, SPW = process.env.E2E_SUPER_PASSWORD;
 test.skip(!KEY || !AID || !APW || !SID || !SPW, "needs admin + super admin env");
 test.describe.configure({ mode: "serial" });
 
+const { payAdvance } = require("./pay");
 const stamp = Date.now();
 const sess = {};
 const login = async (request, id, pw) => sess[id] || (sess[id] = { token: (await (await request.post("/api/admin/login", { data: { adminId: id, password: pw } })).json()).token });
@@ -31,10 +32,10 @@ async function makeSupplier(request, ah, tag, free, region, lead) {
   const v = await (await request.post("/api/supplier-signup/verify-otp", { data: { email, otp: ask.testOtp } })).json();
   const sh = { "x-supplier-dashboard-token": v.token };
   const name = `Plan Container ${tag} ${stamp}`;
-  expect((await request.post("/api/supplier-dashboard/products", { headers: sh, data: { product_name: name, category: "Plastics & Polymers", subcategory: "Containers", moq: "10", unit: "pcs", monthly_capacity: free * 2, available_capacity: free, capacity_unit: "pcs", lead_time_days: lead, origin_region: region } })).status()).toBeLessThan(300);
-  const prod = (await (await request.get("/api/supplier-dashboard/products", { headers: sh })).json()).products.find(p => p.product_name === name);
   const su = H(await login(request, SID, SPW));
   const pid = (await (await request.get("/api/super-admin/suppliers?q=" + encodeURIComponent(email), { headers: su })).json()).suppliers.find(x => x.business_email === email).id;
+  expect((await request.post(`/api/admin/suppliers/${pid}/products`, { headers: su, data: { product_name: name, category: "Plastics & Polymers", subcategory: "Containers", moq: "10", unit: "pcs", monthly_capacity: free * 2, available_capacity: free, capacity_unit: "pcs", lead_time_days: lead, origin_region: region } })).status()).toBe(201);
+  const prod = (await (await request.get("/api/supplier-dashboard/products", { headers: sh })).json()).products.find(p => p.product_name === name);
   const move = (status, extra = {}) => request.patch(`/api/admin/suppliers/${pid}/onboarding`, { headers: ah, data: { status, ...extra } });
   expect((await move("business_verification_pending")).status()).toBe(200);
   expect((await move("business_verified")).status()).toBe(200);
@@ -168,6 +169,7 @@ test.describe("sourcing plan -> internal allocation -> supplier POs", () => {
   });
 
   test("confirm: shortfall is explicit, POs are SupplyDesk-only, region totals reconcile", async ({ request }) => {
+    await payAdvance(request, ah, ord.orderId);
     const confirmUrl = `/api/admin/sd-orders/${ord.sdOrderId}/sourcing-plan/confirm`;
     const lines = [{ capabilityCode: A.code, quantity: 40000, unitCost: 30 }, { capabilityCode: C.code, quantity: 25000, unitCost: 31 }, { capabilityCode: B.code, quantity: 35000, unitCost: 32 }];
     expect((await request.post(confirmUrl, { headers: ah, data: { lines: lines.map(l => ({ ...l, unitCost: null })) } })).status()).toBe(400);        // cost required
@@ -288,6 +290,7 @@ test.describe("admin UI follows the new flow", () => {
     const T = await makeSupplier(request, ah, "UI2", 2000, "Haryana", 7);
     const bb = await buyer(request, "ui");
     const o = await orderViaFlow(request, ah, bb, "uiplan", 4500);
+    await payAdvance(request, ah, o.orderId);
     await openAdmin(request, page);
     page.on("dialog", d => d.accept());
     await page.locator("#opsGroup button", { hasText: /^Sourcing$/ }).click();

@@ -486,7 +486,9 @@ const DESK_POLICY={
     ["PATCH",/^\/api\/admin\/supplier-pos\/[^/]+\/cancel$/],
     ["*",/^\/api\/admin\/requirements\/[^/]+\/(capability-matches|matches|quotes|state)$/],
     ["GET",/^\/api\/admin\/(products|applications|supplier-updates|product-files|supplier-update-files|files)(\/.*)?$/],
-    ["*",/^\/api\/admin\/products\/[^/]+(\/capacity-verification|\/images)?$/]
+    ["GET",/^\/api\/admin\/supplier-options$/],
+    ["POST",/^\/api\/admin\/suppliers\/[^/]+\/products$/],
+    ["*",/^\/api\/admin\/products\/[^/]+(\/capacity-verification|\/details|\/images(\/[^/]+)?)?$/]
   ],
   finance:[
     ["GET",/^\/api\/admin\/(pipeline|orders|my-desk|payables)$/],
@@ -2077,10 +2079,12 @@ app.get("/api/admin/my-desk",requireAdmin,async(req,res)=>{
     }
     if(role==="finance"){
       const qcKeys=RFQ.STAGE_KEYS.slice(RFQ.stageIndex("qc_completed"));
-      const [toBill]=await pool.query("SELECT o.id,o.po_number,o.title,o.stage,o.total_price,o.currency,b.name buyer_name,b.company buyer_company,b.email buyer_email,b.phone buyer_phone,o.buyer_id FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.status<>'cancelled' AND o.review_status IN ('accepted','partially_accepted') AND o.stage IN (?) AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id=o.id AND i.status<>'void') ORDER BY o.status_changed_at",[qcKeys]);
+      const [toBill]=await pool.query("SELECT o.id,o.po_number,o.title,o.stage,o.total_price,o.currency,b.name buyer_name,b.company buyer_company,b.email buyer_email,b.phone buyer_phone,o.buyer_id FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.status<>'cancelled' AND o.review_status IN ('accepted','partially_accepted') AND o.stage IN (?) AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id=o.id AND i.status<>'void' AND i.kind<>'advance') ORDER BY o.status_changed_at",[qcKeys]);
+      const [toAdvance]=await pool.execute("SELECT o.id,o.po_number,o.title,o.stage,o.total_price,o.advance_pct,o.currency,b.name buyer_name,b.company buyer_company,b.email buyer_email,b.phone buyer_phone,o.buyer_id FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.status<>'cancelled' AND o.advance_pct>0 AND o.review_status IN ('accepted','partially_accepted') AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id=o.id AND i.status<>'void') ORDER BY o.created_at");
+      const [toCollect]=await pool.execute("SELECT i.id,i.invoice_no,i.kind,i.total,i.paid_amount,i.currency,i.due_date,o.id order_id,o.po_number,o.title,o.stage FROM invoices i JOIN orders o ON o.id=i.order_id WHERE i.status IN ('issued','partially_paid') AND i.released_at IS NOT NULL ORDER BY i.created_at");
       const [unreleased]=await pool.execute("SELECT i.id,i.invoice_no,i.total,i.currency,o.po_number,o.title FROM invoices i JOIN orders o ON o.id=i.order_id WHERE i.status<>'void' AND i.released_at IS NULL ORDER BY i.created_at");
       const [open]=await pool.execute("SELECT COUNT(*) n FROM invoices WHERE status IN ('issued','partially_paid') AND released_at IS NOT NULL");
-      return res.json({desk:"finance",counts:{to_bill:toBill.length,to_release:unreleased.length,outstanding:Number(open[0].n)||0},toBill:toBill.map(o=>maskBuyerRow(req,{...o,stageLabel:RFQ.stageLabel(o.stage)})),unreleased});
+      return res.json({desk:"finance",counts:{to_advance:toAdvance.length,to_bill:toBill.length,to_release:unreleased.length,outstanding:Number(open[0].n)||0},toAdvance:toAdvance.map(o=>maskBuyerRow(req,{...o,stageLabel:RFQ.stageLabel(o.stage)})),toBill:toBill.map(o=>maskBuyerRow(req,{...o,stageLabel:RFQ.stageLabel(o.stage)})),toCollect:toCollect.map(r=>({...r,stageLabel:RFQ.stageLabel(r.stage),outstanding:RFQ.fromMinor(RFQ.toMinor(r.total)-RFQ.toMinor(r.paid_amount))})),unreleased});
     }
     res.status(400).json({error:"This dashboard is for the Buyer Desk, Procurement Desk and Finance."});
   }catch(error){console.error(error);res.status(500).json({error:"Could not load your desk."});}
@@ -2280,37 +2284,47 @@ app.get("/api/admin/sd-orders/:id/timeline",requireAssigner,async(req,res)=>{
 // ---- Invoices & payments (Phase 5): internal tracking, GST % shown. Not a statutory tax invoice (no GSTIN/HSN). ----
 app.post("/api/admin/orders/:id/invoice",requireAdmin,async(req,res)=>{
   const id=clean(req.params.id,80),b=req.body||{};
-  const gstRate=b.gstRate===""||b.gstRate==null?0:Number(b.gstRate),dueDate=clean(b.dueDate,10)||null,notes=clean(b.notes,1000)||null;
-  if(!Number.isFinite(gstRate)||gstRate<0||gstRate>28)return res.status(400).json({error:"GST rate must be between 0 and 28."});
+  let gstRate=b.gstRate===""||b.gstRate==null?null:Number(b.gstRate);const dueDate=clean(b.dueDate,10)||null,notes=clean(b.notes,1000)||null;
+  const askKind=clean(b.kind,10);
+  if(askKind&&!["advance","final","full"].includes(askKind))return res.status(400).json({error:"Choose advance or balance invoice."});
+  if(gstRate!=null&&(!Number.isFinite(gstRate)||gstRate<0||gstRate>28))return res.status(400).json({error:"GST rate must be between 0 and 28."});
   if(dueDate&&!/^\d{4}-\d{2}-\d{2}$/.test(dueDate))return res.status(400).json({error:"Enter a valid due date."});
   const conn=await pool.getConnection();
   try{
     await conn.beginTransaction();
-    const [[o]]=await conn.execute("SELECT o.id,o.po_number,o.title,o.status,o.stage,o.review_status,o.buyer_id,o.currency,o.total_price,b.email,b.name FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.id=? FOR UPDATE",[id]);
+    const [[o]]=await conn.execute("SELECT o.id,o.po_number,o.title,o.status,o.stage,o.review_status,o.buyer_id,o.currency,o.total_price,o.advance_pct,b.email,b.name FROM orders o JOIN buyers b ON b.id=o.buyer_id WHERE o.id=? FOR UPDATE",[id]);
     if(!o){await conn.rollback();return res.status(404).json({error:"Order not found."});}
-    if(req.admin.role==="finance"&&RFQ.stageIndex(o.stage||"supplydesk_accepted")<RFQ.stageIndex("qc_completed")){await conn.rollback();return res.status(409).json({error:"Billing opens after QC is completed on this order."});}
+    const [existing]=await conn.execute("SELECT kind,subtotal,gst_rate FROM invoices WHERE order_id=? AND status<>'void'",[id]);
+    const advInv=existing.find(x=>x.kind==="advance"),balInv=existing.find(x=>x.kind!=="advance");
+    const kind=askKind||(advInv?"final":"full");
+    if(kind==="advance"&&advInv){await conn.rollback();return res.status(409).json({error:"This order already has an advance invoice."});}
+    if(kind!=="advance"&&balInv){await conn.rollback();return res.status(409).json({error:"This order already has an active invoice. Void it first to issue a new one."});}
+    if(kind==="full"&&advInv){await conn.rollback();return res.status(409).json({error:"An advance invoice exists, so issue the balance invoice."});}
+    if(kind==="advance"&&!(Number(o.advance_pct)>0)){await conn.rollback();return res.status(409).json({error:"This order has no advance."});}
+    if(req.admin.role==="finance"&&kind!=="advance"&&RFQ.stageIndex(o.stage||"supplydesk_accepted")<RFQ.stageIndex("qc_completed")){await conn.rollback();return res.status(409).json({error:"Billing opens after QC is completed on this order."});}
     if(!RFQ.reviewAccepted(o.review_status)){await conn.rollback();return res.status(409).json({error:"SupplyDesk has not accepted this buyer order yet; it cannot be invoiced."});}
     if(o.status==="cancelled"){await conn.rollback();return res.status(409).json({error:"A cancelled order cannot be invoiced."});}
-    const [[dup]]=await conn.execute("SELECT id FROM invoices WHERE order_id=? AND status<>'void' LIMIT 1",[id]);
-    if(dup){await conn.rollback();return res.status(409).json({error:"This order already has an active invoice. Void it first to issue a new one."});}
-    const subtotal=b.subtotal===""||b.subtotal==null?Number(o.total_price):Number(b.subtotal);
+    if(gstRate==null)gstRate=kind==="final"&&advInv?Number(advInv.gst_rate):0;
+    const orderMinor=RFQ.toMinor(o.total_price),advMinor=Math.round(orderMinor*Number(o.advance_pct||0)/100);
+    const defSubtotal=kind==="advance"?RFQ.fromMinor(advMinor):kind==="final"&&advInv?RFQ.fromMinor(orderMinor-RFQ.toMinor(advInv.subtotal)):Number(o.total_price);
+    const subtotal=b.subtotal===""||b.subtotal==null?Number(defSubtotal):Number(b.subtotal);
     const calc=RFQ.computeInvoice(subtotal,gstRate);
     if(!calc){await conn.rollback();return res.status(400).json({error:"Enter a valid invoice amount."});}
     const iid=crypto.randomUUID();let no;
     for(let a=0;a<8;a++){no=RFQ.newInvoiceNo();try{
-      await conn.execute("INSERT INTO invoices (id,invoice_no,order_id,buyer_id,subtotal,gst_rate,gst_amount,total,currency,due_date,notes,created_by,released_at,released_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,"+(req.admin.role==="finance"?"NULL":"NOW()")+",?)",[iid,no,id,o.buyer_id,calc.subtotal,gstRate,calc.gst,calc.total,o.currency,dueDate,notes,actorOf(req).id,req.admin.role==="finance"?null:req.admin.admin_id]);break;}
+      await conn.execute("INSERT INTO invoices (id,invoice_no,order_id,buyer_id,subtotal,gst_rate,gst_amount,total,currency,due_date,notes,created_by,kind,released_at,released_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,"+(req.admin.role==="finance"&&kind!=="advance"?"NULL":"NOW()")+",?)",[iid,no,id,o.buyer_id,calc.subtotal,gstRate,calc.gst,calc.total,o.currency,dueDate,notes,actorOf(req).id,kind,req.admin.role==="finance"&&kind!=="advance"?null:req.admin.admin_id]);break;}
       catch(e){if(e?.code!=="ER_DUP_ENTRY"||a===7)throw e;}}
-    await audit(conn,req,"invoice.issued","invoice",iid,null,{invoiceNo:no,orderId:id,subtotal:calc.subtotal,gstRate,total:calc.total,currency:o.currency});
+    await audit(conn,req,"invoice.issued","invoice",iid,null,{invoiceNo:no,kind,orderId:id,subtotal:calc.subtotal,gstRate,total:calc.total,currency:o.currency});
     await conn.commit();
-    if(req.admin.role!=="finance")try{await sendBrandedMail(o.email,"SupplyDesk | Invoice "+no,{preheader:"Invoice issued",title:"Invoice "+no,intro:"Hello "+(o.name||"Buyer")+", an invoice for order "+o.po_number+" ("+o.title+") has been issued. Total: "+calc.total+" "+o.currency+(dueDate?", due "+dueDate:"")+".",bodyHtml:"",textLines:["Invoice "+no+": "+calc.total+" "+o.currency],ctaText:"View invoice",ctaUrl:ORIGIN()+"/buyer-dashboard"});}catch(e){console.error("Invoice mail failed:",e);}
-    res.status(201).json({ok:true,invoiceId:iid,invoiceNo:no,...calc});
+    if(req.admin.role!=="finance"||kind==="advance")try{await sendBrandedMail(o.email,"SupplyDesk | "+(kind==="advance"?"Advance invoice ":"Invoice ")+no,{preheader:"Invoice issued",title:(kind==="advance"?"Advance invoice ":"Invoice ")+no,intro:"Hello "+(o.name||"Buyer")+", "+(kind==="advance"?"the advance invoice ("+o.advance_pct+"%) for order ":"an invoice for order ")+o.po_number+" ("+o.title+") has been issued. Total: "+calc.total+" "+o.currency+(dueDate?", due "+dueDate:"")+".",bodyHtml:"",textLines:["Invoice "+no+": "+calc.total+" "+o.currency],ctaText:"View invoice",ctaUrl:ORIGIN()+"/buyer-dashboard"});}catch(e){console.error("Invoice mail failed:",e);}
+    res.status(201).json({ok:true,invoiceId:iid,invoiceNo:no,kind,...calc});
   }catch(error){await conn.rollback();console.error("Invoice failed:",error);res.status(500).json({error:"Could not issue the invoice."});}
   finally{conn.release();}
 });
 
 app.get("/api/admin/orders/:id/invoice",requireAdmin,async(req,res)=>{
   try{const oid=clean(req.params.id,80);
-    const [invoices]=await pool.execute("SELECT id,invoice_no,subtotal,gst_rate,gst_amount,total,currency,due_date,notes,status,paid_amount,created_at,released_at FROM invoices WHERE order_id=?"+(req.admin.role==="buyer_desk"?" AND released_at IS NOT NULL":"")+" ORDER BY created_at DESC",[oid]);
+    const [invoices]=await pool.execute("SELECT id,invoice_no,subtotal,gst_rate,gst_amount,total,currency,due_date,notes,status,paid_amount,created_at,released_at,kind FROM invoices WHERE order_id=?"+(req.admin.role==="buyer_desk"?" AND released_at IS NOT NULL":"")+" ORDER BY created_at DESC",[oid]);
     const [payments]=invoices.length?await pool.query("SELECT id,invoice_id,amount,method,reference,received_on,note,recorded_by,created_at FROM payments WHERE invoice_id IN (?) ORDER BY received_on,created_at",[invoices.map(i=>i.id)]):[[]];
     res.json({invoices:invoices.map(i=>({...i,outstanding:RFQ.fromMinor(RFQ.toMinor(i.total)-RFQ.toMinor(i.paid_amount)),payments:payments.filter(p=>p.invoice_id===i.id)}))});}
   catch(error){console.error(error);res.status(500).json({error:"Could not load invoices."});}
@@ -2361,7 +2375,7 @@ app.patch("/api/admin/invoices/:id/void",requireAdmin,async(req,res)=>{
 });
 
 app.get("/api/buyer-invoices",requireBuyerDashboard,async(req,res)=>{
-  try{const [invoices]=await pool.execute("SELECT i.id,i.invoice_no,i.subtotal,i.gst_rate,i.gst_amount,i.total,i.currency,i.due_date,i.status,i.paid_amount,i.created_at,o.po_number,o.title FROM invoices i JOIN orders o ON o.id=i.order_id WHERE i.buyer_id=? AND i.status<>'void' AND i.released_at IS NOT NULL ORDER BY i.created_at DESC LIMIT 100",[req.buyer.id]);
+  try{const [invoices]=await pool.execute("SELECT i.id,i.invoice_no,i.kind,i.subtotal,i.gst_rate,i.gst_amount,i.total,i.currency,i.due_date,i.status,i.paid_amount,i.created_at,o.po_number,o.title FROM invoices i JOIN orders o ON o.id=i.order_id WHERE i.buyer_id=? AND i.status<>'void' AND i.released_at IS NOT NULL ORDER BY i.created_at DESC LIMIT 100",[req.buyer.id]);
     const [payments]=invoices.length?await pool.query("SELECT invoice_id,amount,method,reference,received_on FROM payments WHERE invoice_id IN (?) ORDER BY received_on",[invoices.map(i=>i.id)]):[[]];
     res.json({invoices:invoices.map(i=>({...i,outstanding:RFQ.fromMinor(RFQ.toMinor(i.total)-RFQ.toMinor(i.paid_amount)),payments:payments.filter(p=>p.invoice_id===i.id)}))});}
   catch(error){console.error(error);res.status(500).json({error:"Could not load invoices."});}
@@ -2730,6 +2744,16 @@ app.post("/api/admin/orders/:id/stage",requireAdmin,async(req,res)=>{
     const alloc=await orderAllocation(conn,id);
     const problem=RFQ.manualStageProblem(cur,to,alloc.pos.map(p=>p.status));
     if(problem){await conn.rollback();return res.status(409).json({error:problem});}
+    // The balance must be in before the goods go out for delivery.
+    if(RFQ.stageIndex(to)>=RFQ.stageIndex("out_for_delivery")&&RFQ.stageIndex(cur)<RFQ.stageIndex("out_for_delivery")){
+      const [invs]=await conn.execute("SELECT kind,status FROM invoices WHERE order_id=? AND status<>'void'",[id]);
+      const settled=invs.some(x=>x.kind!=="advance")&&invs.every(x=>x.status==="paid");
+      if(!settled){
+        const why=clean(req.body?.overrideReason,300);
+        if(!(["super_admin","management"].includes(req.admin.role)&&why)){await conn.rollback();return res.status(409).json({error:"The balance payment has not been received. Delivery opens once the invoice is fully paid.",code:"payment_pending"});}
+        await audit(conn,req,"order.delivery_without_payment","order",id,null,{reason:why});
+      }
+    }
     await setOrderStage(conn,req,o,to,{ref,detail:note});
     await conn.commit();
     try{await mailOrderUpdate(o,RFQ.stageLabel(to),note||(ref?"Reference: "+ref:null));}catch(e){console.error("Stage mail failed:",e);}
@@ -3571,6 +3595,7 @@ app.post("/api/supplier-dashboard/profile-update", requireSupplierDashboard, asy
   }
 });
 
+const listingLocked=(req,res)=>res.status(403).json({error:"Products are listed by SupplyDesk. Please send your product details to the SupplyDesk team.",code:"listing_locked"});
 app.get("/api/supplier-dashboard/products", requireSupplierDashboard, async (req,res) => {
   const [products]=await pool.execute(
     "SELECT id,product_name,category,subcategory,description,moq,unit,market_scope,status,admin_notes,created_at,updated_at,monthly_capacity,available_capacity,capacity_unit,lead_time_days,origin_region,capacity_updated_at,capability_code FROM supplier_products WHERE supplier_id=? AND status <> 'archived' ORDER BY updated_at DESC",
@@ -3582,7 +3607,7 @@ app.get("/api/supplier-dashboard/products", requireSupplierDashboard, async (req
   res.json({products});
 });
 
-app.post("/api/supplier-dashboard/products", requireSupplierDashboard, async (req,res) => {
+app.post("/api/supplier-dashboard/products", requireSupplierDashboard, listingLocked, async (req,res) => {
   const productName=clean(req.body?.product_name,255);
   const category=clean(req.body?.category,180);
   const subcategory=clean(req.body?.subcategory,180);
@@ -3614,7 +3639,7 @@ app.post("/api/supplier-dashboard/products", requireSupplierDashboard, async (re
   }
 });
 
-app.patch("/api/supplier-dashboard/products/:id", requireSupplierDashboard, async (req,res) => {
+app.patch("/api/supplier-dashboard/products/:id", requireSupplierDashboard, listingLocked, async (req,res) => {
   const id=clean(req.params.id,80);
   const [[product]]=await pool.execute("SELECT * FROM supplier_products WHERE id=? AND supplier_id=? AND status <> 'archived'",[id,req.supplier.id]);
   if(!product) return res.status(404).json({error:"Product not found."});
@@ -3653,13 +3678,13 @@ app.patch("/api/supplier-dashboard/products/:id/capacity", requireSupplierDashbo
   }catch(error){console.error("Capacity update failed:",error);res.status(500).json({error:"Could not update capacity."});}
 });
 
-app.delete("/api/supplier-dashboard/products/:id", requireSupplierDashboard, async (req,res) => {
+app.delete("/api/supplier-dashboard/products/:id", requireSupplierDashboard, listingLocked, async (req,res) => {
   const [result]=await pool.execute("UPDATE supplier_products SET status='archived' WHERE id=? AND supplier_id=?",[clean(req.params.id,80),req.supplier.id]);
   if(!result.affectedRows) return res.status(404).json({error:"Product not found."});
   res.json({ok:true});
 });
 
-app.post("/api/supplier-dashboard/products/:id/images", requireSupplierDashboard, (req,res,next)=>productImageUpload.array("productImages",6)(req,res,next), optimizeUploads({allowPdf:false}), async (req,res)=>{
+app.post("/api/supplier-dashboard/products/:id/images", requireSupplierDashboard, listingLocked, (req,res,next)=>productImageUpload.array("productImages",6)(req,res,next), optimizeUploads({allowPdf:false}), async (req,res)=>{
   const productId=clean(req.params.id,80);
   try{
     const [[product]]=await pool.execute("SELECT id FROM supplier_products WHERE id=? AND supplier_id=? AND status <> 'archived'",[productId,req.supplier.id]);
@@ -3682,7 +3707,7 @@ app.get("/api/supplier-dashboard/products/:productId/images/:imageId", requireSu
   }catch(error){res.status(500).json({error:"Could not load image."});}
 });
 
-app.delete("/api/supplier-dashboard/products/:productId/images/:imageId", requireSupplierDashboard, async (req,res)=>{
+app.delete("/api/supplier-dashboard/products/:productId/images/:imageId", requireSupplierDashboard, listingLocked, async (req,res)=>{
   try{
     const [[f]]=await pool.execute("SELECT f.id FROM supplier_product_files f JOIN supplier_products p ON p.id=f.product_id WHERE f.id=? AND f.product_id=? AND p.supplier_id=? AND f.status <> 'archived'",[clean(req.params.imageId,80),clean(req.params.productId,80),req.supplier.id]);
     if(!f)return res.status(404).json({error:"Image not found."});
@@ -3997,7 +4022,7 @@ app.get("/api/admin/products", requireAdmin, async (req,res)=>{
     const requested=clean(req.query.status,30);
     const status=["pending","approved","rejected","archived"].includes(requested)?requested:"all";
     const q=clean(req.query.q,200).toLowerCase();
-    let sql=`SELECT p.id,p.supplier_id,p.product_name,p.category,p.subcategory,p.description,p.moq,p.unit,p.market_scope,p.status,p.admin_notes,p.created_at,p.updated_at,
+    let sql=`SELECT p.id,p.supplier_id,p.product_name,p.category,p.subcategory,p.description,p.moq,p.unit,p.market_scope,p.status,p.admin_notes,p.created_at,p.updated_at,p.listed_by_admin,
                      s.legal_name,s.trade_name,s.country,s.city,s.business_email,s.verified,s.published
               FROM supplier_products p
               LEFT JOIN supplier_profiles s ON s.id=p.supplier_id
@@ -4067,11 +4092,99 @@ app.patch("/api/admin/suppliers/:id/onboarding", requireAdmin, async (req,res)=>
   finally{conn.release();}
 });
 
+// Suppliers a team member can list products for. Suppliers cannot list products themselves; SupplyDesk does it.
+app.get("/api/admin/supplier-options", requireAdmin, async (req,res)=>{
+  try{
+    const [rows]=await pool.execute("SELECT s.id,COALESCE(NULLIF(s.trade_name,''),s.legal_name) name,s.city,s.country,s.published FROM supplier_profiles s ORDER BY name LIMIT 1000");
+    res.json({suppliers:rows});
+  }catch(error){console.error("Supplier options failed:",error);res.status(500).json({error:"Could not load suppliers."});}
+});
+
+// Super Admin / Management / Admin / Procurement list a product on behalf of a supplier. It goes into the normal
+// review queue (status pending); the person who listed it cannot approve it unless they are Management or Super Admin.
+app.post("/api/admin/suppliers/:supplierId/products", requireAdmin, async (req,res)=>{
+  if(!LISTERS.includes(req.admin.role)) return res.status(403).json({error:"Your role does not have access to this."});
+  const productName=clean(req.body?.product_name,255), category=clean(req.body?.category,180), subcategory=clean(req.body?.subcategory,180);
+  const description=clean(req.body?.description,3000)||null, moq=clean(req.body?.moq,120)||null, unit=clean(req.body?.unit,80)||null;
+  const marketScope=["Domestic","International","Both"].includes(req.body?.market_scope)?req.body.market_scope:"Both";
+  if(!productName||!category||!subcategory) return res.status(400).json({error:"Product name, category and sub-category are required."});
+  if(!catalog[category]||!catalog[category].includes(subcategory)) return res.status(400).json({error:"Invalid category or sub-category."});
+  const cap=parseCapacityInput(req.body);
+  if(cap.error) return res.status(400).json({error:cap.error});
+  const c=cap.values, hasCap=c.monthly_capacity!=null||c.available_capacity!=null||c.lead_time_days!=null;
+  try{
+    const supplierId=clean(req.params.supplierId,80);
+    const [[sup]]=await pool.execute("SELECT id FROM supplier_profiles WHERE id=?",[supplierId]);
+    if(!sup) return res.status(404).json({error:"Supplier not found."});
+    const id=crypto.randomUUID(); let code=null;
+    for(let attempt=0;attempt<8;attempt++){
+      code=newCapabilityCode(category);
+      try{
+        await pool.execute(
+          "INSERT INTO supplier_products (id,supplier_id,product_name,category,subcategory,description,moq,unit,market_scope,status,monthly_capacity,available_capacity,capacity_unit,lead_time_days,origin_region,capacity_updated_at,capability_code,listed_by_admin) VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,"+(hasCap?"NOW()":"NULL")+",?,?)",
+          [id,supplierId,productName,category,subcategory,description,moq,unit,marketScope,c.monthly_capacity,c.available_capacity,c.capacity_unit,c.lead_time_days,c.origin_region,code,req.admin.admin_id]
+        ); break;
+      }catch(e){ if(e?.code!=="ER_DUP_ENTRY"||attempt===7) throw e; }
+    }
+    await audit(pool,req,"product.listed_by_team","product",id,null,{supplierId,productName,category,subcategory});
+    res.status(201).json({ok:true,id,capabilityCode:code,message:"Product listed. It is waiting for approval."});
+  }catch(error){console.error("Team product listing failed:",error);res.status(500).json({error:"Could not list the product."});}
+});
+
+const LISTERS=["super_admin","management","admin","procurement"];
+const requireLister=(req,res,next)=>LISTERS.includes(req.admin?.role)?next():res.status(403).json({error:"Your role does not have access to this."});
+// Edit a listing. It goes back to review, and the editor cannot approve their own edit (unless Management / Super Admin).
+app.patch("/api/admin/products/:id/details", requireAdmin, requireLister, async (req,res)=>{
+  const id=clean(req.params.id,80);
+  try{
+    const [[product]]=await pool.execute("SELECT * FROM supplier_products WHERE id=? AND status <> 'archived'",[id]);
+    if(!product) return res.status(404).json({error:"Product not found."});
+    const fields={};
+    for(const key of ["product_name","category","subcategory","description","moq","unit"]) if(Object.prototype.hasOwnProperty.call(req.body||{},key)) fields[key]=clean(req.body[key],key==="description"?3000:500)||null;
+    if(Object.prototype.hasOwnProperty.call(req.body||{},"market_scope")) fields.market_scope=["Domestic","International","Both"].includes(req.body.market_scope)?req.body.market_scope:"Both";
+    const category=fields.category||product.category, subcategory=fields.subcategory||product.subcategory;
+    if(!catalog[category]||!catalog[category].includes(subcategory)) return res.status(400).json({error:"Invalid category or sub-category."});
+    if(fields.product_name===null) return res.status(400).json({error:"Product name is required."});
+    const keys=Object.keys(fields); if(!keys.length) return res.status(400).json({error:"No changes submitted."});
+    await pool.execute("UPDATE supplier_products SET "+keys.map(k=>k+"=?").join(",")+", status='pending', product_verified=0, admin_notes=NULL, reviewed_at=NULL, reviewed_by=NULL, listed_by_admin=? WHERE id=?",[...keys.map(k=>fields[k]),req.admin.admin_id,id]);
+    await audit(pool,req,"product.edited_by_team","product",id,null,{changed:keys});
+    res.json({ok:true,message:"Product updated. It is waiting for approval again."});
+  }catch(error){console.error("Team product edit failed:",error);res.status(500).json({error:"Could not update the product."});}
+});
+app.delete("/api/admin/products/:id", requireAdmin, requireLister, async (req,res)=>{
+  const [result]=await pool.execute("UPDATE supplier_products SET status='archived' WHERE id=? AND status <> 'archived'",[clean(req.params.id,80)]);
+  if(!result.affectedRows) return res.status(404).json({error:"Product not found."});
+  await audit(pool,req,"product.archived_by_team","product",clean(req.params.id,80),null,null);
+  res.json({ok:true});
+});
+app.post("/api/admin/products/:id/images", requireAdmin, requireLister, (req,res,next)=>productImageUpload.array("productImages",6)(req,res,next), optimizeUploads({allowPdf:false}), async (req,res)=>{
+  const productId=clean(req.params.id,80);
+  try{
+    const [[product]]=await pool.execute("SELECT id FROM supplier_products WHERE id=? AND status <> 'archived'",[productId]);
+    if(!product){for(const f of (req.files||[]))fs.rmSync(f.path,{force:true});return res.status(404).json({error:"Product not found."});}
+    if(!req.files?.length)return res.status(400).json({error:"Please select at least one product image."});
+    const rows=req.files.map(f=>[crypto.randomUUID(),productId,clean(f.originalname,255),path.basename(f.path),path.relative(UPLOAD_DIR,f.path).split(path.sep).join("/"),f.mimetype,f.size,"pending"]);
+    await pool.query("INSERT INTO supplier_product_files (id,product_id,original_name,stored_name,relative_path,mime_type,file_size,status) VALUES ?",[rows]);
+    await pool.execute("UPDATE supplier_products SET status='pending',product_verified=0,admin_notes=NULL,reviewed_at=NULL,reviewed_by=NULL,listed_by_admin=? WHERE id=?",[req.admin.admin_id,productId]);
+    await audit(pool,req,"product.images_added_by_team","product",productId,null,{count:req.files.length});
+    res.status(201).json({ok:true,message:"Images added. The product is waiting for approval."});
+  }catch(error){for(const f of (req.files||[]))fs.rmSync(f.path,{force:true});console.error(error);res.status(500).json({error:"Could not upload product images."});}
+});
+app.delete("/api/admin/products/:id/images/:imageId", requireAdmin, requireLister, async (req,res)=>{
+  const [r]=await pool.execute("UPDATE supplier_product_files SET status='archived' WHERE id=? AND product_id=? AND status <> 'archived'",[clean(req.params.imageId,80),clean(req.params.id,80)]);
+  if(!r.affectedRows) return res.status(404).json({error:"Image not found."});
+  res.json({ok:true});
+});
+
 app.patch("/api/admin/products/:id", requireAdmin, async (req,res)=>{
   const status=clean(req.body?.status,30), notes=clean(req.body?.adminNotes,4000);
   if(!["approved","rejected","pending"].includes(status)) return res.status(400).json({error:"Invalid product status."});
   try{
     const pid=clean(req.params.id,80);
+    if(status==="approved"&&!["super_admin","management"].includes(req.admin.role)){
+      const [[lp]]=await pool.execute("SELECT listed_by_admin FROM supplier_products WHERE id=?",[pid]);
+      if(lp&&lp.listed_by_admin&&lp.listed_by_admin===req.admin.admin_id) return res.status(409).json({error:"You listed this product, so someone else has to approve it.",code:"self_approval"});
+    }
     // product_verified mirrors "approved". Capacity is verified separately (explicit flag here or the capacity-verification route).
     const [result]=await pool.execute("UPDATE supplier_products SET status=?,product_verified=IF(?='approved',1,0),capacity_verified=IF(?='approved',capacity_verified,0),admin_notes=?,reviewed_at=NOW(),reviewed_by=? WHERE id=?",[status,status,status,notes||null,req.admin.admin_id,pid]);
     if(status==="approved"&&req.body?.capacityVerified===true) await pool.execute("UPDATE supplier_products SET capacity_verified=1,capacity_verified_at=NOW() WHERE id=? AND monthly_capacity>0",[pid]);
@@ -4944,6 +5057,9 @@ async function ensureFlowSchema(){
   await add("sd_orders","plan_proposed_by VARCHAR(120) NULL");
   await add("sd_orders","plan_proposed_at DATETIME NULL");
   await add("sd_orders","single_source_note VARCHAR(300) NULL");
+  await add("supplier_products","listed_by_admin VARCHAR(120) NULL");
+  await add("orders","advance_pct TINYINT NOT NULL DEFAULT 50");
+  await add("invoices","kind VARCHAR(10) NOT NULL DEFAULT 'full'");
   await pool.query("CREATE TABLE IF NOT EXISTS sd_rate_quotes (id CHAR(36) PRIMARY KEY, sd_order_id CHAR(36) NOT NULL, capability_code VARCHAR(30) NOT NULL, supplier_id CHAR(36) NOT NULL, unit_rate DECIMAL(14,2) NOT NULL, lead_time_days INT NULL, note VARCHAR(300) NULL, created_by VARCHAR(120) NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uq_rate_quote (sd_order_id,capability_code)) ENGINE=InnoDB");
   {const fresh=await add("invoices","released_at DATETIME NULL");await add("invoices","released_by VARCHAR(120) NULL");
    // Invoices that existed before the release step were already visible to buyers.
@@ -5050,6 +5166,16 @@ app.post("/api/admin/sd-orders/:id/sourcing-plan/confirm",requireAdmin,async(req
     }
     if(plan.sum<d.unallocated-1e-9&&!b.allowShortfall)return res.status(409).json({error:"The plan covers "+plan.sum.toLocaleString("en-IN")+" of "+d.unallocated.toLocaleString("en-IN")+". Confirm that you accept the shortfall or allocate the rest.",code:"shortfall",shortfall:fmtN(d.unallocated-plan.sum)});
   }catch(error){if(error.http)return res.status(error.http).json({error:error.message});console.error(error);return res.status(500).json({error:"Could not check the plan."});}
+  // Money before commitment: the buyer's advance must be in before Supplier POs go out (Management / Super Admin can override).
+  try{
+    const [adv]=await pool.execute("SELECT o.po_number,o.advance_pct,(SELECT COUNT(*) FROM invoices v WHERE v.order_id=o.id AND v.kind='advance' AND v.status='paid') paid FROM sd_order_items it JOIN orders o ON o.id=it.buyer_order_id WHERE it.sd_order_id=?",[id]);
+    const unpaid=adv.filter(x=>Number(x.advance_pct)>0&&!Number(x.paid));
+    if(unpaid.length){
+      if(!(b.approveWithoutAdvance&&["super_admin","management"].includes(req.admin.role)))
+        return res.status(409).json({error:"The buyer's advance has not been received for "+unpaid.map(x=>x.po_number).join(", ")+". Collect it first"+(["super_admin","management"].includes(req.admin.role)?", or approve releasing without it.":"."),code:"advance_pending"});
+      await audit(pool,req,"sd_order.advance_override","sd_order",id,null,{orders:unpaid.map(x=>x.po_number)});
+    }
+  }catch(error){console.error(error);return res.status(500).json({error:"Could not check the advance."});}
   const conn=await pool.getConnection();const created=[];
   try{
     await conn.beginTransaction();

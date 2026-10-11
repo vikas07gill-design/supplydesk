@@ -22,6 +22,7 @@ async function newRequirement(request, b, tag, qty = 1000) {
   expect(r.status()).toBe(201);
   return (await r.json()).requirementId;
 }
+const { payAdvance } = require("./pay");
 const review = (request, ah, id, data) => request.post(`/api/admin/requirements/${id}/review`, { headers: ah, data });
 
 // A supplier that is fully approved, with one verified product of the given free capacity.
@@ -31,10 +32,10 @@ async function makeSupplier(request, ah, tag, free, region, lead) {
   const v = await (await request.post("/api/supplier-signup/verify-otp", { data: { email, otp: ask.testOtp } })).json();
   const sh = { "x-supplier-dashboard-token": v.token };
   const name = `Plan Container ${tag} ${stamp}`;
-  expect((await request.post("/api/supplier-dashboard/products", { headers: sh, data: { product_name: name, category: "Plastics & Polymers", subcategory: "Containers", moq: "10", unit: "pcs", monthly_capacity: free * 2, available_capacity: free, capacity_unit: "pcs", lead_time_days: lead, origin_region: region } })).status()).toBeLessThan(300);
-  const prod = (await (await request.get("/api/supplier-dashboard/products", { headers: sh })).json()).products.find(p => p.product_name === name);
   const su = H(await login(request, SID, SPW));
   const pid = (await (await request.get("/api/super-admin/suppliers?q=" + encodeURIComponent(email), { headers: su })).json()).suppliers.find(x => x.business_email === email).id;
+  expect((await request.post(`/api/admin/suppliers/${pid}/products`, { headers: su, data: { product_name: name, category: "Plastics & Polymers", subcategory: "Containers", moq: "10", unit: "pcs", monthly_capacity: free * 2, available_capacity: free, capacity_unit: "pcs", lead_time_days: lead, origin_region: region } })).status()).toBe(201);
+  const prod = (await (await request.get("/api/supplier-dashboard/products", { headers: sh })).json()).products.find(p => p.product_name === name);
   const move = (status, extra = {}) => request.patch(`/api/admin/suppliers/${pid}/onboarding`, { headers: ah, data: { status, ...extra } });
   expect((await move("business_verification_pending")).status()).toBe(200);
   expect((await move("business_verified")).status()).toBe(200);
@@ -147,6 +148,9 @@ test("Management releases the POs at the final rates; over-ceiling needs explici
   const draft = (await (await request.get(`/api/admin/sd-orders/${w.sdOrderId}/sourcing-plan`, { headers: H(M) })).json()).draft;
   const bad = await request.post(`/api/admin/sd-orders/${w.sdOrderId}/sourcing-plan/confirm`, { headers: H(M), data: { lines: draft.map(l => ({ ...l, unitCost: 45 })) } });
   expect(bad.status()).toBe(409); expect((await bad.json()).code).toBe("over_ceiling");
+  const noAdv = await request.post(`/api/admin/sd-orders/${w.sdOrderId}/sourcing-plan/confirm`, { headers: H(M), data: { lines: draft } });
+  expect(noAdv.status()).toBe(409); expect((await noAdv.json()).code).toBe("advance_pending");
+  await payAdvance(request, H(F), w.orderId);
   const rel = await request.post(`/api/admin/sd-orders/${w.sdOrderId}/sourcing-plan/confirm`, { headers: H(M), data: { lines: draft } });
   expect(rel.status()).toBe(201);
   const sj = await (await request.get(`/api/admin/sd-orders/${w.sdOrderId}/sourcing-plan`, { headers: su })).json();
@@ -183,18 +187,20 @@ test("QC hands the order to Finance and tells the Buyer Desk; Finance releases t
   expect(inv.status()).toBe(201);
   const iid = (await inv.json()).invoiceId;
   // not visible to the Buyer Desk or the buyer until released
-  expect((await (await request.get(`/api/admin/orders/${w.orderId}/invoice`, { headers: H(B) })).json()).invoices.length).toBe(0);
-  expect((await (await request.get("/api/buyer-invoices", { headers: w.b.h })).json()).invoices.length).toBe(0);
+  expect((await (await request.get(`/api/admin/orders/${w.orderId}/invoice`, { headers: H(B) })).json()).invoices.length).toBe(1);   // only the paid advance
+  expect((await (await request.get("/api/buyer-invoices", { headers: w.b.h })).json()).invoices.length).toBe(1);
   expect((await request.post(`/api/admin/invoices/${iid}/release`, { headers: H(B) })).status()).toBe(403);
   expect((await (await request.get("/api/admin/my-desk", { headers: H(F) })).json()).unreleased.length).toBe(1);
   expect((await request.post(`/api/admin/invoices/${iid}/release`, { headers: H(F) })).status()).toBe(200);
-  expect((await (await request.get(`/api/admin/orders/${w.orderId}/invoice`, { headers: H(B) })).json()).invoices.length).toBe(1);
-  expect((await (await request.get("/api/buyer-invoices", { headers: w.b.h })).json()).invoices.length).toBe(1);
+  expect((await (await request.get(`/api/admin/orders/${w.orderId}/invoice`, { headers: H(B) })).json()).invoices.length).toBe(2);
+  expect((await (await request.get("/api/buyer-invoices", { headers: w.b.h })).json()).invoices.length).toBe(2);
   // Buyer Desk now takes it to delivery
   for (const k of ["A", "B"]) { const id = (await (await request.get("/api/supplier-dashboard/purchase-orders", { headers: SUP[k].sh })).json()).purchaseOrders[0].id; for (const st of ["ready_for_dispatch"]) expect((await spo(request, SUP[k], id, st)).status()).toBe(200); }
   const stage = (h, s) => request.post(`/api/admin/orders/${w.orderId}/stage`, { headers: h, data: { stage: s } });
   expect((await stage(H(B), "qc_completed")).status()).toBe(403);
   expect((await stage(H(B), "ready_for_transport")).status()).toBe(200);
+  const bal = (await (await request.get(`/api/admin/orders/${w.orderId}/invoice`, { headers: H(F) })).json()).invoices.find(i => i.kind === "final");
+  expect(bal).toBeTruthy();
   const audits = (await (await request.get("/api/admin/audit", { headers: su })).json()).entries.map(e => e.action);
   for (const a of ["sd_order.ceiling_set", "sd_order.rate_quoted", "sd_order.plan_proposed", "invoice.released"]) expect(audits, a).toContain(a);
 });
@@ -239,7 +245,7 @@ test("scorecards show speed and saving per person; only Management / Super Admin
   expect(pr).toMatchObject({ assigned: 1, proposed: 1, released: 1 });
   expect(pr.avgSavingPct).toBe(8);               // final rates averaged 36.8 against a buy-below price of 40
   expect(pr.payablesRaised).toBe(1);
-  expect(d.finance.find(x => x.adminId === F.adminId)).toMatchObject({ invoices: 1, payablesPaid: 1 });
+  expect(d.finance.find(x => x.adminId === F.adminId)).toMatchObject({ invoices: 2, payablesPaid: 1 });
   expect(d.buyer.find(x => x.adminId === B.adminId).qcDone).toBe(1);
 });
 
@@ -259,4 +265,74 @@ test("UI: Management opens Scorecards; Finance sees payables on My Desk", async 
   await expect(page.locator("#detail h2")).toHaveText("Desk scorecards");
   await expect(page.locator("#detail")).toContainText("Saving %");
   await expect(page.locator("#detail tr", { hasText: /^procurement/ })).toContainText("8");
+});
+
+test("listing a product for a supplier: Procurement / Admin / Management can; the lister cannot approve their own listing", async ({ request }) => {
+  const body = (name) => ({ product_name: name, category: "Plastics & Polymers", subcategory: "Containers", description: "Listed by the team", moq: "100", unit: "pcs", monthly_capacity: 4000, available_capacity: 3000, capacity_unit: "pcs", lead_time_days: 9, origin_region: "Delhi" });
+  const post = (who, sid, data) => request.post(`/api/admin/suppliers/${sid}/products`, { headers: H(who), data });
+  // options: Procurement can read the supplier list, Finance and Buyer Desk cannot list
+  const opts = await request.get("/api/admin/supplier-options", { headers: H(P) });
+  expect(opts.status()).toBe(200);
+  expect((await opts.json()).suppliers.some(s => s.id === SUP.A.pid)).toBe(true);
+  expect((await post(F, SUP.A.pid, body("Finance listing"))).status()).toBe(403);
+  expect((await post(B, SUP.A.pid, body("Desk listing"))).status()).toBe(403);
+  // validation
+  expect((await post(P, SUP.A.pid, { ...body("x"), category: "Nope" })).status()).toBe(400);
+  expect((await post(P, "00000000-0000-0000-0000-000000000000", body("x"))).status()).toBe(404);
+  // suppliers can no longer list, edit, remove or add photos to products themselves
+  const locked = await request.post("/api/supplier-dashboard/products", { headers: SUP.A.sh, data: body("Supplier listing") });
+  expect(locked.status()).toBe(403);
+  expect((await locked.json()).code).toBe("listing_locked");
+  expect((await request.patch(`/api/supplier-dashboard/products/${SUP.A.productId}`, { headers: SUP.A.sh, data: { description: "x" } })).status()).toBe(403);
+  expect((await request.delete(`/api/supplier-dashboard/products/${SUP.A.productId}`, { headers: SUP.A.sh })).status()).toBe(403);
+  // Procurement lists it: pending, with a capability code
+  const name = `Team Listed ${stamp}`;
+  const r = await post(P, SUP.A.pid, body(name));
+  expect(r.status()).toBe(201);
+  const { id, capabilityCode } = await r.json();
+  expect(capabilityCode).toMatch(/^SD-/);
+  const row = (await (await request.get("/api/admin/products?status=pending", { headers: H(P) })).json()).products.find(p => p.id === id);
+  expect(row.status).toBe("pending");
+  expect(row.listed_by_admin).toBe(P.adminId);
+  // the lister cannot approve it; Management can, and the supplier sees it as approved
+  const self = await request.patch(`/api/admin/products/${id}`, { headers: H(P), data: { status: "approved" } });
+  expect(self.status()).toBe(409);
+  expect((await self.json()).code).toBe("self_approval");
+  expect((await request.patch(`/api/admin/products/${id}`, { headers: H(M), data: { status: "approved", capacityVerified: true } })).status()).toBe(200);
+  const mine = (await (await request.get("/api/supplier-dashboard/products", { headers: SUP.A.sh })).json()).products.find(p => p.id === id);
+  expect(mine.status).toBe("approved");
+  // editing goes back to review and the editor cannot approve their own edit; photos can be added; the listing can be removed
+  const PNG1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+  const ed = await request.patch(`/api/admin/products/${id}/details`, { headers: H(P), data: { description: "Edited by the team" } });
+  expect(ed.status()).toBe(200);
+  expect((await request.patch(`/api/admin/products/${id}`, { headers: H(P), data: { status: "approved" } })).status()).toBe(409);
+  expect((await request.post(`/api/admin/products/${id}/images`, { headers: H(P), multipart: { productImages: { name: "p.png", mimeType: "image/png", buffer: PNG1 } } })).status()).toBe(201);
+  const imgs = (await (await request.get(`/api/admin/products/${id}/images`, { headers: H(P) })).json()).images;
+  expect(imgs.length).toBe(1);
+  expect((await request.delete(`/api/admin/products/${id}/images/${imgs[0].id}`, { headers: H(P) })).status()).toBe(200);
+  expect((await request.patch(`/api/admin/products/${id}`, { headers: H(M), data: { status: "approved" } })).status()).toBe(200);
+  expect((await request.delete(`/api/admin/products/${id}`, { headers: H(F) })).status()).toBe(403);
+  expect((await request.delete(`/api/admin/products/${id}`, { headers: H(P) })).status()).toBe(200);
+  expect((await (await request.get("/api/supplier-dashboard/products", { headers: SUP.A.sh })).json()).products.some(p => p.id === id)).toBe(false);
+  // the legacy Admin can list too, and Super Admin can approve it
+  const a = await post(ah["x-admin-token"], SUP.B.pid, body(`Admin Listed ${stamp}`));
+  expect(a.status()).toBe(201);
+  expect((await request.patch(`/api/admin/products/${(await a.json()).id}`, { headers: su, data: { status: "approved" } })).status()).toBe(200);
+});
+
+test("UI: Procurement opens Products, lists a product for a supplier and sees it in the queue", async ({ page }) => {
+  await page.addInitScript(([t, r]) => { sessionStorage.setItem("supplydesk_admin_token", t); sessionStorage.setItem("supplydesk_admin_role", r); }, [P.token, "procurement"]);
+  await page.goto("/admin.html");
+  await page.locator(".toolbar button", { hasText: /^Products$/ }).first().click();
+  await page.locator("#list button", { hasText: "List a product for a supplier" }).click();
+  await expect(page.locator("#detail h2")).toHaveText("List a product for a supplier");
+  const name = `UI Listed ${stamp}`;
+  await page.locator("#lpSup").selectOption(SUP.C.pid);
+  await page.locator("#lpName").fill(name);
+  await page.locator("#lpCat").selectOption("Plastics & Polymers");
+  await page.locator("#lpSub").selectOption("Containers");
+  await page.locator("#lpMonthly").fill("5000"); await page.locator("#lpAvail").fill("4000"); await page.locator("#lpCapUnit").selectOption("pcs");
+  await page.locator("#detail button", { hasText: "List product" }).click();
+  await expect(page.locator("#message")).toContainText("waiting for approval");
+  await expect(page.locator("#list")).toContainText(name);
 });
