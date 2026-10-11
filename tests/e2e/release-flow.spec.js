@@ -22,7 +22,7 @@ async function newRequirement(request, b, tag, qty = 1000) {
   expect(r.status()).toBe(201);
   return (await r.json()).requirementId;
 }
-const { payAdvance } = require("./pay");
+const { payAdvance, supplierInvoice, sendAndAcceptInvoice } = require("./pay");
 const review = (request, ah, id, data) => request.post(`/api/admin/requirements/${id}/review`, { headers: ah, data });
 
 // A supplier that is fully approved, with one verified product of the given free capacity.
@@ -205,12 +205,64 @@ test("QC hands the order to Finance and tells the Buyer Desk; Finance releases t
   for (const a of ["sd_order.ceiling_set", "sd_order.rate_quoted", "sd_order.plan_proposed", "invoice.released"]) expect(audits, a).toContain(a);
 });
 
+test("supplier side: no requirements or quotes; documents, invoice rules and messages", async ({ request }) => {
+  const poId = (await (await request.get("/api/supplier-dashboard/purchase-orders", { headers: SUP.A.sh })).json()).purchaseOrders[0].id;
+  const sh = SUP.A.sh, base = `/api/supplier-dashboard/purchase-orders/${poId}`;
+  for (const [m, u] of [["get", "/api/supplier-dashboard/requirements"], ["post", "/api/supplier-dashboard/requirements/x/quote"], ["post", "/api/supplier-dashboard/requirements/x/view"], ["patch", "/api/supplier-dashboard/connections/x"]]) {
+    const r = await request[m](u, { headers: sh, data: {} });
+    expect(r.status(), u).toBe(403); expect((await r.json()).code).toBe("sourcing_managed");
+  }
+  // documents against the PO
+  const doc = (kind) => request.post(`${base}/documents`, { headers: sh, multipart: { kind, documents: { name: "qc.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 qc") } } });
+  expect((await doc("qc_report")).status()).toBe(201);
+  expect((await request.post(`${base}/documents`, { headers: sh, multipart: { kind: "other", documents: { name: "x.exe", mimeType: "application/x-msdownload", buffer: Buffer.from("MZ") } } })).status()).toBe(400);
+  const docs = (await (await request.get(`${base}/documents`, { headers: sh })).json()).documents;
+  expect(docs.map(d => d.kind)).toEqual(["qc_report"]);
+  expect((await request.get(`${base}/documents/${docs[0].id}`, { headers: sh })).status()).toBe(200);
+  expect((await request.get(`${base}/documents/${docs[0].id}`, { headers: SUP.B.sh })).status()).toBe(404);   // another supplier cannot open it
+  const desk = await (await request.get(`/api/admin/supplier-pos/${poId}/desk`, { headers: H(P) })).json();
+  expect(desk.documents.length).toBe(1);
+  expect((await request.get(`/api/admin/supplier-pos/${poId}/desk`, { headers: H(B) })).status()).toBe(403);
+  // invoice rules
+  expect((await supplierInvoice(request, sh, poId, 15200, { billedToSupplyDesk: "false" })).status()).toBe(400);   // must be made out to SupplyDesk
+  expect((await supplierInvoice(request, sh, poId, 0)).status()).toBe(400);
+  expect((await supplierInvoice(request, sh, poId, 15200, { invoiceDate: "2099-01-01" })).status()).toBe(400);
+  expect((await request.post(`${base}/invoice`, { headers: sh, multipart: { invoiceNo: "N1", invoiceDate: new Date().toISOString().slice(0, 10), taxable: "100", billedToSupplyDesk: "true" } })).status()).toBe(400);   // file required
+  expect((await supplierInvoice(request, sh, poId, 99999)).status()).toBe(409);
+  expect((await supplierInvoice(request, SUP.A.sh, poId, 15200)).status()).toBe(201);
+  expect((await supplierInvoice(request, sh, poId, 15200)).status()).toBe(409);                                     // one open invoice
+  const inv = (await (await request.get(`${base}/invoice`, { headers: sh })).json()).invoices[0];
+  expect(inv.dueDate).toBe(new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
+  let pay = (await (await request.get("/api/supplier-dashboard/payments", { headers: sh })).json()).payments.find(x => x.poId === poId);
+  expect(pay.state).toBe("received");
+  expect((await request.post(`/api/admin/supplier-invoices/${inv.id}/reject`, { headers: H(P), data: {} })).status()).toBe(400);
+  expect((await request.post(`/api/admin/supplier-invoices/${inv.id}/reject`, { headers: H(B), data: { note: "x" } })).status()).toBe(403);
+  expect((await request.post(`/api/admin/supplier-invoices/${inv.id}/reject`, { headers: H(P), data: { note: "GST amount is wrong" } })).status()).toBe(200);
+  pay = (await (await request.get("/api/supplier-dashboard/payments", { headers: sh })).json()).payments.find(x => x.poId === poId);
+  expect(pay.state).toBe("invoice_rejected"); expect(pay.note).toBe("GST amount is wrong");
+  // messages: contact details are blocked both ways
+  const say = (h, m) => request.post(`${base}/messages`, { headers: h, data: { message: m } });
+  expect((await say(sh, "call me on 9876543210")).status()).toBe(422);
+  expect((await say(sh, "mail me at a@b.com")).status()).toBe(422);
+  expect((await say(sh, "Dispatch is on Friday")).status()).toBe(201);
+  expect((await request.post(`/api/admin/supplier-pos/${poId}/messages`, { headers: H(P), data: { message: "ring 9876543210" } })).status()).toBe(422);
+  expect((await request.post(`/api/admin/supplier-pos/${poId}/messages`, { headers: H(P), data: { message: "Thanks, noted" } })).status()).toBe(201);
+  const thread = (await (await request.get(`${base}/messages`, { headers: sh })).json()).messages;
+  expect(thread.map(m => m.from)).toEqual(["supplier", "team"]);
+  expect(JSON.stringify(thread)).not.toMatch(/admin_id|9876/);
+});
+
 test("supplier payables: Procurement raises, Management approves, Finance pays - three different hands", async ({ request }) => {
   const poIds = {};
   for (const k of ["A", "B"]) poIds[k] = (await (await request.get("/api/supplier-dashboard/purchase-orders", { headers: SUP[k].sh })).json()).purchaseOrders[0].id;
   const raise = (h, k, data = {}) => request.post(`/api/admin/supplier-pos/${poIds[k]}/payable`, { headers: h, data });
   expect((await raise(H(B), "A")).status()).toBe(403);                       // Buyer Desk has nothing to do with supplier money
-  expect((await raise(H(P), "A", { amount: 99999 })).status()).toBe(409);     // cannot exceed the PO value
+  const noInv = await raise(H(P), "A");
+  expect(noInv.status()).toBe(409); expect((await noInv.json()).code).toBe("invoice_required");   // no payable without the supplier's invoice
+  expect((await supplierInvoice(request, SUP.A.sh, poIds.A, 99999)).status()).toBe(409);          // invoice above the PO value is refused
+  await sendAndAcceptInvoice(request, SUP.A.sh, H(P), poIds.A, 15200);
+  await sendAndAcceptInvoice(request, SUP.B.sh, H(P), poIds.B, 21600);
+  expect((await raise(H(P), "A", { amount: 99999 })).status()).toBe(409);     // cannot exceed the invoice
   const r = await raise(H(P), "A");
   expect(r.status()).toBe(201); expect((await r.json()).amount).toBe(15200);  // 400 x 38
   expect((await raise(H(P), "A")).status()).toBe(409);                        // one payable per PO
@@ -224,6 +276,14 @@ test("supplier payables: Procurement raises, Management approves, Finance pays -
   expect((await request.post(`/api/admin/payables/${pid}/approve`, { headers: H(M) })).status()).toBe(200);
   expect((await request.post(`/api/admin/payables/${pid}/pay`, { headers: H(M), data: { reference: "UTR1" } })).status()).toBe(403);   // only Finance pays
   expect((await request.post(`/api/admin/payables/${pid}/pay`, { headers: H(F), data: {} })).status()).toBe(400);
+  const early = await request.post(`/api/admin/payables/${pid}/pay`, { headers: H(F), data: { reference: "UTR-" + stamp } });
+  expect(early.status()).toBe(409); expect((await early.json()).code).toBe("not_due");      // 30 days credit: not before the due date
+  const pl = (await (await request.get("/api/admin/payables", { headers: H(P) })).json()).payables.find(x => x.id === pid);
+  const due = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+  expect(pl.dueDate).toBe(due);
+  expect((await request.post(`/api/admin/payables/${pid}/allow-early`, { headers: H(F), data: { reason: "x" } })).status()).toBeGreaterThanOrEqual(403);   // Finance cannot waive it
+  expect((await request.post(`/api/admin/payables/${pid}/allow-early`, { headers: H(M), data: {} })).status()).toBe(400);                              // needs a reason
+  expect((await request.post(`/api/admin/payables/${pid}/allow-early`, { headers: H(M), data: { reason: "Strategic supplier, agreed early" } })).status()).toBe(200);
   expect((await request.post(`/api/admin/payables/${pid}/pay`, { headers: H(F), data: { reference: "UTR-" + stamp } })).status()).toBe(200);
   const fin = (await (await request.get("/api/admin/payables?status=paid", { headers: H(F) })).json()).payables[0];
   expect(fin.status).toBe("paid"); expect(fin.paymentRef).toBe("UTR-" + stamp);
@@ -235,6 +295,9 @@ test("supplier payables: Procurement raises, Management approves, Finance pays -
   const self = await request.post(`/api/admin/payables/${oid}/approve`, { headers: H(M) });
   expect(self.status()).toBe(409); expect((await self.json()).error).toMatch(/segregation/i);
   expect((await request.post(`/api/admin/payables/${oid}/approve`, { headers: su })).status()).toBe(200);   // the owner can step in
+  const paidView = (await (await request.get("/api/supplier-dashboard/payments", { headers: SUP.A.sh })).json()).payments.find(x => x.poId === poIds.A);
+  expect(paidView.state).toBe("paid"); expect(paidView.reference).toBe("UTR-" + stamp);
+  expect(JSON.stringify(paidView)).not.toMatch(/raised|approved_by|margin/);
 });
 
 test("scorecards show speed and saving per person; only Management / Super Admin can read them", async ({ request }) => {
