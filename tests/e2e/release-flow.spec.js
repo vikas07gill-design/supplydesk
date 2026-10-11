@@ -260,3 +260,54 @@ test("UI: Management opens Scorecards; Finance sees payables on My Desk", async 
   await expect(page.locator("#detail")).toContainText("Saving %");
   await expect(page.locator("#detail tr", { hasText: /^procurement/ })).toContainText("8");
 });
+
+test("listing a product for a supplier: Procurement / Admin / Management can; the lister cannot approve their own listing", async ({ request }) => {
+  const body = (name) => ({ product_name: name, category: "Plastics & Polymers", subcategory: "Containers", description: "Listed by the team", moq: "100", unit: "pcs", monthly_capacity: 4000, available_capacity: 3000, capacity_unit: "pcs", lead_time_days: 9, origin_region: "Delhi" });
+  const post = (who, sid, data) => request.post(`/api/admin/suppliers/${sid}/products`, { headers: H(who), data });
+  // options: Procurement can read the supplier list, Finance and Buyer Desk cannot list
+  const opts = await request.get("/api/admin/supplier-options", { headers: H(P) });
+  expect(opts.status()).toBe(200);
+  expect((await opts.json()).suppliers.some(s => s.id === SUP.A.pid)).toBe(true);
+  expect((await post(F, SUP.A.pid, body("Finance listing"))).status()).toBe(403);
+  expect((await post(B, SUP.A.pid, body("Desk listing"))).status()).toBe(403);
+  // validation
+  expect((await post(P, SUP.A.pid, { ...body("x"), category: "Nope" })).status()).toBe(400);
+  expect((await post(P, "00000000-0000-0000-0000-000000000000", body("x"))).status()).toBe(404);
+  // Procurement lists it: pending, with a capability code
+  const name = `Team Listed ${stamp}`;
+  const r = await post(P, SUP.A.pid, body(name));
+  expect(r.status()).toBe(201);
+  const { id, capabilityCode } = await r.json();
+  expect(capabilityCode).toMatch(/^SD-/);
+  const row = (await (await request.get("/api/admin/products?status=pending", { headers: H(P) })).json()).products.find(p => p.id === id);
+  expect(row.status).toBe("pending");
+  expect(row.listed_by_admin).toBe(P.adminId);
+  // the lister cannot approve it; Management can, and the supplier sees it as approved
+  const self = await request.patch(`/api/admin/products/${id}`, { headers: H(P), data: { status: "approved" } });
+  expect(self.status()).toBe(409);
+  expect((await self.json()).code).toBe("self_approval");
+  expect((await request.patch(`/api/admin/products/${id}`, { headers: H(M), data: { status: "approved", capacityVerified: true } })).status()).toBe(200);
+  const mine = (await (await request.get("/api/supplier-dashboard/products", { headers: SUP.A.sh })).json()).products.find(p => p.id === id);
+  expect(mine.status).toBe("approved");
+  // the legacy Admin can list too, and Super Admin can approve it
+  const a = await post(ah["x-admin-token"], SUP.B.pid, body(`Admin Listed ${stamp}`));
+  expect(a.status()).toBe(201);
+  expect((await request.patch(`/api/admin/products/${(await a.json()).id}`, { headers: su, data: { status: "approved" } })).status()).toBe(200);
+});
+
+test("UI: Procurement opens Products, lists a product for a supplier and sees it in the queue", async ({ page }) => {
+  await page.addInitScript(([t, r]) => { sessionStorage.setItem("supplydesk_admin_token", t); sessionStorage.setItem("supplydesk_admin_role", r); }, [P.token, "procurement"]);
+  await page.goto("/admin.html");
+  await page.locator(".toolbar button", { hasText: /^Products$/ }).first().click();
+  await page.locator("#list button", { hasText: "List a product for a supplier" }).click();
+  await expect(page.locator("#detail h2")).toHaveText("List a product for a supplier");
+  const name = `UI Listed ${stamp}`;
+  await page.locator("#lpSup").selectOption(SUP.C.pid);
+  await page.locator("#lpName").fill(name);
+  await page.locator("#lpCat").selectOption("Plastics & Polymers");
+  await page.locator("#lpSub").selectOption("Containers");
+  await page.locator("#lpMonthly").fill("5000"); await page.locator("#lpAvail").fill("4000"); await page.locator("#lpCapUnit").selectOption("pcs");
+  await page.locator("#detail button", { hasText: "List product" }).click();
+  await expect(page.locator("#message")).toContainText("waiting for approval");
+  await expect(page.locator("#list")).toContainText(name);
+});

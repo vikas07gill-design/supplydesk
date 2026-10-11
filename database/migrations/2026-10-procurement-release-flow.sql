@@ -37,3 +37,6 @@ CREATE TABLE IF NOT EXISTS supplier_payables (
   UNIQUE KEY uq_payable_po (supplier_po_id),
   INDEX idx_payable_status (status, raised_at)
 ) ENGINE=InnoDB;
+
+-- Products listed by a team member on behalf of a supplier (the lister cannot approve their own listing).
+ALTER TABLE supplier_products ADD COLUMN IF NOT EXISTS listed_by_admin VARCHAR(120) NULL;

@@ -486,6 +486,8 @@ const DESK_POLICY={
     ["PATCH",/^\/api\/admin\/supplier-pos\/[^/]+\/cancel$/],
     ["*",/^\/api\/admin\/requirements\/[^/]+\/(capability-matches|matches|quotes|state)$/],
     ["GET",/^\/api\/admin\/(products|applications|supplier-updates|product-files|supplier-update-files|files)(\/.*)?$/],
+    ["GET",/^\/api\/admin\/supplier-options$/],
+    ["POST",/^\/api\/admin\/suppliers\/[^/]+\/products$/],
     ["*",/^\/api\/admin\/products\/[^/]+(\/capacity-verification|\/images)?$/]
   ],
   finance:[
@@ -3997,7 +3999,7 @@ app.get("/api/admin/products", requireAdmin, async (req,res)=>{
     const requested=clean(req.query.status,30);
     const status=["pending","approved","rejected","archived"].includes(requested)?requested:"all";
     const q=clean(req.query.q,200).toLowerCase();
-    let sql=`SELECT p.id,p.supplier_id,p.product_name,p.category,p.subcategory,p.description,p.moq,p.unit,p.market_scope,p.status,p.admin_notes,p.created_at,p.updated_at,
+    let sql=`SELECT p.id,p.supplier_id,p.product_name,p.category,p.subcategory,p.description,p.moq,p.unit,p.market_scope,p.status,p.admin_notes,p.created_at,p.updated_at,p.listed_by_admin,
                      s.legal_name,s.trade_name,s.country,s.city,s.business_email,s.verified,s.published
               FROM supplier_products p
               LEFT JOIN supplier_profiles s ON s.id=p.supplier_id
@@ -4067,11 +4069,54 @@ app.patch("/api/admin/suppliers/:id/onboarding", requireAdmin, async (req,res)=>
   finally{conn.release();}
 });
 
+// Suppliers a team member can list products for (approved, live suppliers only).
+app.get("/api/admin/supplier-options", requireAdmin, async (req,res)=>{
+  try{
+    const [rows]=await pool.execute("SELECT s.id,COALESCE(NULLIF(s.trade_name,''),s.legal_name) name,s.city,s.country FROM supplier_profiles s WHERE s.published=1 ORDER BY name LIMIT 500");
+    res.json({suppliers:rows});
+  }catch(error){console.error("Supplier options failed:",error);res.status(500).json({error:"Could not load suppliers."});}
+});
+
+// Super Admin / Management / Admin / Procurement list a product on behalf of a supplier. It goes into the normal
+// review queue (status pending); the person who listed it cannot approve it unless they are Management or Super Admin.
+app.post("/api/admin/suppliers/:supplierId/products", requireAdmin, async (req,res)=>{
+  if(!["super_admin","management","admin","procurement"].includes(req.admin.role)) return res.status(403).json({error:"Your role does not have access to this."});
+  const productName=clean(req.body?.product_name,255), category=clean(req.body?.category,180), subcategory=clean(req.body?.subcategory,180);
+  const description=clean(req.body?.description,3000)||null, moq=clean(req.body?.moq,120)||null, unit=clean(req.body?.unit,80)||null;
+  const marketScope=["Domestic","International","Both"].includes(req.body?.market_scope)?req.body.market_scope:"Both";
+  if(!productName||!category||!subcategory) return res.status(400).json({error:"Product name, category and sub-category are required."});
+  if(!catalog[category]||!catalog[category].includes(subcategory)) return res.status(400).json({error:"Invalid category or sub-category."});
+  const cap=parseCapacityInput(req.body);
+  if(cap.error) return res.status(400).json({error:cap.error});
+  const c=cap.values, hasCap=c.monthly_capacity!=null||c.available_capacity!=null||c.lead_time_days!=null;
+  try{
+    const supplierId=clean(req.params.supplierId,80);
+    const [[sup]]=await pool.execute("SELECT id FROM supplier_profiles WHERE id=? AND published=1",[supplierId]);
+    if(!sup) return res.status(404).json({error:"Supplier not found or not live yet."});
+    const id=crypto.randomUUID(); let code=null;
+    for(let attempt=0;attempt<8;attempt++){
+      code=newCapabilityCode(category);
+      try{
+        await pool.execute(
+          "INSERT INTO supplier_products (id,supplier_id,product_name,category,subcategory,description,moq,unit,market_scope,status,monthly_capacity,available_capacity,capacity_unit,lead_time_days,origin_region,capacity_updated_at,capability_code,listed_by_admin) VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,"+(hasCap?"NOW()":"NULL")+",?,?)",
+          [id,supplierId,productName,category,subcategory,description,moq,unit,marketScope,c.monthly_capacity,c.available_capacity,c.capacity_unit,c.lead_time_days,c.origin_region,code,req.admin.admin_id]
+        ); break;
+      }catch(e){ if(e?.code!=="ER_DUP_ENTRY"||attempt===7) throw e; }
+    }
+    await audit(pool,req,"product.listed_by_team","product",id,null,{supplierId,productName,category,subcategory});
+    res.status(201).json({ok:true,id,capabilityCode:code,message:"Product listed. It is waiting for approval."});
+  }catch(error){console.error("Team product listing failed:",error);res.status(500).json({error:"Could not list the product."});}
+});
+
 app.patch("/api/admin/products/:id", requireAdmin, async (req,res)=>{
   const status=clean(req.body?.status,30), notes=clean(req.body?.adminNotes,4000);
   if(!["approved","rejected","pending"].includes(status)) return res.status(400).json({error:"Invalid product status."});
   try{
     const pid=clean(req.params.id,80);
+    if(status==="approved"&&!["super_admin","management"].includes(req.admin.role)){
+      const [[lp]]=await pool.execute("SELECT listed_by_admin FROM supplier_products WHERE id=?",[pid]);
+      if(lp&&lp.listed_by_admin&&lp.listed_by_admin===req.admin.admin_id) return res.status(409).json({error:"You listed this product, so someone else has to approve it.",code:"self_approval"});
+    }
     // product_verified mirrors "approved". Capacity is verified separately (explicit flag here or the capacity-verification route).
     const [result]=await pool.execute("UPDATE supplier_products SET status=?,product_verified=IF(?='approved',1,0),capacity_verified=IF(?='approved',capacity_verified,0),admin_notes=?,reviewed_at=NOW(),reviewed_by=? WHERE id=?",[status,status,status,notes||null,req.admin.admin_id,pid]);
     if(status==="approved"&&req.body?.capacityVerified===true) await pool.execute("UPDATE supplier_products SET capacity_verified=1,capacity_verified_at=NOW() WHERE id=? AND monthly_capacity>0",[pid]);
@@ -4944,6 +4989,7 @@ async function ensureFlowSchema(){
   await add("sd_orders","plan_proposed_by VARCHAR(120) NULL");
   await add("sd_orders","plan_proposed_at DATETIME NULL");
   await add("sd_orders","single_source_note VARCHAR(300) NULL");
+  await add("supplier_products","listed_by_admin VARCHAR(120) NULL");
   await pool.query("CREATE TABLE IF NOT EXISTS sd_rate_quotes (id CHAR(36) PRIMARY KEY, sd_order_id CHAR(36) NOT NULL, capability_code VARCHAR(30) NOT NULL, supplier_id CHAR(36) NOT NULL, unit_rate DECIMAL(14,2) NOT NULL, lead_time_days INT NULL, note VARCHAR(300) NULL, created_by VARCHAR(120) NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uq_rate_quote (sd_order_id,capability_code)) ENGINE=InnoDB");
   {const fresh=await add("invoices","released_at DATETIME NULL");await add("invoices","released_by VARCHAR(120) NULL");
    // Invoices that existed before the release step were already visible to buyers.
