@@ -127,7 +127,14 @@ test("the whole journey, one order, every role", async ({ request, browser }) =>
   expect(sub.status()).toBe(200);
   await step(browser, "Procurement submits the final choice", "Procurement", "400 from the Rs 38 supplier and 600 from the Rs 36 supplier. Nothing goes to the suppliers yet.", { user: M, label: "Management - Sourcing plan (review)", go: sourcing() });
 
-  // 6. Release POs
+  // 6. Buyer pays the 50% advance, then the POs are released
+  const adv = await request.post(`/api/admin/orders/${w.orderId}/invoice`, { headers: H(F), data: { kind: "advance", gstRate: 18 } });
+  expect(adv.status()).toBe(201);
+  const advJ = await adv.json();
+  expect(advJ.kind).toBe("advance");
+  expect(advJ.subtotal).toBe(25000);   // 50% of the Rs 50,000 order
+  expect((await request.post(`/api/admin/sd-orders/${w.sdId}/sourcing-plan/confirm`, { headers: H(M), data: { lines: [{ capabilityCode: SUP.A.code, quantity: 1, unitCost: 1 }] } })).status()).toBe(409);   // advance not received yet
+  expect((await request.post(`/api/admin/invoices/${advJ.invoiceId}/payments`, { headers: H(F), data: { amount: advJ.total, method: "bank_transfer", reference: "ADV1" } })).status()).toBeLessThan(300);
   const draft = (await (await request.get(`/api/admin/sd-orders/${w.sdId}/sourcing-plan`, { headers: H(M) })).json()).draft;
   expect((await request.post(`/api/admin/sd-orders/${w.sdId}/sourcing-plan/confirm`, { headers: H(M), data: { lines: draft } })).status()).toBe(201);
   await step(browser, "Management releases the Supplier POs", "Management", "POs go to the two suppliers at the final rates, with SupplyDesk as the customer. Management now sees selling, buying and margin together.", { user: M, label: "Management - Sourcing plan (released)", go: sourcing() });
@@ -143,13 +150,19 @@ test("the whole journey, one order, every role", async ({ request, browser }) =>
   // 9. Billing
   const inv = await request.post(`/api/admin/orders/${w.orderId}/invoice`, { headers: H(F), data: { gstRate: 18 } });
   expect(inv.status()).toBe(201);
-  const invId = (await inv.json()).invoiceId;
+  const invJ = await inv.json(), invId = invJ.invoiceId;
+  expect(invJ.kind).toBe("final");
+  expect(invJ.subtotal).toBe(25000);   // the remaining 50%
   expect((await request.post(`/api/admin/invoices/${invId}/release`, { headers: H(F) })).status()).toBe(200);
-  await step(browser, "Finance issues the sale invoice and releases it to the team", "Finance", "Invoice for Rs 50,000 + 18% GST. It stays with Finance until released; now the Buyer Desk and the buyer can see it.", { user: B, label: "Buyer Desk - My desk", go: async () => {} });
+  await step(browser, "Finance issues the sale invoice and releases it to the team", "Finance", "Balance invoice for the other 50% (Rs 25,000 + 18% GST). It stays with Finance until released; now the Buyer Desk and the buyer can see it.", { user: B, label: "Buyer Desk - My desk", go: async () => {} });
 
-  // 10. Delivery by the Buyer Desk
+  // 10. Delivery by the Buyer Desk, only after the balance is paid
   for (const k of ["A", "B"]) { const id = (await (await request.get("/api/supplier-dashboard/purchase-orders", { headers: SUP[k].sh })).json()).purchaseOrders[0].id; for (const st of ["ready_for_dispatch", "dispatched", "completed"]) expect((await spo(request, SUP[k], id, st)).status()).toBe(200); }
-  for (const st of ["ready_for_transport", "transport_booked", "insurance_completed", "in_transit", "out_for_delivery", "delivered"]) expect((await request.post(`/api/admin/orders/${w.orderId}/stage`, { headers: H(B), data: { stage: st } })).status(), st).toBe(200);
+  for (const st of ["ready_for_transport", "transport_booked", "insurance_completed", "in_transit"]) expect((await request.post(`/api/admin/orders/${w.orderId}/stage`, { headers: H(B), data: { stage: st } })).status(), st).toBe(200);
+  const blocked = await request.post(`/api/admin/orders/${w.orderId}/stage`, { headers: H(B), data: { stage: "out_for_delivery" } });
+  expect(blocked.status()).toBe(409); expect((await blocked.json()).code).toBe("payment_pending");
+  expect((await request.post(`/api/admin/invoices/${invId}/payments`, { headers: H(F), data: { amount: invJ.total, method: "bank_transfer", reference: "BAL1" } })).status()).toBeLessThan(300);
+  for (const st of ["out_for_delivery", "delivered"]) expect((await request.post(`/api/admin/orders/${w.orderId}/stage`, { headers: H(B), data: { stage: st } })).status(), st).toBe(200);
   await step(browser, "Buyer Desk delivers", "Buyer Desk", "Bhavna arranged transport and insurance with the buyer and marked it delivered.", null);
 
   // 11. Money to suppliers

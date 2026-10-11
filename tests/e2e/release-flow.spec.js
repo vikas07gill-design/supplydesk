@@ -22,6 +22,7 @@ async function newRequirement(request, b, tag, qty = 1000) {
   expect(r.status()).toBe(201);
   return (await r.json()).requirementId;
 }
+const { payAdvance } = require("./pay");
 const review = (request, ah, id, data) => request.post(`/api/admin/requirements/${id}/review`, { headers: ah, data });
 
 // A supplier that is fully approved, with one verified product of the given free capacity.
@@ -147,6 +148,9 @@ test("Management releases the POs at the final rates; over-ceiling needs explici
   const draft = (await (await request.get(`/api/admin/sd-orders/${w.sdOrderId}/sourcing-plan`, { headers: H(M) })).json()).draft;
   const bad = await request.post(`/api/admin/sd-orders/${w.sdOrderId}/sourcing-plan/confirm`, { headers: H(M), data: { lines: draft.map(l => ({ ...l, unitCost: 45 })) } });
   expect(bad.status()).toBe(409); expect((await bad.json()).code).toBe("over_ceiling");
+  const noAdv = await request.post(`/api/admin/sd-orders/${w.sdOrderId}/sourcing-plan/confirm`, { headers: H(M), data: { lines: draft } });
+  expect(noAdv.status()).toBe(409); expect((await noAdv.json()).code).toBe("advance_pending");
+  await payAdvance(request, H(F), w.orderId);
   const rel = await request.post(`/api/admin/sd-orders/${w.sdOrderId}/sourcing-plan/confirm`, { headers: H(M), data: { lines: draft } });
   expect(rel.status()).toBe(201);
   const sj = await (await request.get(`/api/admin/sd-orders/${w.sdOrderId}/sourcing-plan`, { headers: su })).json();
@@ -183,18 +187,20 @@ test("QC hands the order to Finance and tells the Buyer Desk; Finance releases t
   expect(inv.status()).toBe(201);
   const iid = (await inv.json()).invoiceId;
   // not visible to the Buyer Desk or the buyer until released
-  expect((await (await request.get(`/api/admin/orders/${w.orderId}/invoice`, { headers: H(B) })).json()).invoices.length).toBe(0);
-  expect((await (await request.get("/api/buyer-invoices", { headers: w.b.h })).json()).invoices.length).toBe(0);
+  expect((await (await request.get(`/api/admin/orders/${w.orderId}/invoice`, { headers: H(B) })).json()).invoices.length).toBe(1);   // only the paid advance
+  expect((await (await request.get("/api/buyer-invoices", { headers: w.b.h })).json()).invoices.length).toBe(1);
   expect((await request.post(`/api/admin/invoices/${iid}/release`, { headers: H(B) })).status()).toBe(403);
   expect((await (await request.get("/api/admin/my-desk", { headers: H(F) })).json()).unreleased.length).toBe(1);
   expect((await request.post(`/api/admin/invoices/${iid}/release`, { headers: H(F) })).status()).toBe(200);
-  expect((await (await request.get(`/api/admin/orders/${w.orderId}/invoice`, { headers: H(B) })).json()).invoices.length).toBe(1);
-  expect((await (await request.get("/api/buyer-invoices", { headers: w.b.h })).json()).invoices.length).toBe(1);
+  expect((await (await request.get(`/api/admin/orders/${w.orderId}/invoice`, { headers: H(B) })).json()).invoices.length).toBe(2);
+  expect((await (await request.get("/api/buyer-invoices", { headers: w.b.h })).json()).invoices.length).toBe(2);
   // Buyer Desk now takes it to delivery
   for (const k of ["A", "B"]) { const id = (await (await request.get("/api/supplier-dashboard/purchase-orders", { headers: SUP[k].sh })).json()).purchaseOrders[0].id; for (const st of ["ready_for_dispatch"]) expect((await spo(request, SUP[k], id, st)).status()).toBe(200); }
   const stage = (h, s) => request.post(`/api/admin/orders/${w.orderId}/stage`, { headers: h, data: { stage: s } });
   expect((await stage(H(B), "qc_completed")).status()).toBe(403);
   expect((await stage(H(B), "ready_for_transport")).status()).toBe(200);
+  const bal = (await (await request.get(`/api/admin/orders/${w.orderId}/invoice`, { headers: H(F) })).json()).invoices.find(i => i.kind === "final");
+  expect(bal).toBeTruthy();
   const audits = (await (await request.get("/api/admin/audit", { headers: su })).json()).entries.map(e => e.action);
   for (const a of ["sd_order.ceiling_set", "sd_order.rate_quoted", "sd_order.plan_proposed", "invoice.released"]) expect(audits, a).toContain(a);
 });
@@ -239,7 +245,7 @@ test("scorecards show speed and saving per person; only Management / Super Admin
   expect(pr).toMatchObject({ assigned: 1, proposed: 1, released: 1 });
   expect(pr.avgSavingPct).toBe(8);               // final rates averaged 36.8 against a buy-below price of 40
   expect(pr.payablesRaised).toBe(1);
-  expect(d.finance.find(x => x.adminId === F.adminId)).toMatchObject({ invoices: 1, payablesPaid: 1 });
+  expect(d.finance.find(x => x.adminId === F.adminId)).toMatchObject({ invoices: 2, payablesPaid: 1 });
   expect(d.buyer.find(x => x.adminId === B.adminId).qcDone).toBe(1);
 });
 

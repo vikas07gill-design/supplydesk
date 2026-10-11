@@ -40,3 +40,5 @@ CREATE TABLE IF NOT EXISTS supplier_payables (
 
 -- Products listed by a team member on behalf of a supplier (the lister cannot approve their own listing).
 ALTER TABLE supplier_products ADD COLUMN IF NOT EXISTS listed_by_admin VARCHAR(120) NULL;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS advance_pct TINYINT NOT NULL DEFAULT 50;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS kind VARCHAR(10) NOT NULL DEFAULT 'full';

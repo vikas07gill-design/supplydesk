@@ -176,6 +176,12 @@ test.describe("Buyer PO -> SupplyDesk order -> Supplier PO", () => {
     expect((await request.post(`/api/admin/orders/${b1.orderId}/stage`, { headers: b1.bh, data: { stage: "ready_for_transport" } })).status()).toBeGreaterThanOrEqual(401);   // buyers cannot drive the timeline
     const refs = { transport_booked: "BKG-123", insurance_completed: "INS-9", in_transit: "TRK-555" };
     for (const s of ["ready_for_transport", "transport_booked", "insurance_completed", "in_transit", "out_for_delivery", "delivered", "order_closed"]) {
+      if (s === "out_for_delivery") {
+        const blocked = await stage(b1.orderId, s);
+        expect(blocked.status()).toBe(409); expect((await blocked.json()).code).toBe("payment_pending");
+        const bi = await (await request.post(`/api/admin/orders/${b1.orderId}/invoice`, { headers: ah, data: { gstRate: 18 } })).json();
+        expect((await request.post(`/api/admin/invoices/${bi.invoiceId}/payments`, { headers: ah, data: { amount: bi.total, method: "bank_transfer", reference: "PAID1" } })).status()).toBeLessThan(300);
+      }
       const r = await stage(b1.orderId, s, refs[s] ? { ref: refs[s] } : {});
       expect(r.status(), s).toBe(200);
       expect((await buyerOrder(request, b1)).stage).toBe(s);
