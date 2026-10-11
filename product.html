@@ -14,7 +14,7 @@ nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!i
 .visual:after{content:"SUPPLYDESK VERIFIED PRODUCT";color:#79e5e4;bottom:20px;left:20px}
 .shape{width:190px;height:190px;border-radius:42px;background:linear-gradient(145deg,#4be2d1,#2788e8 55%,#10395b);box-shadow:inset -22px -18px 35px rgba(0,0,0,.25),0 35px 65px rgba(0,0,0,.35);transform:rotateX(18deg) rotateY(-20deg) rotateZ(8deg);animation:productFloat 4s ease-in-out infinite}
 .visual .shape:before{content:"";position:absolute;inset:25px;border-radius:28px;border:1px solid rgba(255,255,255,.25);box-shadow:inset 0 0 30px rgba(255,255,255,.08)}
-.gallery{z-index:3}.gallery img{height:290px;max-width:290px;box-shadow:0 18px 40px rgba(0,0,0,.25)}
+.gallery.has-images{justify-content:safe center;align-items:center}.gallery.has-images img{width:min(320px,82%);height:300px;max-width:none;flex:0 0 auto}.visual:has(.gallery.has-images) .shape,.visual:has(.gallery.has-images):before{display:none}.gallery{z-index:3}.gallery img{height:290px;max-width:290px;box-shadow:0 18px 40px rgba(0,0,0,.25)}
 .hero h1{font-size:43px}.eyebrow{color:#078f9c;font-weight:900}.meta{font-weight:650}.tags .tag{background:linear-gradient(135deg,#eefaf9,#edf4ff);border:1px solid #dfebef}
 .actions .primary{background:linear-gradient(135deg,#16b9d1,#287bf4);border:0;box-shadow:0 12px 26px rgba(39,132,238,.23)}
 .info{border-radius:20px;box-shadow:0 12px 35px rgba(13,63,84,.05)}
@@ -78,6 +78,9 @@ function renderCapacity(product) {
   document.getElementById("capNote").textContent = note;
   document.getElementById("capacityPanel").style.display = "block";
 }
+function marketLabel(v) {
+  return ({ Both: "Domestic & export", Domestic: "Domestic", International: "Export" })[v] || v || "";
+}
 async function loadLiveProduct() {
   if (!liveId) {
     document.getElementById("name").textContent = "Product not found";
@@ -97,10 +100,10 @@ async function loadLiveProduct() {
     liveProduct = product;
     document.title = product.name + " | SupplyDesk";
     document.getElementById("name").textContent = product.name;
-    document.getElementById("meta").textContent = "📍 " + [product.region, product.city, product.country].filter(Boolean).join(", ") + (product.market_scope ? " · " + product.market_scope : "");
+    document.getElementById("meta").textContent = "📍 " + [product.region, product.city, product.country].filter(Boolean).join(", ") + (marketLabel(product.market_scope) ? " · " + marketLabel(product.market_scope) : "");
     if (product.capabilityCode) document.getElementById("capCode").textContent = "Capability ID: " + product.capabilityCode;
     renderCapacity(product);
-    document.getElementById("desc").textContent = product.description || ((product.category || "") + " · " + (product.subcategory || ""));
+    document.getElementById("desc").textContent = product.description || ([product.category, product.subcategory].filter(function(t) { return t && t !== "Other"; }).join(" · "));
     const gallery = document.getElementById("gallery");
     if ((product.images || []).length) {
       gallery.classList.add("has-images");
@@ -108,8 +111,8 @@ async function loadLiveProduct() {
         return '<img src="' + escapeHtml(image.url) + '" alt="' + escapeHtml(product.name) + '">';
       }).join("");
     }
-    document.querySelector(".tags").innerHTML = [product.category, product.subcategory, product.market_scope]
-      .filter(Boolean)
+    document.querySelector(".tags").innerHTML = [product.category, product.subcategory, marketLabel(product.market_scope)]
+      .filter(function(t) { return t && t !== "Other"; })
       .map(function(tag) { return '<span class="tag">' + escapeHtml(tag) + '</span>'; })
       .join("");
     document.getElementById("connectIntro").textContent =
