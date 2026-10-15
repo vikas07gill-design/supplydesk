@@ -1,0 +1,18 @@
+{
+  "appId": "in.supplydesk.app",
+  "appName": "SupplyDesk",
+  "webDir": "www",
+  "server": {
+    "url": "https://supplydesk.in",
+    "cleartext": false,
+    "allowNavigation": ["supplydesk.in", "*.supplydesk.in"],
+    "errorPath": "offline.html"
+  },
+  "ios": { "contentInset": "always", "backgroundColor": "#0B2540", "limitsNavigationsToAppBoundDomains": false },
+  "android": { "backgroundColor": "#0B2540", "allowMixedContent": false },
+  "plugins": {
+    "SplashScreen": { "launchShowDuration": 1200, "backgroundColor": "#0B2540", "showSpinner": false, "androidScaleType": "CENTER_INSIDE" },
+    "StatusBar": { "style": "DARK", "backgroundColor": "#0B2540" },
+    "Keyboard": { "resize": "body" }
+  }
+}

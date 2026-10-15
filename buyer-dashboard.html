@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Buyer Dashboard | SupplyDesk</title>
 <style>
 :root{--navy:#06182b;--blue:#287bf4;--teal:#16b9d1;--bg:#f4f9fc;--ink:#102a3a;--muted:#6f8792;--line:#dce9ee;--white:#fff}
@@ -156,4 +156,4 @@ async function saveProfile(){
 async function logout(){try{await fetch("/api/buyer-dashboard/logout",{method:"POST",headers:{"x-buyer-dashboard-token":token}})}catch(e){}localStorage.removeItem("supplydesk_buyer_dashboard_token");location.href="index.html"}
 load();
 </script>
-</body></html>
+<script src="assets/native-app.js" defer></script></body></html>

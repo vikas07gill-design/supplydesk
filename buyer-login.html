@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Buyer Login | SupplyDesk</title>
 <style>
 :root{--ink:#092438;--muted:#6b808a;--line:#dbe8ed;--bg:#f4f9fc;--brand:#087f8c;--blue:#287bf4}*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#eef8fb,#f8fbfd);font-family:Inter,system-ui,sans-serif;color:var(--ink);min-height:100vh}
@@ -86,4 +86,4 @@ async function verify(){
 }
 $("f").addEventListener("submit",e=>{e.preventDefault();sent?verify():sendCode()});
 $("resend").addEventListener("click",async()=>{$("email").readOnly=false;["company","contact","phone","country"].forEach(i=>{$(i).readOnly=false});sent=false;await sendCode()});
-</script></body></html>
+</script><script src="assets/native-app.js" defer></script></body></html>

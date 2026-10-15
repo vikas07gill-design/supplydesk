@@ -4557,7 +4557,12 @@ app.use((req, res, next) => {
     /^\/\.github(?:\/|$)/i,
     /^\/\.env(?:\.|$)/i,
     /^\/package(?:\.json|-lock\.json)$/i,
-    /^\/HOSTINGER_SETUP\.md$/i
+    /^\/HOSTINGER_SETUP\.md$/i,
+    /^\/DATABASE_ARCHITECTURE\.md$/i,
+    // server source, tests, configs, native app project and uploads are never public
+    /^\/(?:server|rfq|upload-optimize|taxonomy)\.js$/i,
+    /^\/(?:pw\.local\.config\.mjs|playwright\.config\.js)$/i,
+    /^\/(?:tests|mobile|supabase|private-uploads|node_modules|test-results)(?:\/|$)/i
   ];
   if (blocked.some(pattern => pattern.test(req.path))) return res.status(404).send("Not found");
   next();
