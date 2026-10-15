@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Supplier Dashboard | SupplyDesk</title>
 <meta name="description" content="Manage your SupplyDesk supplier profile, products, orders and payments.">
 <style>
@@ -943,5 +943,5 @@ fillCategorySelect();
 const initialTab=location.hash?location.hash.slice(1):"overview";
 if(token())loadDashboard();else showLogin();
 </script>
-</body>
+<script src="assets/native-app.js" defer></script></body>
 </html>

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#06182b">
 <link rel="icon" type="image/svg+xml" href="assets/supplydesk-icon.svg">
 <title>SupplyDesk | Global Supply Network</title>
@@ -71,12 +71,12 @@ footer{padding:30px 0;border-top:1px solid var(--line);color:#7a8e98;font-size:1
 
 <section class="section" style="padding-top:0"><div class="wrap"><div class="cta"><div class="cta-text"><span class="cta-eyebrow">Start sourcing</span><h2>Have a product to source?</h2><p>Post your requirement and SupplyDesk will come back with one clear quotation.</p><ul class="cta-points"><li>Vetted manufacturer network</li><li>One quotation, one invoice</li><li>Order tracking in your dashboard</li></ul></div><div class="cta-actions"><a class="btn primary" href="#search">Start Searching →</a><a class="btn cta-ghost" href="requirement.html">Post your requirement</a></div></div></div></section>
 
-<footer><div class="wrap footerin"><div>© 2026 SupplyDesk · Global Procurement Partner</div><div class="footerlinks"><a href="search.html">Search</a><a href="services.html">Services</a><a href="buyer-login.html">Buyer Login</a><a href="supplier-dashboard.html">Supplier Login</a><a href="#how">How it works</a></div></div></footer>
+<footer><div class="wrap footerin"><div>© 2026 SupplyDesk · Global Procurement Partner</div><div class="footerlinks"><a href="privacy.html">Privacy</a><a href="search.html">Search</a><a href="services.html">Services</a><a href="buyer-login.html">Buyer Login</a><a href="supplier-dashboard.html">Supplier Login</a><a href="#how">How it works</a></div></div></footer>
 <script>
 let searchType="product";
 document.querySelectorAll(".search-tab").forEach(tab=>tab.addEventListener("click",()=>{document.querySelectorAll(".search-tab").forEach(x=>x.classList.remove("active"));tab.classList.add("active");searchType=tab.dataset.searchType||"product";document.getElementById("product").placeholder=searchType==="supplier"?"Search suppliers or business names...":searchType==="category"?"Search industries or categories...":"Search products, materials or keywords...";}));
 function searchDemo(){const q=document.getElementById("product").value.trim();if(!q){document.getElementById("product").focus();return}location.href="search.html?q="+encodeURIComponent(q)+(searchType&&searchType!=="product"?"&type="+encodeURIComponent(searchType):"")}
 function quick(q){document.getElementById("product").value=q;searchDemo()}
 </script>
-<script src="assets/authnav.js" defer></script></body>
+<script src="assets/authnav.js" defer></script><script src="assets/native-app.js" defer></script></body>
 </html>
