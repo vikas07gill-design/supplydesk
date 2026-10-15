@@ -1405,6 +1405,46 @@ app.post("/api/buyer-dashboard/logout", requireBuyerDashboard, async(req,res)=>{
   res.json({ok:true});
 });
 
+// ---- Account deletion (App Store / Play Store requirement) ----
+// Personal data is erased; commercial records (orders, invoices, payments, POs) are retained in anonymised form
+// because tax and accounting law requires it. Accounts with live orders / unsettled money cannot be deleted yet.
+const DELETE_WORD="DELETE";
+function deletedEmail(id){return "deleted+"+String(id).replace(/[^a-z0-9]/gi,"").slice(0,24)+"@deleted.invalid";}
+
+app.post("/api/buyer-dashboard/delete-account", requireBuyerDashboard, async(req,res)=>{
+  if(clean(req.body?.confirm,20)!==DELETE_WORD) return res.status(400).json({error:"Type "+DELETE_WORD+" to confirm account deletion.",code:"confirm_required"});
+  const conn=await pool.getConnection();
+  try{
+    await conn.beginTransaction();
+    const id=req.buyer.id;
+    const [[openOrders]]=await conn.execute("SELECT COUNT(*) n FROM orders WHERE buyer_id=? AND status<>'cancelled' AND COALESCE(stage,'order_received') NOT IN ('delivered','order_closed')",[id]);
+    const [[unpaid]]=await conn.execute("SELECT COUNT(*) n FROM invoices WHERE buyer_id=? AND status IN ('issued','partially_paid')",[id]);
+    if(openOrders.n>0||unpaid.n>0){
+      await conn.rollback();
+      return res.status(409).json({error:"You have "+(openOrders.n?openOrders.n+" open order(s)":"")+(openOrders.n&&unpaid.n?" and ":"")+(unpaid.n?unpaid.n+" unpaid invoice(s)":"")+". Please complete them or contact support@supplydesk.in before deleting your account.",code:"open_orders",openOrders:openOrders.n,unpaidInvoices:unpaid.n});
+    }
+    // Close any requirement that is still in progress so the team stops working on it.
+    const [rfqs]=await conn.execute("SELECT id,rfq_state,status FROM buyer_requirements WHERE buyer_id=?",[id]);
+    for(const r of rfqs){
+      const st=r.rfq_state||RFQ.LEGACY_STATUS_TO_STATE[r.status]||"submitted";
+      if(RFQ.isTerminal(st)) continue;
+      try{await moveRfq(conn,{buyer:{id},ip:req.ip},r.id,"cancelled","account deleted by buyer");await conn.execute("UPDATE buyer_requirements SET status='cancelled',updated_at=NOW() WHERE id=?",[r.id]);}catch(e){if(!(e instanceof RfqError))throw e;}
+    }
+    const oldEmail=req.buyer.email;
+    await conn.execute("UPDATE buyers SET email=?,name='Deleted buyer',company=NULL,country=NULL,phone=NULL,last_seen=NULL WHERE id=?",[deletedEmail(id),id]);
+    await conn.execute("DELETE FROM buyer_dashboard_tokens WHERE buyer_id=?",[id]);
+    await conn.execute("DELETE FROM buyer_email_otps WHERE LOWER(TRIM(email))=LOWER(TRIM(?))",[oldEmail]);
+    await conn.execute("UPDATE buyer_enquiries SET message=NULL,buyer_remark=NULL WHERE buyer_id=?",[id]);
+    await audit(conn,{buyer:{id},ip:req.ip},"buyer.account_deleted","buyer",id,null,{retained:"orders, invoices, payments (anonymised)"});
+    await conn.commit();
+    res.json({ok:true});
+  }catch(error){
+    await conn.rollback();
+    console.error("Buyer account deletion failed:",error);
+    res.status(500).json({error:"Could not delete the account. Please contact support@supplydesk.in."});
+  }finally{conn.release();}
+});
+
 // Buyer / supplier quick-signup fields (company, contact, mobile, country). Documents are never collected at signup.
 function readSignupFields(body){
   const company=clean(body?.company,180), contact=clean(body?.contact,180), phone=clean(body?.phone,40), country=clean(body?.country,100);
@@ -3726,6 +3766,39 @@ app.post("/api/supplier-dashboard/logout", requireSupplierDashboard, async (req,
   const rawToken=clean(req.get("x-supplier-dashboard-token"),128);
   await pool.execute("UPDATE supplier_dashboard_tokens SET revoked_at=NOW() WHERE token_hash=?",[dashboardTokenHash(rawToken)]);
   res.json({ok:true});
+});
+
+app.post("/api/supplier-dashboard/delete-account", requireSupplierDashboard, async (req,res) => {
+  if(clean(req.body?.confirm,20)!==DELETE_WORD) return res.status(400).json({error:"Type "+DELETE_WORD+" to confirm account deletion.",code:"confirm_required"});
+  const conn=await pool.getConnection();
+  const files=[];
+  try{
+    await conn.beginTransaction();
+    const id=req.supplier.id, appId=req.supplier.application_id;
+    const [[openPos]]=await conn.execute("SELECT COUNT(*) n FROM supplier_pos WHERE supplier_id=? AND status NOT IN ('declined','cancelled','completed')",[id]);
+    const [[openMoney]]=await conn.execute("SELECT COUNT(*) n FROM supplier_payables WHERE supplier_id=? AND status IN ('pending_approval','approved')",[id]);
+    const [[openInv]]=await conn.execute("SELECT COUNT(*) n FROM supplier_invoices WHERE supplier_id=? AND status='submitted'",[id]);
+    if(openPos.n>0||openMoney.n>0||openInv.n>0){
+      await conn.rollback();
+      return res.status(409).json({error:"You still have live purchase orders or unsettled payments ("+openPos.n+" open PO, "+(openMoney.n+openInv.n)+" pending payment item). Please complete them or contact support@supplydesk.in before deleting your account.",code:"open_orders",openPos:openPos.n,pendingPayments:openMoney.n+openInv.n});
+    }
+    const gone=deletedEmail(id);
+    const [docs]=await conn.execute("SELECT relative_path FROM supplier_files WHERE application_id=?",[appId]);
+    docs.forEach(d=>files.push(d.relative_path));
+    await conn.execute("DELETE FROM supplier_files WHERE application_id=?",[appId]);
+    await conn.execute("UPDATE supplier_profiles SET legal_name='Deleted supplier',trade_name=NULL,address='-',website=NULL,business_email=?,business_phone='-',contact_person='-',designation=NULL,profile_details_json=NULL,wizard_json=NULL,verified=0,published=0,onboarding_status='account_deleted',status_updated_at=NOW() WHERE id=?",[gone,id]);
+    await conn.execute("UPDATE supplier_applications SET legal_name='Deleted supplier',trade_name=NULL,address='-',website=NULL,business_email=?,business_phone='-',contact_person='-',designation=NULL,registration_number=NULL,tax_number=NULL,import_export_number=NULL,certification_details=NULL WHERE id=?",[gone,appId]);
+    await conn.execute("DELETE FROM supplier_dashboard_tokens WHERE supplier_id=?",[id]);
+    await conn.execute("DELETE FROM supplier_dashboard_otps WHERE supplier_id=?",[id]);
+    await audit(conn,{supplier:{id},ip:req.ip},"supplier.account_deleted","supplier",id,null,{retained:"purchase orders, invoices, payables (anonymised)"});
+    await conn.commit();
+    for(const rel of files){try{const abs=path.resolve(UPLOAD_DIR,rel);if(abs.startsWith(path.resolve(UPLOAD_DIR)+path.sep))fs.rmSync(abs,{force:true});}catch{}}
+    res.json({ok:true});
+  }catch(error){
+    await conn.rollback();
+    console.error("Supplier account deletion failed:",error);
+    res.status(500).json({error:"Could not delete the account. Please contact support@supplydesk.in."});
+  }finally{conn.release();}
 });
 
 app.post("/api/supplier-dashboard/profile-update", requireSupplierDashboard, async (req,res) => {

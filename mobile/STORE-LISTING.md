@@ -6,7 +6,7 @@
 
 ## 2. Must be ready before you submit (both stores)
 1. **Privacy policy URL**: `https://supplydesk.in/privacy.html` (draft written; please have it reviewed and confirm the support email).
-2. **Account deletion**: both stores require users to be able to ask for deletion. The policy page says "email support@supplydesk.in". Apple prefers an in-app option; a "Delete my account" button on the buyer and supplier dashboards is the next build item.
+2. **Account deletion**: DONE. Buyer and Supplier dashboards have an in-app "Delete my account" button (type DELETE to confirm). Personal data is erased; orders/invoices/payments stay anonymised (tax law). In the store forms, give the privacy policy URL as the deletion URL as well.
 3. **Demo login for the reviewers** (Apple and Google both ask). Create a test buyer and a test supplier and give the credentials in the review notes. Buyers sign in by email OTP, so create a reviewer account that has a fixed, documented code or a pre-verified session.
 4. **Screenshots**: iPhone 6.7" (1290x2796), iPhone 6.5", iPad 13" if you support iPad; Android phone (min 2 images). Take them from the real app.
 5. **Short + full description**, category **Business**, age rating (no objectionable content; 4+ / Everyone).

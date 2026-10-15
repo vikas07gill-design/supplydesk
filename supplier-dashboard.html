@@ -264,6 +264,11 @@ header{background:rgba(5,20,35,.92);color:#fff;border-bottom:1px solid rgba(255,
           </div>
         </form>
       </div>
+      <div class="card" id="deleteAccountCard" style="margin-top:14px;border-color:#f0c4c4">
+        <h3 style="margin:0 0 6px">Delete my account</h3>
+        <p class="muted" style="margin:0 0 10px">Your business details, contact information, uploaded documents and login are permanently erased. Purchase orders, invoices and payment records are kept in anonymised form because tax law requires it. This cannot be undone.</p>
+        <button class="btn" type="button" style="color:#b42318;border-color:#b42318" onclick="deleteMyAccount()">Delete my account</button>
+      </div>
     </section>
 
     <section id="tab-documents" class="tab-panel">
@@ -934,6 +939,15 @@ async function onbSubmit(){
   catch(e){onbMsg(e.message,false);}
 }
 
+async function deleteMyAccount(){
+  if(!confirm("Delete your SupplyDesk supplier account permanently? This cannot be undone."))return;
+  const word=prompt("Type DELETE to confirm.");
+  if(word!=="DELETE")return;
+  try{await api("/api/supplier-dashboard/delete-account",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirm:"DELETE"})});
+    try{dashboardStorage.removeItem(dashboardKey)}catch{}
+    showLogin("Your account has been deleted.");
+  }catch(e){alert(e.message)}
+}
 async function logout(){try{await api("/api/supplier-dashboard/logout",{method:"POST"})}catch{}dashboardStorage.removeItem(dashboardKey);showLogin("You have signed out.");}
 document.getElementById("productImages").addEventListener("change",e=>{
   document.getElementById("imagePreview").innerHTML=Array.from(e.target.files).slice(0,6).map(f=>'<div><img src="'+URL.createObjectURL(f)+'" alt=""><div class="image-note">'+esc(f.name)+'</div></div>').join("");
