@@ -3836,6 +3836,12 @@ app.post("/api/supplier-dashboard/profile-update", requireSupplierDashboard, asy
   }
 });
 
+// Suppliers never create, edit, delete or photograph products: only the SupplyDesk team lists them (admin routes).
+app.all(["/api/supplier-dashboard/products","/api/supplier-dashboard/products/:id","/api/supplier-dashboard/products/:id/images","/api/supplier-dashboard/products/:productId/images/:imageId"],(req,res,next)=>{
+  if(req.method==="GET"||req.method==="HEAD") return next();
+  if(req.method==="PATCH"&&/\/capacity$/.test(req.path)) return next();
+  return requireSupplierDashboard(req,res,()=>listingLocked(req,res));
+});
 const listingLocked=(req,res)=>res.status(403).json({error:"Products are listed by SupplyDesk. Please send your product details to the SupplyDesk team.",code:"listing_locked"});
 app.get("/api/supplier-dashboard/products", requireSupplierDashboard, async (req,res) => {
   const [products]=await pool.execute(
@@ -3848,57 +3854,6 @@ app.get("/api/supplier-dashboard/products", requireSupplierDashboard, async (req
   res.json({products});
 });
 
-app.post("/api/supplier-dashboard/products", requireSupplierDashboard, listingLocked, async (req,res) => {
-  const productName=clean(req.body?.product_name,255);
-  const category=clean(req.body?.category,180);
-  const subcategory=clean(req.body?.subcategory,180);
-  const description=clean(req.body?.description,3000)||null;
-  const moq=clean(req.body?.moq,120)||null;
-  const unit=clean(req.body?.unit,80)||null;
-  const marketScope=["Domestic","International","Both"].includes(req.body?.market_scope)?req.body.market_scope:"Both";
-  if(!productName||!category||!subcategory) return res.status(400).json({error:"Product name, category and sub-category are required."});
-  if(!catalog[category]||!catalog[category].includes(subcategory)) return res.status(400).json({error:"Invalid category or sub-category."});
-  const cap=parseCapacityInput(req.body);
-  if(cap.error) return res.status(400).json({error:cap.error});
-  const c=cap.values, hasCap=c.monthly_capacity!=null||c.available_capacity!=null||c.lead_time_days!=null;
-  try{
-    const id=crypto.randomUUID();
-    let code=null;
-    for(let attempt=0;attempt<8;attempt++){
-      code=newCapabilityCode(category);
-      try{
-        await pool.execute(
-          "INSERT INTO supplier_products (id,supplier_id,product_name,category,subcategory,description,moq,unit,market_scope,status,monthly_capacity,available_capacity,capacity_unit,lead_time_days,origin_region,capacity_updated_at,capability_code) VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,"+(hasCap?"NOW()":"NULL")+",?)",
-          [id,req.supplier.id,productName,category,subcategory,description,moq,unit,marketScope,c.monthly_capacity,c.available_capacity,c.capacity_unit,c.lead_time_days,c.origin_region,code]
-        ); break;
-      }catch(e){ if(e?.code!=="ER_DUP_ENTRY"||attempt===7) throw e; }
-    }
-    res.status(201).json({ok:true,id,capabilityCode:code,message:"Product submitted for SupplyDesk review."});
-  }catch(error){
-    console.error("Supplier product create failed:",error);
-    res.status(500).json({error:"Could not add product."});
-  }
-});
-
-app.patch("/api/supplier-dashboard/products/:id", requireSupplierDashboard, listingLocked, async (req,res) => {
-  const id=clean(req.params.id,80);
-  const [[product]]=await pool.execute("SELECT * FROM supplier_products WHERE id=? AND supplier_id=? AND status <> 'archived'",[id,req.supplier.id]);
-  if(!product) return res.status(404).json({error:"Product not found."});
-  const fields={};
-  for(const key of ["product_name","category","subcategory","description","moq","unit"]){
-    if(Object.prototype.hasOwnProperty.call(req.body||{},key)) fields[key]=clean(req.body[key], key==="description"?3000:500)||null;
-  }
-  if(Object.prototype.hasOwnProperty.call(req.body||{},"market_scope")) fields.market_scope=["Domestic","International","Both"].includes(req.body.market_scope)?req.body.market_scope:"Both";
-  const category=fields.category||product.category, subcategory=fields.subcategory||product.subcategory;
-  if(!catalog[category]||!catalog[category].includes(subcategory)) return res.status(400).json({error:"Invalid category or sub-category."});
-  const keys=Object.keys(fields);
-  if(!keys.length) return res.status(400).json({error:"No changes submitted."});
-  const set=keys.map(k=>k+"=?").join(",");
-  await pool.execute("UPDATE supplier_products SET "+set+", status='pending', product_verified=0, admin_notes=NULL, reviewed_at=NULL, reviewed_by=NULL WHERE id=? AND supplier_id=?",[...keys.map(k=>fields[k]),id,req.supplier.id]);
-  res.json({ok:true,message:"Product changes submitted for review."});
-});
-
-// Capacity and lead time change often, so updating them does not send the listing back for review.
 app.patch("/api/supplier-dashboard/products/:id/capacity", requireSupplierDashboard, async (req,res) => {
   const id=clean(req.params.id,80);
   const cap=parseCapacityInput(req.body);
@@ -3920,25 +3875,6 @@ app.patch("/api/supplier-dashboard/products/:id/capacity", requireSupplierDashbo
   }catch(error){console.error("Capacity update failed:",error);res.status(500).json({error:"Could not update capacity."});}
 });
 
-app.delete("/api/supplier-dashboard/products/:id", requireSupplierDashboard, listingLocked, async (req,res) => {
-  const [result]=await pool.execute("UPDATE supplier_products SET status='archived' WHERE id=? AND supplier_id=?",[clean(req.params.id,80),req.supplier.id]);
-  if(!result.affectedRows) return res.status(404).json({error:"Product not found."});
-  res.json({ok:true});
-});
-
-app.post("/api/supplier-dashboard/products/:id/images", requireSupplierDashboard, listingLocked, (req,res,next)=>productImageUpload.array("productImages",6)(req,res,next), optimizeUploads({allowPdf:false}), async (req,res)=>{
-  const productId=clean(req.params.id,80);
-  try{
-    const [[product]]=await pool.execute("SELECT id FROM supplier_products WHERE id=? AND supplier_id=? AND status <> 'archived'",[productId,req.supplier.id]);
-    if(!product){for(const f of (req.files||[]))fs.rmSync(f.path,{force:true});return res.status(404).json({error:"Product not found."});}
-    if(!req.files?.length)return res.status(400).json({error:"Please select at least one product image."});
-    const rows=req.files.map(f=>[crypto.randomUUID(),productId,clean(f.originalname,255),path.basename(f.path),path.relative(UPLOAD_DIR,f.path).split(path.sep).join("/"),f.mimetype,f.size,"pending"]);
-    await pool.query("INSERT INTO supplier_product_files (id,product_id,original_name,stored_name,relative_path,mime_type,file_size,status) VALUES ?",[rows]);
-    await pool.execute("UPDATE supplier_products SET status='pending',admin_notes=NULL,reviewed_at=NULL,reviewed_by=NULL WHERE id=? AND supplier_id=?",[productId,req.supplier.id]);
-    res.status(201).json({ok:true,message:"Images uploaded. The product is back in review and will be published after SupplyDesk approval."});
-  }catch(error){for(const f of (req.files||[]))fs.rmSync(f.path,{force:true});console.error(error);res.status(500).json({error:"Could not upload product images."});}
-});
-
 app.get("/api/supplier-dashboard/products/:productId/images/:imageId", requireSupplierDashboard, async (req,res)=>{
   try{
     const [[f]]=await pool.execute("SELECT f.relative_path,f.original_name,f.mime_type FROM supplier_product_files f JOIN supplier_products p ON p.id=f.product_id WHERE f.id=? AND f.product_id=? AND p.supplier_id=? AND f.status <> 'archived'",[clean(req.params.imageId,80),clean(req.params.productId,80),req.supplier.id]);
@@ -3947,14 +3883,6 @@ app.get("/api/supplier-dashboard/products/:productId/images/:imageId", requireSu
     if(!absolute.startsWith(root+path.sep)||!fs.existsSync(absolute))return res.status(404).json({error:"Image not found."});
     res.setHeader("Content-Type",f.mime_type);res.setHeader("Content-Disposition",`inline; filename="${f.original_name.replace(/["\\]/g,"")}"`);res.sendFile(absolute);
   }catch(error){res.status(500).json({error:"Could not load image."});}
-});
-
-app.delete("/api/supplier-dashboard/products/:productId/images/:imageId", requireSupplierDashboard, listingLocked, async (req,res)=>{
-  try{
-    const [[f]]=await pool.execute("SELECT f.id FROM supplier_product_files f JOIN supplier_products p ON p.id=f.product_id WHERE f.id=? AND f.product_id=? AND p.supplier_id=? AND f.status <> 'archived'",[clean(req.params.imageId,80),clean(req.params.productId,80),req.supplier.id]);
-    if(!f)return res.status(404).json({error:"Image not found."});
-    await pool.execute("UPDATE supplier_product_files SET status='archived' WHERE id=?",[f.id]);res.json({ok:true});
-  }catch(error){res.status(500).json({error:"Could not remove image."});}
 });
 
 app.get("/api/products/:productId/images/:imageId", async (req,res)=>{

@@ -304,37 +304,10 @@ header{background:rgba(5,20,35,.92);color:#fff;border-bottom:1px solid rgba(255,
 <div class="actions"><button class="btn primary" type="submit" id="capBtn">Save capacity</button></div>
 <div class="image-note">Capacity updates go live immediately and do not need re-approval. Keep it current: listings not updated for 45 days show as "being reconfirmed".</div>
 </form></div></div>
-<div id="productModal" class="hidden" style="position:fixed;inset:0;background:rgba(8,32,42,.42);z-index:50;padding:20px;overflow:auto">
-<div class="login" style="max-width:650px;margin:7vh auto">
-<div class="card-head"><div><div class="eyebrow">Product listing</div><h2 id="productTitle">Add Product</h2></div><button class="btn" onclick="closeProduct()">Close</button></div>
-<form id="productForm">
-<input type="hidden" id="productId">
-<div class="field"><label>Product name *</label><input id="productName" required></div>
-<div class="profile-grid">
-<div class="field"><label>Category *</label><select id="productCategory" required></select></div>
-<div class="field"><label>Sub-category *</label><select id="productSubcategory" required></select></div>
-<div class="field"><label>MOQ</label><input id="productMoq" placeholder="Example: 500 pcs"></div>
-<div class="field"><label>Unit</label><input id="productUnit" placeholder="pcs / kg / ton / set"></div>
-<div class="field"><label>Monthly capacity</label><input id="productMonthlyCap" inputmode="numeric" placeholder="Example: 500000"></div>
-<div class="field"><label>Available capacity now</label><input id="productAvailableCap" inputmode="numeric" placeholder="Example: 180000"></div>
-<div class="field"><label>Capacity unit</label><select id="productCapUnit"><option value="">Select</option><option>pcs</option><option>kg</option><option>tons</option><option>meters</option><option>sets</option><option>units</option><option>liters</option><option>boxes</option><option>pairs</option><option>sq.m</option></select></div>
-<div class="field"><label>Lead time (days)</label><input id="productLeadTime" inputmode="numeric" placeholder="Example: 25"></div>
-<div class="field full"><label>Manufacturing region / state</label><input id="productRegion" placeholder="Example: Jiangsu, Gujarat"><div class="image-note">Buyers see capacity as a range plus your region. Your company name and contact details are never shown to buyers.</div></div>
-<div class="field full"><label>Market</label><select id="productMarket"><option>Both</option><option>Domestic</option><option>International</option></select></div>
-<div class="field full"><label>Description</label><textarea id="productDescription" placeholder="Tell buyers what you supply, specifications, capacity or key details."></textarea></div>
-<div class="field full"><label>Product images</label><input id="productImages" type="file" accept="image/jpeg,image/png,image/webp" multiple><div class="image-note">Up to 6 images, max 5 MB each. Images are reviewed before becoming public.</div><div id="imagePreview" class="product-images"></div></div>
-</div>
-<div id="productStatus" class="notice hidden"></div>
-<div class="actions"><button class="btn primary" type="submit" id="productBtn">Submit for Review</button></div>
-</form>
-</div>
-</div>
-
 <script src="/assets/taxonomy.js"></script>
 <script>
 const dashboardKey="supplydesk_supplier_dashboard_token";
 const dashboardStorage=sessionStorage;
-const catalog=SD_TAX.subs;
 let dashboardData=null;
 
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
@@ -641,50 +614,6 @@ function toggleCompanyEditor(force){
   if(open)document.getElementById("pLegal")?.focus();
 }
 
-function fillCategorySelect(){
-  const cat=document.getElementById("productCategory"),sub=document.getElementById("productSubcategory");
-  cat.innerHTML=Object.keys(catalog).map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join("");
-  function fill(){sub.innerHTML=(catalog[cat.value]||[]).map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join("")}
-  cat.onchange=fill;fill();
-}
-let productFormMode="add";
-function openProduct(product,mode){
-  productFormMode=mode|| (product?"edit":"add");
-  fillCategorySelect();document.getElementById("productModal").classList.remove("hidden");
-  document.getElementById("productTitle").textContent=productFormMode==="copy"?"Copy Product":product?"Edit Product":"Add Product";
-  document.getElementById("productId").value=product?.id||"";
-  document.getElementById("productName").value=product?.product_name||"";
-  document.getElementById("productCategory").value=product?.category||dashboardData.supplier.category;
-  document.getElementById("productCategory").dispatchEvent(new Event("change"));
-  document.getElementById("productSubcategory").value=product?.subcategory||dashboardData.supplier.subcategory;
-  document.getElementById("productMoq").value=product?.moq||"";
-  document.getElementById("productUnit").value=product?.unit||"";
-  document.getElementById("productMarket").value=product?.market_scope||"Both";
-  document.getElementById("productMonthlyCap").value=product?.monthly_capacity??"";
-  document.getElementById("productAvailableCap").value=product?.available_capacity??"";
-  document.getElementById("productCapUnit").value=product?.capacity_unit||"";
-  document.getElementById("productLeadTime").value=product?.lead_time_days??"";
-  document.getElementById("productRegion").value=product?.origin_region||"";
-  document.getElementById("productDescription").value=product?.description||"";
-  document.getElementById("productImages").value="";
-  document.getElementById("imagePreview").innerHTML=(product?.images||[]).filter(x=>x.status!=="archived").map(x=>'<img data-modal-image="'+esc(x.id)+'" data-product-id="'+esc(product.id)+'" alt="">').join("");
-  hydrateModalImages(product?.id);
-  document.getElementById("productStatus").classList.add("hidden");
-}
-async function hydrateModalImages(productId){
-  document.querySelectorAll("[data-modal-image]").forEach(async img=>{
-    try{const r=await fetch("/api/supplier-dashboard/products/"+encodeURIComponent(productId)+"/images/"+encodeURIComponent(img.dataset.modalImage),{headers:{"x-supplier-dashboard-token":token()}});if(r.ok){const b=await r.blob();img.src=URL.createObjectURL(b);}}catch{}
-  });
-}
-function closeProduct(){document.getElementById("productModal").classList.add("hidden")}
-function findProduct(id){return (dashboardData.products||[]).find(x=>x.id===id)}
-function editProduct(id){const p=findProduct(id);if(p)openProduct(p,"edit")}
-function copyProduct(id){
-  const p=findProduct(id);
-  if(!p)return;
-  openProduct({...p,id:"",product_name:p.product_name},"copy");
-}
-async function archiveProduct(id){if(!confirm("Remove this product from your public listings?"))return;try{await api("/api/supplier-dashboard/products/"+id,{method:"DELETE"});await loadDashboard()}catch(e){alert(e.message)}}
 
 let otpRequestGeneration=0;
 let otpRequestReady=false;
@@ -773,25 +702,6 @@ document.getElementById("verifyOtpBtn").onclick=async()=>{
   }finally{
     clearTimeout(timer);btn.disabled=false;btn.textContent="Verify OTP →";
   }
-};
-
-document.getElementById("productForm").onsubmit=async e=>{
-  e.preventDefault();const id=document.getElementById("productId").value;const btn=document.getElementById("productBtn"),s=document.getElementById("productStatus");btn.disabled=true;btn.textContent="Saving...";
-  const body={product_name:document.getElementById("productName").value.trim(),category:document.getElementById("productCategory").value,subcategory:document.getElementById("productSubcategory").value,moq:document.getElementById("productMoq").value.trim(),unit:document.getElementById("productUnit").value.trim(),market_scope:document.getElementById("productMarket").value,description:document.getElementById("productDescription").value.trim()};
-  const capBody={monthly_capacity:document.getElementById("productMonthlyCap").value.trim(),available_capacity:document.getElementById("productAvailableCap").value.trim(),capacity_unit:document.getElementById("productCapUnit").value,lead_time_days:document.getElementById("productLeadTime").value.trim(),origin_region:document.getElementById("productRegion").value.trim()};
-  try{
-    if(id){ if(capBody.monthly_capacity||capBody.available_capacity||capBody.lead_time_days) await api("/api/supplier-dashboard/products/"+id+"/capacity",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(capBody)}); }
-    else Object.assign(body,capBody);
-    const d=await api(id?"/api/supplier-dashboard/products/"+id:"/api/supplier-dashboard/products",{method:id?"PATCH":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    const productId=id||d.id;
-    const files=document.getElementById("productImages").files;
-    if(files.length){
-      const fd=new FormData();for(const f of files)fd.append("productImages",f);
-      const imgResult=await api("/api/supplier-dashboard/products/"+encodeURIComponent(productId)+"/images",{method:"POST",body:fd});
-      s.textContent=imgResult.message;
-    }else s.textContent=d.message;
-    s.className="notice success";s.classList.remove("hidden");setTimeout(async()=>{closeProduct();await loadDashboard()},900)
-  }catch(e){s.textContent=e.message;s.className="notice error";s.classList.remove("hidden")}finally{btn.disabled=false;btn.textContent=id?"Submit Changes for Review":"Submit for Review"}
 };
 
 document.getElementById("capForm").onsubmit=async e=>{
@@ -949,11 +859,6 @@ async function deleteMyAccount(){
   }catch(e){alert(e.message)}
 }
 async function logout(){try{await api("/api/supplier-dashboard/logout",{method:"POST"})}catch{}dashboardStorage.removeItem(dashboardKey);showLogin("You have signed out.");}
-document.getElementById("productImages").addEventListener("change",e=>{
-  document.getElementById("imagePreview").innerHTML=Array.from(e.target.files).slice(0,6).map(f=>'<div><img src="'+URL.createObjectURL(f)+'" alt=""><div class="image-note">'+esc(f.name)+'</div></div>').join("");
-});
-fillCategorySelect();
-
 const initialTab=location.hash?location.hash.slice(1):"overview";
 if(token())loadDashboard();else showLogin();
 </script>
