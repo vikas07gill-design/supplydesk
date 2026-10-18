@@ -4343,6 +4343,7 @@ app.post("/api/admin/products/:id/images", requireAdmin, requireLister, (req,res
 app.delete("/api/admin/products/:id/images/:imageId", requireAdmin, requireLister, async (req,res)=>{
   const [r]=await pool.execute("UPDATE supplier_product_files SET status='archived' WHERE id=? AND product_id=? AND status <> 'archived'",[clean(req.params.imageId,80),clean(req.params.id,80)]);
   if(!r.affectedRows) return res.status(404).json({error:"Image not found."});
+  try{await audit(pool,req,"product.image_removed_by_team","product",clean(req.params.id,80),null,{imageId:clean(req.params.imageId,80)});}catch{}
   res.json({ok:true});
 });
 

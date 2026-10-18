@@ -912,9 +912,13 @@ async function openProductReview(id){
     if(!p)throw new Error("Product not found.");
     const imgData=await api("/api/admin/products/"+encodeURIComponent(id)+"/images");
     const images=imgData.images||[];
-    const imageHtml=images.length?'<div style="display:flex;gap:8px;flex-wrap:wrap">'+images.map(f=>'<div><div style="width:120px;height:90px;border-radius:9px;border:1px solid #dbe7eb;display:grid;place-items:center;font-size:11px;color:#637680">Product image</div><button style="margin-top:5px" onclick="viewProductImage(\''+f.id+'\')">Open</button><div class="muted">'+esc(f.status)+'</div></div>').join("")+'</div>':'<div class="muted">No product images uploaded.</div>';
+    const imageHtml=images.length?'<div style="display:flex;gap:8px;flex-wrap:wrap">'+images.map(f=>'<div><div style="width:120px;height:90px;border-radius:9px;border:1px solid #dbe7eb;display:grid;place-items:center;font-size:11px;color:#637680">Product image</div><button style="margin-top:5px" onclick="viewProductImage(\''+f.id+'\')">Open</button><button class="danger" style="margin-top:5px" onclick="removeProductImage(\''+id+'\',\''+f.id+'\')">Remove</button><div class="muted">'+esc(f.status)+'</div></div>').join("")+'</div>':'<div class="muted">No product images uploaded.</div>';
     document.getElementById("detail").innerHTML=`<h2>${esc(p.product_name)}</h2><div class="status"><strong>Status:</strong> ${esc(p.status)}</div><div class="kv"><b>Supplier</b><span>${esc(p.trade_name||p.legal_name)}</span><b>Location</b><span>${esc(p.city)}, ${esc(p.country)}</span><b>Category</b><span>${esc(p.category)} → ${esc(p.subcategory)}</span><b>Market</b><span>${esc(p.market_scope)}</span><b>MOQ</b><span>${esc(p.moq||"Not provided")}</span><b>Unit</b><span>${esc(p.unit||"Not provided")}</span><b>Description</b><span>${esc(p.description||"Not provided")}</span></div><h3>Product images</h3>${imageHtml}<h3>Admin decision</h3><textarea id="productNotes" placeholder="Verification notes">${esc(p.admin_notes||"")}</textarea><div class="actions"><label style="display:flex;gap:8px;align-items:center;margin:8px 0"><input type="checkbox" id="productCapOk" style="width:auto"> Capacity verified by SupplyDesk (counts toward public availability)</label><button class="approve" onclick="setProductStatus('${p.id}','approved')">Approve & Publish</button><button class="danger" onclick="setProductStatus('${p.id}','rejected')">Reject</button></div>`;
   }catch(e){document.getElementById("message").textContent=e.message}
+}
+async function removeProductImage(productId,imageId){
+  if(!confirm("Remove this photo from the product?"))return;
+  try{await api("/api/admin/products/"+encodeURIComponent(productId)+"/images/"+encodeURIComponent(imageId),{method:"DELETE"});await openProductReview(productId);document.getElementById("message").textContent="Photo removed."}catch(e){document.getElementById("message").textContent=e.message}
 }
 async function viewProductImage(id){
   try{
