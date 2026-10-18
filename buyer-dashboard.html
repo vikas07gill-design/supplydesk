@@ -62,6 +62,11 @@ main{padding:34px 0 60px}.hero{display:flex;justify-content:space-between;gap:20
 </div>
 <div style="margin-top:14px"><button class="btn primary" onclick="saveProfile()">Save profile</button></div><div class="status" id="status"></div>
 </div>
+<div class="card" style="margin-top:18px;border-color:#f0c4c4">
+<h2 class="section-title">Delete my account</h2>
+<p style="margin:0 0 10px;color:#5b6472">Your name, company, phone and login are permanently erased and open requirements are cancelled. Orders, invoices and payment records are kept in anonymised form because tax law requires it. This cannot be undone.</p>
+<button class="btn" style="color:#b42318;border-color:#b42318" onclick="deleteMyAccount()">Delete my account</button><div class="status" id="delStatus"></div>
+</div>
 </main>
 <script>
 const token=localStorage.getItem("supplydesk_buyer_dashboard_token")||"";
@@ -152,6 +157,15 @@ async function saveProfile(){
  const body={name:document.getElementById("name").value.trim(),company:document.getElementById("company").value.trim(),country:document.getElementById("country").value.trim(),phone:document.getElementById("phone").value.trim()};
  const r=await fetch("/api/buyer-dashboard/profile",{method:"PATCH",headers:{"Content-Type":"application/json","x-buyer-dashboard-token":token},body:JSON.stringify(body)});
  const d=await r.json().catch(()=>({}));status.className="status "+(r.ok?"success":"error");status.textContent=r.ok?"Profile saved.":(d.error||"Could not save profile.");
+}
+async function deleteMyAccount(){
+ if(!confirm("Delete your SupplyDesk account permanently? This cannot be undone."))return;
+ if(prompt("Type DELETE to confirm.")!=="DELETE")return;
+ const st=document.getElementById("delStatus");
+ const r=await fetch("/api/buyer-dashboard/delete-account",{method:"POST",headers:{"Content-Type":"application/json","x-buyer-dashboard-token":token},body:JSON.stringify({confirm:"DELETE"})});
+ const d=await r.json().catch(()=>({}));
+ if(!r.ok){st.className="status error";st.textContent=d.error||"Could not delete the account.";return}
+ localStorage.removeItem("supplydesk_buyer_dashboard_token");alert("Your account has been deleted.");location.href="index.html";
 }
 async function logout(){try{await fetch("/api/buyer-dashboard/logout",{method:"POST",headers:{"x-buyer-dashboard-token":token}})}catch(e){}localStorage.removeItem("supplydesk_buyer_dashboard_token");location.href="index.html"}
 load();

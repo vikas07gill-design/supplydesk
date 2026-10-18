@@ -595,12 +595,30 @@ async function openListProduct(editId){
         +'<label>Monthly capacity<input id="lpMonthly" type="number" min="0"></label><label>Available now<input id="lpAvail" type="number" min="0"></label>'
         +'<label>Capacity unit<select id="lpCapUnit"><option value="">-</option>'+CAP_UNIT_OPTS.map(u=>'<option>'+u+'</option>').join("")+'</select></label>'
         +'<label>Lead time (days)<input id="lpLead" type="number" min="0"></label><label>Origin region<input id="lpRegion" maxlength="150"></label></div>')
+      +(cur?'<div class="rq-wide" style="margin-top:12px"><b>Current photos</b><div id="lpPhotos" class="muted" style="margin-top:6px">Loading photos...</div></div>':'')
       +'<label class="rq-wide">Photos <small>(up to 6, JPG / PNG / WEBP, 5 MB each)</small><input id="lpFiles" type="file" accept="image/jpeg,image/png,image/webp" multiple></label>'
       +'<div class="actions"><button class="primary" onclick="saveListProduct('+(cur?"'"+esc(editId)+"'":"")+')">'+(cur?"Save changes":"List product")+'</button><button onclick="loadProducts()">Cancel</button></div>'
       :'<div class="rq-next"><div class="rq-next-h">No suppliers yet</div><div class="muted">A supplier has to sign up before products can be listed for it.</div></div>');
     if(sOpts){lpFillSubs();if(cur)document.getElementById("lpSub").value=cur.subcategory;}
+    if(sOpts&&cur)lpPhotos(editId);
     document.getElementById("detail").scrollIntoView({behavior:"smooth",block:"start"});
   }catch(e){flowErr(e)}
+}
+async function lpPhotos(id){
+  const box=document.getElementById("lpPhotos");if(!box)return;
+  try{
+    const d=await api("/api/admin/products/"+encodeURIComponent(id)+"/images");
+    const imgs=(d.images||[]).filter(f=>f.status!=="archived");
+    if(!imgs.length){box.textContent="No photos yet. Add some below.";return}
+    box.innerHTML='<div style="display:flex;gap:10px;flex-wrap:wrap">'+imgs.map(f=>'<div style="width:130px"><div style="width:130px;height:100px;border:1px solid #dbe7eb;border-radius:9px;background:#fff;display:grid;place-items:center;overflow:hidden"><img data-lpimg="'+esc(f.id)+'" alt="" style="max-width:100%;max-height:100%;object-fit:contain"></div><button class="danger" style="margin-top:6px;width:100%" onclick="lpRemovePhoto(\''+esc(id)+'\',\''+esc(f.id)+'\')">Remove photo</button></div>').join("")+'</div>';
+    box.querySelectorAll("[data-lpimg]").forEach(async img=>{
+      try{const r=await fetch("/api/admin/product-files/"+encodeURIComponent(img.dataset.lpimg),{headers:{"x-admin-token":token()}});if(r.ok)img.src=URL.createObjectURL(await r.blob())}catch{}
+    });
+  }catch(e){box.textContent=e.message||"Could not load photos."}
+}
+async function lpRemovePhoto(id,imageId){
+  if(!confirm("Remove this photo from the product?"))return;
+  try{await api("/api/admin/products/"+encodeURIComponent(id)+"/images/"+encodeURIComponent(imageId),{method:"DELETE"});await lpPhotos(id);flowMsg("Photo removed.")}catch(e){flowErr(e)}
 }
 function lpFillSubs(){
   const c=document.getElementById("lpCat").value,subs=(window.SD_TAX.subs||{})[c]||[];

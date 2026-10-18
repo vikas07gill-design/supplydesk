@@ -31,6 +31,18 @@ nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!i
 .capnote{margin:14px 0 0;color:#5b707a;font-size:13px}
 .pill.cap-available{background:#d9f5e3;color:#0c5a2a}.pill.cap-limited{background:#fff1cc;color:#8a5200}.pill.cap-full{background:#ffe1e1;color:#8a1c1c}.pill.cap-unknown{background:#e9eef2;color:#46606b}
 .capitem .pill{display:inline-block;padding:4px 11px;border-radius:99px;font-size:13px;font-weight:800}
+
+/* Photo carousel: one photo at a time, swipe / arrows / dots, no native scrollbar */
+.gallery.has-images{position:absolute;inset:0;display:flex;gap:0;padding:0;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scroll-behavior:smooth;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;justify-content:flex-start;align-items:stretch;outline:none}
+.gallery.has-images::-webkit-scrollbar{display:none}
+.gallery.has-images .slide{flex:0 0 100%;min-width:0;scroll-snap-align:center;scroll-snap-stop:always;display:grid;place-items:center;padding:18px 54px 40px}
+.gallery.has-images .slide img{width:100%;height:100%;max-width:100%;max-height:100%;padding:8px;object-fit:contain;background:#fff;border-radius:14px;box-shadow:0 18px 40px rgba(0,0,0,.25)}
+.gnav{position:absolute;top:50%;transform:translateY(-50%);z-index:5;width:38px;height:38px;border-radius:50%;border:0;background:rgba(255,255,255,.92);color:#0d2430;font-size:22px;line-height:1;cursor:pointer;display:grid;place-items:center;box-shadow:0 6px 18px rgba(0,0,0,.3)}
+.gnav:hover{background:#fff}.gnav[disabled]{opacity:.35;cursor:default}.gnav.prev{left:8px}.gnav.next{right:8px}
+.gdots{position:absolute;left:0;right:0;bottom:10px;z-index:5;display:flex;justify-content:center;gap:7px}
+.gdots button{width:9px;height:9px;border-radius:50%;border:0;padding:0;background:rgba(255,255,255,.45);cursor:pointer}.gdots button.on{background:#fff;transform:scale(1.25)}
+.gcount{position:absolute;top:10px;right:12px;z-index:5;background:rgba(0,0,0,.45);color:#fff;font-size:12px;font-weight:700;padding:3px 9px;border-radius:99px}
+@media(max-width:640px){.gallery.has-images .slide{padding:14px 44px 36px}.gnav{width:34px;height:34px}}
 </style><link rel="stylesheet" href="assets/depth.css"><script src="assets/depth.js" defer></script></head><body><nav><div class="wrap nav"><a class="brand-logo" href="index.html" aria-label="SupplyDesk home"><img src="assets/supplydesk-logo-dark.svg" alt="SupplyDesk" style="width:180px;height:auto;display:block"></a><a class="btn" href="search.html">← Back to Search</a></div></nav><main class="wrap"><div class="back">Product listing</div><section class="hero"><div class="visual" id="visual"><div class="shape"></div><div id="gallery" class="gallery"></div></div><div><div class="eyebrow">Product</div><h1 id="name">Loading product…</h1><div class="meta" id="meta"></div><p class="desc" id="desc"></p><div class="tags"></div><div class="capcode" id="capCode"></div><div class="actions"><button class="btn primary" id="connectBtn" type="button" style="display:none" onclick="openConnect()">Request Quote →</button><a class="btn" href="search.html">More Products</a></div></div></section><section class="info capacity" id="capacityPanel" style="display:none"><h2>Capacity &amp; availability</h2><div class="capgrid" id="capGrid"></div><p class="capnote" id="capNote"></p></section><section class="info"><h2>How it works</h2><p>Send your quantity and requirement to SupplyDesk. We check it against current manufacturing capacity and reply in your Buyer Dashboard: accepted, partially accepted (with the quantity we can supply) or not available, with remarks.</p></section></main>
 <div class="connect-box" id="connectBox" role="dialog" aria-modal="true" aria-labelledby="connectTitle">
   <div class="connect-card">
@@ -54,6 +66,32 @@ nav .brand-mark{background:linear-gradient(145deg,#159de7,#0a6ee8 55%,#14cdbb)!i
 <script>
 const liveId = new URLSearchParams(location.search).get("id") || "";
 let liveProduct = null;
+function setupCarousel(gallery, n) {
+  if (n < 2) return;
+  const visual = document.getElementById("visual");
+  const prev = document.createElement("button"), next = document.createElement("button"), dots = document.createElement("div"), count = document.createElement("div");
+  prev.className = "gnav prev"; prev.type = "button"; prev.setAttribute("aria-label", "Previous photo"); prev.innerHTML = "&#8249;";
+  next.className = "gnav next"; next.type = "button"; next.setAttribute("aria-label", "Next photo"); next.innerHTML = "&#8250;";
+  dots.className = "gdots"; count.className = "gcount";
+  for (let i = 0; i < n; i++) { const d = document.createElement("button"); d.type = "button"; d.setAttribute("aria-label", "Photo " + (i + 1)); d.onclick = function() { go(i); }; dots.appendChild(d); }
+  visual.appendChild(prev); visual.appendChild(next); visual.appendChild(dots); visual.appendChild(count);
+  let cur = 0;
+  function width() { return gallery.clientWidth || 1; }
+  function go(i) { cur = Math.max(0, Math.min(n - 1, i)); gallery.scrollTo({ left: cur * width(), behavior: "smooth" }); paint(); }
+  function paint() {
+    prev.disabled = cur === 0; next.disabled = cur === n - 1; count.textContent = (cur + 1) + " / " + n;
+    Array.prototype.forEach.call(dots.children, function(d, i) { d.className = i === cur ? "on" : ""; });
+  }
+  prev.onclick = function() { go(cur - 1); }; next.onclick = function() { go(cur + 1); };
+  let t; gallery.addEventListener("scroll", function() { clearTimeout(t); t = setTimeout(function() { cur = Math.round(gallery.scrollLeft / width()); paint(); }, 60); });
+  gallery.addEventListener("keydown", function(e) { if (e.key === "ArrowRight") { e.preventDefault(); go(cur + 1); } if (e.key === "ArrowLeft") { e.preventDefault(); go(cur - 1); } });
+  let down = false, sx = 0, sl = 0;
+  gallery.addEventListener("mousedown", function(e) { down = true; sx = e.pageX; sl = gallery.scrollLeft; gallery.style.scrollBehavior = "auto"; gallery.style.scrollSnapType = "none"; });
+  window.addEventListener("mouseup", function() { if (!down) return; down = false; gallery.style.scrollBehavior = ""; gallery.style.scrollSnapType = ""; go(Math.round(gallery.scrollLeft / width())); });
+  window.addEventListener("mousemove", function(e) { if (down) gallery.scrollLeft = sl - (e.pageX - sx); });
+  window.addEventListener("resize", function() { gallery.scrollTo({ left: cur * width(), behavior: "auto" }); });
+  paint();
+}
 function escapeHtml(value) {
   return String(value == null ? "" : value).replace(/[&<>"']/g, function(ch) {
     return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch];
@@ -107,9 +145,11 @@ async function loadLiveProduct() {
     const gallery = document.getElementById("gallery");
     if ((product.images || []).length) {
       gallery.classList.add("has-images");
-      gallery.innerHTML = product.images.map(function(image) {
-        return '<img src="' + escapeHtml(image.url) + '" alt="' + escapeHtml(product.name) + '">';
+      gallery.setAttribute("tabindex", "0");
+      gallery.innerHTML = product.images.map(function(image, i) {
+        return '<div class="slide"><img src="' + escapeHtml(image.url) + '" alt="' + escapeHtml(product.name) + ' photo ' + (i + 1) + '" draggable="false"></div>';
       }).join("");
+      setupCarousel(gallery, product.images.length);
     }
     document.querySelector(".tags").innerHTML = [product.category, product.subcategory, marketLabel(product.market_scope)]
       .filter(function(t) { return t && t !== "Other"; })
